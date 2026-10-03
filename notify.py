@@ -175,6 +175,8 @@ def slack_blocks(r: dict) -> list[dict]:
 # ---------------- 발송 ----------------
 
 def send_mail(subj: str, text: str, html_text: str | None = None) -> bool:
+    if os.environ.get("MAIL_ENABLED", "0") != "1":
+        return False  # 지금은 슬랙으로만 받아요 (메일을 켜려면 MAIL_ENABLED=1)
     user = os.environ.get("NAVER_ID")
     pw = os.environ.get("NAVER_APP_PASSWORD")
     to = os.environ.get("MAIL_TO") or user
@@ -222,8 +224,15 @@ def send_report(r: dict) -> dict:
     ok_mail = send_mail(subj, text, html_body(r))
     ok_slack = send_slack(subj, slack_blocks(r))
     # 한쪽만 실패하면 다른 쪽에 알려요
-    if ok_mail and not ok_slack and os.environ.get("SLACK_WEBHOOK_URL"):
+    if ok_mail and not ok_slack and os.environ.get("SLACK_WEBHOOK_URL") and os.environ.get("MAIL_ENABLED", "0") == "1":
         send_mail("[미국주식] 슬랙 발송 실패", "오늘 리포트를 슬랙으로 보내지 못했어요. 메일 내용을 확인하세요.")
-    if ok_slack and not ok_mail and os.environ.get("NAVER_APP_PASSWORD"):
+    if ok_slack and not ok_mail and os.environ.get("MAIL_ENABLED", "0") == "1":
         send_slack(":warning: 오늘 리포트를 메일로 보내지 못했어요. 네이버 앱 비밀번호를 확인하세요.")
     return {"mail": ok_mail, "slack": ok_slack, "subject": subj, "text": text}
+
+
+def send_text(title: str, text: str) -> None:
+    """주간 요약·과거 검증처럼 긴 글: 슬랙(코드 블록) + 메일(켜져 있을 때)."""
+    send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
+                       {"type": "section", "text": {"type": "mrkdwn", "text": "```" + text[:2800] + "```"}}])
+    send_mail(f"[미국주식] {title}", text)

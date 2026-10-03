@@ -206,7 +206,7 @@ def report(tr: pd.DataFrame, n: int, years: int, used: int, send: bool):
     print(text)
     if send:
         import notify
-        notify.send_mail("[미국주식] 과거 검증 결과", text)
+        notify.send_text("과거 검증 결과", text)
 
 
 if __name__ == "__main__":

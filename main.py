@@ -404,7 +404,7 @@ def run_weekly(dry: bool):
     log_df = store.read("신호 기록")
     if log_df.empty:
         msg = "아직 신호 기록이 없어요."
-        print(msg) if dry else notify.send_mail("[미국주식] 주간 요약", msg)
+        print(msg) if dry else notify.send_text("주간 요약", msg)
         return
     tickers = sorted(set(log_df["종목"]))
     hist = prices.download_history([t.replace(".", "-") for t in tickers], period="90d")
@@ -441,7 +441,7 @@ def run_weekly(dry: bool):
         lines.append("아직 5거래일이 지난 신호가 없어요.")
     lines.append("\n표본이 적을 때의 숫자는 우연일 수 있어요. 한 달 이상 쌓인 뒤에 판단하세요.")
     text = "\n".join(lines)
-    print(text) if dry else notify.send_mail("[미국주식] 주간 요약 · 신호 성적", text)
+    print(text) if dry else notify.send_text("주간 요약 · 신호 성적", text)
 
 
 def notify_fail(msg: str):
