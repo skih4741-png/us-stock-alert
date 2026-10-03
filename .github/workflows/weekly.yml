@@ -1,0 +1,24 @@
+name: 주간 요약
+on:
+  schedule:
+    - cron: "0 11 * * 0"   # 한국 일요일 20:00
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      NAVER_ID: ${{ secrets.NAVER_ID }}
+      NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install yfinance pandas numpy requests gspread google-auth
+      - run: python main.py weekly

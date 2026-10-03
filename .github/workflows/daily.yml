@@ -1,0 +1,51 @@
+name: 아침 리포트
+on:
+  schedule:
+    - cron: "0 22 * * 1-5"   # 한국 화~토 07:00
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "시험용: 거래대금 상위 몇 개만 (비우면 전체)"
+        required: false
+        default: ""
+permissions:
+  contents: write
+concurrency:
+  group: stock-alert
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      NAVER_ID: ${{ secrets.NAVER_ID }}
+      NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      WEB_URL: ${{ vars.WEB_URL }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 아침 분석
+        run: |
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            python main.py daily --limit ${{ github.event.inputs.limit }}
+          else
+            python main.py daily
+          fi
+      - name: 기록 저장 (저장소 활동 유지)
+        if: always()
+        run: |
+          git config user.name "stock-alert-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/state.json data/fundamentals.json data/universe_cache.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "기록 $(date -u +%F)"
+          git push || true

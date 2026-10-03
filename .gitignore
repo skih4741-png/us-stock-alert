@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+service_account*.json
+*.key.json
+data/local_sheet/
+.streamlit/secrets.toml
+us-stock-alert-*.json
+data/*.log
