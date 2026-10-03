@@ -183,13 +183,15 @@ def send_mail(subj: str, text: str, html_text: str | None = None) -> bool:
         return False
     if "@" not in user:
         user = f"{user}@naver.com"
+    domain = user.split("@")[1].lower()
+    host = os.environ.get("SMTP_HOST") or {"gmail.com": "smtp.gmail.com", "daum.net": "smtp.daum.net"}.get(domain, "smtp.naver.com")
     msg = MIMEMultipart("alternative")
     msg["Subject"], msg["From"], msg["To"] = subj, user, to
     msg.attach(MIMEText(text, "plain", "utf-8"))
     if html_text:
         msg.attach(MIMEText(html_text, "html", "utf-8"))
     try:
-        with smtplib.SMTP_SSL("smtp.naver.com", 465, timeout=30) as s:
+        with smtplib.SMTP_SSL(host, 465, timeout=30) as s:
             s.login(user, pw)
             s.sendmail(user, [x.strip() for x in to.split(",")], msg.as_string())
         return True
