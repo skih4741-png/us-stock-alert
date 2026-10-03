@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 120
     env:
       NAVER_ID: ${{ secrets.NAVER_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
       MAIL_TO: ${{ secrets.MAIL_TO }}
       PYTHONIOENCODING: utf-8
