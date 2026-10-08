@@ -24,6 +24,7 @@ jobs:
       NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
       MAIL_TO: ${{ secrets.MAIL_TO }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       WEB_URL: ${{ vars.WEB_URL }}
       PYTHONIOENCODING: utf-8
