@@ -63,7 +63,9 @@ def label_reasons(keys: list[str]) -> list[str]:
 # 아침 리포트
 # ======================================================================
 
-def run_daily(limit: int | None, dry: bool) -> dict:
+def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
+    """app_only: 보내거나 기록하지 않고 앱 데이터만 시트에 저장 (앱 첫 설치·시험용)."""
+    dry = dry or app_only
     t0 = time.time()
     now = config.now_kst()
     stage = "시작"
@@ -335,6 +337,9 @@ def run_daily(limit: int | None, dry: bool) -> dict:
             print("\n" + notify.subject(report) + "\n\n" + notify.text_body(report))
             print("\n[앱 데이터] 보유 " + ", ".join(f"{h['t']}={h['conclusion']}" for h in app["holdings"])
                   + f" · 크기 {len(appdata.dumps(app)):,}자")
+            if app_only:
+                store.put_blob("daily", appdata.dumps(app))
+                print("[앱 데이터] 시트 '앱 데이터' 탭에 저장했어요")
             sent = {"mail": False, "slack": False}
         else:
             sent = notify.send_report(report)
@@ -507,9 +512,10 @@ if __name__ == "__main__":
     ap.add_argument("message", nargs="?", default="")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--app-only", action="store_true", help="보내지 않고 앱 데이터만 저장")
     a = ap.parse_args()
     if a.mode == "daily":
-        run_daily(a.limit, a.dry)
+        run_daily(a.limit, a.dry, a.app_only)
     elif a.mode in ("premarket", "intraday"):
         run_watch(a.mode, a.dry)
     elif a.mode == "weekly":

@@ -9,3 +9,6 @@ data/local_sheet/
 .streamlit/secrets.toml
 us-stock-alert-*.json
 data/*.log
+
+data/*.log
+data/*.ps1
