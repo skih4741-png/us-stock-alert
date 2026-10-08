@@ -669,6 +669,37 @@
       (spy != null ? " · SPY " + pct(spy) : "") + "</dd>";
   }
 
+  function autoSimHtml(m) {
+    if (!m) return '<div class="empty">자동 모의매매는 다음 아침 리포트부터 시작돼요</div>';
+    const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
+    const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
+    const passN = (m.checks || []).filter(c => c[1]).length;
+    return '<div class="card"><div class="row between"><b>3개월 자동 모의매매</b><span class="badge info">모의 · 실제 주문 없음</span></div>' +
+      '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · " + m.day + "/" + m.days + "일째 · 가상 $" + fmt(m.budget, 0) + " · 11장 규칙 그대로</div>" +
+      '<div class="plbar" style="margin-top:8px"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
+      '<div class="big num">$' + fmt(m.equity) + ' <span class="badge ' + signTone(m.ret) + '">' + pct(m.ret) + "</span></div>" +
+      '<div class="small num">현금 $' + fmt(m.cash) + " · 같은 기간 SPY " + pct(m.spy_ret) + " · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +
+      '<div class="card"><div class="sub">얼마 벌고 얼마 잃었나 (수수료·환전 추정치 뺀 금액)</div>' +
+      '<div class="pl"><div><div class="small">번 돈 (' + m.wins + '건)</div><div class="big num good-t">' + usd(m.gain) + "</div></div>" +
+      '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
+      '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
+      '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd></dl></div>" +
+      "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
+        '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +
+        "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
+      "<h2>다음 거래일 주문 계획</h2>" + ((m.pending || []).length ? '<div class="list">' + m.pending.map(o =>
+        '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
+        " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + "</div></div>").join("") + "</div>"
+        : '<div class="empty">없음 (조건에 맞는 후보가 없거나 자리가 찼어요)</div>') +
+      "<h2>실전 기준 " + passN + "/6 <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
+      '<div class="card"><ul class="checks">' + (m.checks || []).map(c => '<li class="' + (c[1] ? "ok" : "no") + '">' + (c[1] ? "✓ " : "– ") + esc(c[0]) +
+        '<div class="small">' + esc(c[2]) + "</div></li>").join("") + "</ul></div>" +
+      "<h2>판 거래</h2>" + ((m.closed || []).length ? '<div class="list">' + m.closed.map(c =>
+        '<div class="item" style="cursor:default"><span class="tk">' + esc(c.t) + '</span><div class="grow small num">' + esc(c.date) + " → " + esc(c.exit_date) + " · " + esc(c.why) +
+        '</div><b class="num ' + (c.pnl >= 0 ? "good-t" : "bad-t") + '">' + usd(c.pnl) + "</b></div>").join("") + "</div>" : '<div class="empty">아직 없음</div>') +
+      "<h2>기록</h2>" + '<div class="card small">' + (m.log || []).map(esc).join("<br>") + "</div>";
+  }
+
   function viewScore() {
     if (!S.token) return;
     const pf = (S.perf && S.perf.paper) || {}, sg = (S.perf && S.perf.signals) || {};
@@ -676,10 +707,12 @@
     const cash = paperCash();
     const eq = cash + open.reduce((s, x) => s + x.qty * (x.now || x.price), 0);
     const ret = (eq / PAPER_START - 1) * 100;
-    const seg = S.scoreSeg || "acct";
+    const seg = S.scoreSeg || "auto";
     const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
     let body = "";
-    if (seg === "acct") {
+    if (seg === "auto") {
+      body = autoSimHtml(S.perf && S.perf.sim);
+    } else if (seg === "acct") {
       body = '<div class="card"><div class="sub">모의 계좌 평가금액</div><div class="big num">$' + fmt(eq) + ' <span class="badge ' + signTone(ret) + '">' + pct(ret) + "</span></div>" +
         '<div class="small num">현금 $' + fmt(cash) + " · 보유 " + open.length + "종목 · 시작 $1,000" +
         (pf.excess_pct != null ? " · 같은 돈을 SPY에 넣었을 때보다 " + pct(pf.excess_pct) + "p" : "") + "</div></div>" +
@@ -736,7 +769,7 @@
         : '<div class="empty">주간 리포트는 일요일에 만들어져요</div>';
     }
     appShell("score", '<div class="head"><div><h1>성적 · 모의투자</h1><div class="small">가상 1,000달러 · 실제 주문 없음</div></div></div>' + statusLine() +
-      '<div class="segs">' + segBtn("acct", "모의 계좌") + segBtn("skill", "실력 vs 운") + segBtn("sig", "신호 성적") + segBtn("week", "주간 리포트") + "</div>" +
+      '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
       body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
     $app.querySelectorAll("[data-sell]").forEach(b => b.addEventListener("click", () => {

@@ -33,6 +33,7 @@ import performance
 import prices
 import push
 import scoring
+import simtrade
 import timing
 import universe
 from explain import explain
@@ -360,6 +361,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             if app_only:
                 store.put_blob("daily", appdata.dumps(app))
                 print("[앱 데이터] 시트 '앱 데이터' 탭에 저장했어요")
+                run_sim(store, app, now)
                 save_perf(store, now)
             sent = {"mail": False, "slack": False}
         else:
@@ -377,6 +379,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 log.info("푸시 %d개 보냄", n)
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
+            run_sim(store, app, now)
             save_perf(store, now)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
@@ -489,11 +492,28 @@ def run_watch(kind: str, dry: bool):
 # 주간 요약 · 신호 성적
 # ======================================================================
 
+def run_sim(store, app: dict, now):
+    """자동 모의매매 한 걸음 + 기간이 끝났으면 실전 전환 판단 알림. 실패해도 리포트는 그대로."""
+    try:
+        picks = [p for b in app.get("bands", []) for p in b["picks"] + b.get("etf_picks", [])]
+        st = simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"))
+        if st:
+            def tell(title, text):
+                notify.send_text(title, text)
+                appdata.add_alert(store, "sim", title, text.split("\n")[1] if "\n" in text else text, now.isoformat(timespec="minutes"), "info")
+                push.send(store, title, "성적 탭 → 자동 모의에서 결과를 봐요", "#/score", "system", tag="sim")
+            simtrade.maybe_evaluate(store, st, tell)
+    except Exception as e:
+        log.warning("자동 모의매매 실패: %s", e)
+
+
 def save_perf(store, now, notify_stops: bool = True) -> dict | None:
     """3단계: 신호 성적·모의 계좌를 계산해 앱 '성적' 탭 데이터로 저장. 실패해도 리포트는 그대로."""
     try:
         perf = performance.update(store)
         perf["at"] = now.isoformat(timespec="minutes")
+        st = simtrade.load(store)
+        perf["sim"] = simtrade.summary(st) if st else None
         store.put_blob("perf", appdata.dumps(appdata._clean(perf)))
         hit = [x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")]
         if hit and notify_stops:
@@ -547,6 +567,12 @@ def run_weekly(dry: bool):
             lines.append(f"회고를 안 쓴 거래 {pp['no_note']}개 — 앱 성적 탭에서 한 줄 남겨 주세요")
     else:
         lines.append("아직 담은 종목이 없어요. 종목 상세에서 '모의투자에 담기'를 눌러 시작해요.")
+
+    sm = perf.get("sim")
+    if sm:
+        lines.append(f"\n■ 자동 모의매매 (가상 ${sm['budget']:.0f}, {sm['day']}/{sm['days']}일째)")
+        lines.append(f"평가 ${sm['equity']:.2f} ({_fmt(sm['ret'])}) · SPY {_fmt(sm['spy_ret'])} · 번 돈 +${sm['gain']:.2f} · 잃은 돈 -${abs(sm['loss']):.2f}")
+        lines.append("실전 기준 " + str(sum(1 for c in sm["checks"] if c[1])) + "/6 통과 중 (3개월 끝에 최종 판단)")
 
     # 보유 결론 변화 (지난주 저장본과 비교)
     try:

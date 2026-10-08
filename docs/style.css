@@ -180,3 +180,4 @@ pre.weekly { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-
 .pl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
 .plbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); margin: 4px 0 12px; }
 .plbar .g { background: var(--good); } .plbar .l { background: var(--bad); }
+.segs { overflow-x: auto; gap: 16px; } .segs button { white-space: nowrap; flex: none; }
