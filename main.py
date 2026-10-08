@@ -30,6 +30,7 @@ import lists
 import market
 import notify
 import prices
+import push
 import scoring
 import timing
 import universe
@@ -368,6 +369,12 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                                   now.isoformat(timespec="minutes"), "info")
             except Exception as e:
                 log.warning("앱 데이터 저장 실패: %s", e)
+            try:
+                n = push.send(store, "아침 리포트 · " + REGIME[mk["regime"]],
+                              f"매도 {s['sell']} · 신규 매수 {s['new']} · 매수 후보 {s['buy']}", "#/home", "daily")
+                log.info("푸시 %d개 보냄", n)
+            except Exception as e:
+                log.warning("푸시 실패: %s", e)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                   "성공/실패": "성공", "분석한 종목 수": len(base), "걸린 시간(초)": took,
@@ -464,6 +471,12 @@ def run_watch(kind: str, dry: bool):
             appdata.add_alert(store, kind, title_, body_, at, tone_)
         except Exception as e:
             log.warning("앱 알림 기록 실패: %s", e)
+    if app_items:
+        try:
+            push.send(store, ("장 시작 전 점검" if kind == "premarket" else "장중 경고") + f" · {len(app_items)}건",
+                      " / ".join(t for t, _, _ in app_items[:3]), "#/alerts", "watch")
+        except Exception as e:
+            log.warning("푸시 실패: %s", e)
     state.setdefault("alerts", {})[today] = sorted(sent_today)
     state["alerts"] = {k: v for k, v in state["alerts"].items() if k >= today}  # 오늘 것만 보관
     save_state(state)
@@ -515,18 +528,32 @@ def run_weekly(dry: bool):
         lines.append("아직 5거래일이 지난 신호가 없어요.")
     lines.append("\n표본이 적을 때의 숫자는 우연일 수 있어요. 한 달 이상 쌓인 뒤에 판단하세요.")
     text = "\n".join(lines)
-    print(text) if dry else notify.send_text("주간 요약 · 신호 성적", text)
+    if dry:
+        print(text)
+        return
+    notify.send_text("주간 요약 · 신호 성적", text)
+    at = config.now_kst().isoformat(timespec="minutes")
+    first = lines[1] if len(lines) > 1 else "지난 신호 성적이 나왔어요"
+    try:
+        appdata.add_alert(store, "weekly", "주간 요약", first, at, "info")
+        push.send(store, "주간 요약 · 신호 성적", first, "#/alerts", "weekly")
+    except Exception as e:
+        log.warning("주간 요약 앱 알림 실패: %s", e)
 
 
 def notify_fail(msg: str):
     text = f":x: 오늘 아침 분석이 실패했어요 — {msg}\n깃허브 Actions 기록에서 자세한 내용을 볼 수 있어요."
     notify.send_slack(text)
     notify.send_mail("[미국주식] 아침 분석 실패", text.replace(":x: ", ""))
+    try:
+        push.send(Store(), "아침 분석 실패", msg[:120], "#/alerts", "system")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["daily", "premarket", "intraday", "weekly", "fail"])
+    ap.add_argument("mode", choices=["daily", "premarket", "intraday", "weekly", "fail", "pushtest"])
     ap.add_argument("message", nargs="?", default="")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--dry", action="store_true")
@@ -538,6 +565,8 @@ if __name__ == "__main__":
         run_watch(a.mode, a.dry)
     elif a.mode == "weekly":
         run_weekly(a.dry)
+    elif a.mode == "pushtest":
+        print("보낸 푸시:", push.send(Store(), "시험 알림", a.message or "푸시 알림이 잘 와요", "#/alerts", "system"))
     else:
         notify_fail(a.message or "원인을 알 수 없어요")
     sys.exit(0)

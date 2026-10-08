@@ -7,3 +7,4 @@ google-auth>=2.29
 anthropic>=0.40
 streamlit>=1.38
 altair>=5.0
+pywebpush>=2.0

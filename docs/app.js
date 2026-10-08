@@ -310,6 +310,76 @@
     document.getElementById("sheetClose").onclick = () => { sh.hidden = true; };
   });
 
+
+  /* ---------- 2단계: 앱 푸시 ---------- */
+  const KINDS = [["daily", "아침 리포트"], ["watch", "장중 경고 (손절선·급락)"], ["weekly", "주간 요약"]];
+  const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  function b64ToBytes(b64) {
+    const pad = "=".repeat((4 - b64.length % 4) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+  }
+  async function currentSub() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.ready;
+    return reg.pushManager.getSubscription();
+  }
+  async function renderPush() {
+    const box = document.getElementById("pushBox");
+    if (!box) return;
+    if (isIOS() && !isStandalone()) {
+      box.innerHTML = '<div class="card sub">아이폰은 <b>홈 화면에 추가한 앱</b>에서만 알림을 켤 수 있어요. 사파리 공유 버튼 → "홈 화면에 추가" 후, 홈 화면 아이콘으로 열어 주세요. (iOS 16.4 이상)</div>';
+      return;
+    }
+    if (!pushSupported()) { box.innerHTML = '<div class="card sub">이 브라우저는 앱 알림을 지원하지 않아요. 슬랙으로는 계속 받아요.</div>'; return; }
+    if (!CFG.VAPID_PUBLIC_KEY) { box.innerHTML = '<div class="card sub">알림 서버 준비 중이에요.</div>'; return; }
+    if (Notification.permission === "denied") {
+      box.innerHTML = '<div class="msg err">알림이 차단돼 있어요. 아이폰 설정 → 알림 → 주식알림에서 허용해 주세요.</div>';
+      return;
+    }
+    const sub = await currentSub();
+    let kinds = KINDS.map(k => k[0]), on = false;
+    if (sub) {
+      try { const j = await api("pushStatus", { token: S.token, endpoint: sub.endpoint }); on = j.ok && j.registered; if (on && j.kinds.length) kinds = j.kinds; } catch (e) {}
+    }
+    box.innerHTML = '<div class="card">' +
+      '<div class="row between"><b>' + (on ? "알림 받는 중" : "알림 꺼짐") + '</b><span class="badge ' + (on ? "good" : "") + '">' + (on ? "켜짐" : "꺼짐") + "</span></div>" +
+      KINDS.map(k => '<label class="check"><input type="checkbox" data-kind="' + k[0] + '"' + (kinds.indexOf(k[0]) >= 0 ? " checked" : "") + "> " + k[1] + "</label>").join("") +
+      '<div class="small">알림을 누르면 앱의 해당 화면이 열려요. 슬랙으로도 그대로 와요.</div></div>' +
+      (on ? '<button class="btn ghost" id="pushSave">알림 종류 저장</button><button class="btn danger" id="pushOff">이 기기 알림 끄기</button>'
+          : '<button class="btn" id="pushOn">알림 켜기</button>') + '<div id="pushMsg"></div>';
+    const chosen = () => [...box.querySelectorAll("input[data-kind]")].filter(x => x.checked).map(x => x.dataset.kind);
+    const msg = (t, ok) => { document.getElementById("pushMsg").innerHTML = '<div class="msg ' + (ok ? "ok" : "err") + '">' + esc(t) + "</div>"; };
+    const onBtn = document.getElementById("pushOn");
+    if (onBtn) onBtn.onclick = async () => {
+      onBtn.disabled = true;
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") { msg("알림을 허용해야 켤 수 있어요.", false); onBtn.disabled = false; return; }
+        const reg = await navigator.serviceWorker.ready;
+        const s2 = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(CFG.VAPID_PUBLIC_KEY) });
+        const j = await api("savePush", { token: S.token, sub: s2.toJSON(), kinds: chosen() });
+        if (!j.ok) { msg(j.error || "저장하지 못했어요", false); onBtn.disabled = false; return; }
+        reg.showNotification("알림이 켜졌어요", { body: "아침 리포트·장중 경고가 이 휴대폰으로 와요.", icon: "icons/icon-192.png", tag: "welcome" });
+        toast("알림을 켰어요"); renderPush();
+      } catch (e) { msg("알림을 켜지 못했어요: " + e.message, false); onBtn.disabled = false; }
+    };
+    const save = document.getElementById("pushSave");
+    if (save) save.onclick = async () => {
+      const s2 = await currentSub();
+      const j = await api("savePush", { token: S.token, sub: s2.toJSON(), kinds: chosen() });
+      j.ok ? toast("알림 종류를 저장했어요") : msg(j.error, false);
+    };
+    const off = document.getElementById("pushOff");
+    if (off) off.onclick = async () => {
+      const s2 = await currentSub();
+      if (s2) { try { await api("removePush", { token: S.token, endpoint: s2.endpoint }); } catch (e) {} await s2.unsubscribe(); }
+      toast("이 기기 알림을 껐어요"); renderPush();
+    };
+  }
+
   /* ---------- 화면: 앱 ---------- */
   function appShell(tab, html) {
     $tabs.hidden = false;
@@ -343,6 +413,8 @@
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button></div>" +
       statusLine() +
+      (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
+        ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
@@ -486,12 +558,14 @@
     appShell("settings", '<div class="head"><h1>설정</h1></div>' +
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
+      '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
       '<h2>계정</h2><a class="btn ghost" href="#/password">비밀번호 바꾸기</a>' +
       '<button class="btn ghost" id="hist">최근 로그인 기록</button><div id="histOut"></div>' +
       '<button class="btn ghost" id="out">로그아웃</button><button class="btn danger" id="outAll">모든 기기 로그아웃</button>' +
       '<h2>표시 설정</h2><div class="card sub">보여줄 개수, ETF 개수, 최대 손실 같은 기준은 구글 시트 \'설정\' 탭에서 바꿔요. 다음 리포트부터 적용돼요.</div>' +
       '<h2>설치</h2><div class="card sub">아이폰: 사파리 공유 버튼 → "홈 화면에 추가". 홈 화면 아이콘으로 열면 주소창 없이 앱처럼 열려요.</div>' +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
+    renderPush();
     document.getElementById("hist").onclick = async () => {
       const o = document.getElementById("histOut"); o.innerHTML = '<div class="small">불러오는 중…</div>';
       try {

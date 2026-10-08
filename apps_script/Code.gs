@@ -169,6 +169,38 @@ const ACTIONS = {
     return { ok: true, logins: (acct_().logins || []).slice(0, 10) };
   },
 
+  savePush: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const sub = r.sub || {};
+    if (!sub.endpoint || !/^https:\/\//.test(sub.endpoint) || !sub.keys) return { ok: false, error: '알림 구독 정보가 올바르지 않아요.' };
+    const kinds = (r.kinds || ['daily', 'watch', 'weekly']).filter(function (k) { return ['daily', 'watch', 'weekly'].indexOf(k) >= 0; }).join(',');
+    const sh = pushSheet_();
+    const rows = sh.getDataRange().getValues();
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][3]).indexOf(sub.endpoint) >= 0) sh.deleteRow(i + 1);
+    }
+    sh.appendRow([new Date().toISOString(), String(r.label || '').slice(0, 60), kinds, JSON.stringify({ endpoint: sub.endpoint, keys: sub.keys })]);
+    return { ok: true, kinds: kinds };
+  },
+
+  removePush: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const sh = pushSheet_();
+    const rows = sh.getDataRange().getValues();
+    let n = 0;
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (r.endpoint && String(rows[i][3]).indexOf(String(r.endpoint)) >= 0) { sh.deleteRow(i + 1); n++; }
+    }
+    return { ok: true, removed: n };
+  },
+
+  pushStatus: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const rows = pushSheet_().getDataRange().getValues().slice(1);
+    const mine = rows.filter(function (x) { return r.endpoint && String(x[3]).indexOf(String(r.endpoint)) >= 0; })[0];
+    return { ok: true, registered: !!mine, kinds: mine ? String(mine[2]).split(',') : [], devices: rows.length };
+  },
+
   logout: function (r) {
     const all = sessions_();
     delete all[sha_(String(r.token || ''))];
@@ -199,6 +231,13 @@ function readBlobs_() {
     outp[k] = parts[k].sort(function (x, y) { return x[0] - y[0]; }).map(function (x) { return x[1]; }).join('');
   });
   return outp;
+}
+
+function pushSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+  let sh = ss.getSheetByName('푸시 구독');
+  if (!sh) { sh = ss.insertSheet('푸시 구독'); sh.appendRow(['등록 시각', '기기', '종류', '구독']); }
+  return sh;
 }
 
 /* ---------------- 계정·로그인 표 ---------------- */
