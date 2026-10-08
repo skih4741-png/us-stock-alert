@@ -45,11 +45,18 @@
   /* ---------- 서버 ---------- */
   async function api(action, body) {
     if (!CFG.API_URL) throw new Error("로그인 서버 주소가 아직 설정되지 않았어요 (config.js)");
-    const res = await fetch(CFG.API_URL, {
-      method: "POST", redirect: "follow",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(Object.assign({ action: action, device: deviceId(), label: deviceLabel() }, body || {})),
-    });
+    const payload = JSON.stringify(Object.assign({ action: action, device: deviceId(), label: deviceLabel() }, body || {}));
+    let res, last;
+    for (let i = 0; i < 3; i++) {  // 연결이 잠깐 끊겨도 두 번 더 시도
+      try {
+        res = await fetch(CFG.API_URL, {
+          method: "POST", redirect: "follow", cache: "no-store", credentials: "omit",
+          headers: { "Content-Type": "text/plain;charset=utf-8" }, body: payload,
+        });
+        break;
+      } catch (e) { last = e; await new Promise(r => setTimeout(r, 800 * (i + 1))); }
+    }
+    if (!res) throw new Error("서버에 연결하지 못했어요. 인터넷 연결(와이파이·VPN·광고 차단 앱)을 확인하고 다시 시도해 주세요. (" + (last && last.message) + ")");
     if (!res.ok) throw new Error("서버 응답 오류 (" + res.status + ")");
     const j = await res.json();
     if (j.auth) { clearAll(); go("#/login"); }
