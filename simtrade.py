@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 KEY = "sim"
 FEE = 0.0025 + 0.0010      # 한쪽 거래 비용 추정 (수수료 + 환전)
 DAYS = 90                  # 시험 기간 (달력 기준)
-DEFAULT = {"budget": 50.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
+DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
 AVOID = ("신규 매수 보류", "재무 주의", "급등", "출렁임", "참고용")
 
 
@@ -37,7 +37,7 @@ def save(store, st: dict):
     store.put_blob(KEY, json.dumps(st, ensure_ascii=False, separators=(",", ":")))
 
 
-def start(store, start_day: str, budget: float = 50.0) -> dict:
+def start(store, start_day: str, budget: float = 100.0) -> dict:
     st = {"v": 1, "start": start_day, "end": (date.fromisoformat(start_day) + timedelta(days=DAYS)).isoformat(),
           "cfg": dict(DEFAULT, budget=budget), "cash": budget, "positions": [], "pending": [], "closed": [], "log": [],
           "equity": [], "checked": "", "violations": 0, "month_stops": [], "evaluated": None}
