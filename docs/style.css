@@ -190,3 +190,8 @@ textarea { width: 100%; font-size: 16px; padding: 12px 14px; border: 1px solid v
 .bubble.me { background: var(--accent-bg); color: var(--ink); border-radius: 14px; padding: 10px 14px; margin: 12px 0 6px auto; max-width: 85%; width: fit-content; }
 .warn-t { color: var(--warn); }
 ol.plain { padding-left: 20px; margin: 6px 0; }
+/* 뒤로 가기 버튼을 화면 맨 위에 고정 (스크롤해도 보이게) */
+.back { position: sticky; top: 0; z-index: 30; display: block; text-align: left; box-sizing: border-box;
+  width: calc(100% + 32px); margin: calc(-12px - var(--safe-t)) -16px 8px; padding: calc(10px + var(--safe-t)) 16px 10px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); cursor: pointer; }

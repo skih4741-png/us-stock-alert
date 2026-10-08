@@ -48,6 +48,10 @@ class Client:
         self._token = None
         self._last = 0.0
 
+    def _kid(self) -> str:  # 앱키가 바뀌면 저장된 토큰을 버리려고 (앱키 자체는 저장 안 함)
+        import hashlib
+        return hashlib.sha256(self.key.encode()).hexdigest()[:12]
+
     # ---- 토큰 (하루 한 번) ----
     def token(self) -> str:
         if self._token:
@@ -56,7 +60,7 @@ class Client:
         if self.store:
             try:
                 c = json.loads(self.store.get_blob("kis_token") or "{}")
-                if c.get("exp", "") > now.isoformat():
+                if c.get("exp", "") > now.isoformat() and c.get("k") == self._kid():
                     self._token = c["t"]
                     return self._token
             except Exception:
@@ -69,7 +73,7 @@ class Client:
         self._token = j["access_token"]
         if self.store:
             try:
-                self.store.put_blob("kis_token", json.dumps({"t": self._token, "exp": (now + timedelta(hours=23)).isoformat()}))
+                self.store.put_blob("kis_token", json.dumps({"t": self._token, "k": self._kid(), "exp": (now + timedelta(hours=23)).isoformat()}))
             except Exception:
                 pass
         return self._token
@@ -179,4 +183,6 @@ if __name__ == "__main__":  # python kis.py check — 연결 점검 (주문은 �
         print("오늘 주문·체결:", len(c.fills(kst)), "건")
     except KisError as e:
         print("실패:", e)
+        if "모의투자용 앱키가 아닙니다" in str(e):
+            print("→ 지금 넣은 키는 실전용이에요. KIS Developers에서 '모의투자' 앱키를 따로 발급받아 KIS_APP_KEY·KIS_APP_SECRET을 바꿔 주세요.")
     sys.exit(0)

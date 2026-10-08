@@ -156,7 +156,8 @@ def _post(path: str, body: dict, where: str, timeout: int = 90) -> dict | None:
                    "platform.openai.com → Billing에서 충전하면 다음 실행부터 다시 켜져요.")
             return None
         if r.status_code in (401, 403):
-            _S["disabled_reason"] = "OpenAI 키 오류"
+            log.warning("OpenAI 거부 (%s): %s / %s", r.status_code, err.get("code") or "", err.get("type") or "")
+            _S["disabled_reason"] = f"OpenAI 키 오류 ({r.status_code} {err.get('code') or err.get('type') or ''})"
             _alert("key", "GPT 키를 확인해 주세요", "OpenAI가 키를 거부했어요(만료·삭제·권한). 깃허브 비밀 값 OPENAI_API_KEY를 새 키로 바꿔 주세요.")
             return None
         if r.status_code == 429 or r.status_code >= 500:
