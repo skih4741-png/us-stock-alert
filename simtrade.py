@@ -18,28 +18,29 @@ import numpy as np
 import prices
 
 log = logging.getLogger(__name__)
-KEY = "sim"
+KEY = "sim"          # 판단용 (실전과 같은 100달러)
+REF_KEY = "sim_ref"  # 참고용 1,000달러 (판단에 안 씀)
 FEE = 0.0025 + 0.0010      # 한쪽 거래 비용 추정 (수수료 + 환전)
 DAYS = 90                  # 시험 기간 (달력 기준)
 DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
 AVOID = ("신규 매수 보류", "재무 주의", "급등", "출렁임", "참고용")
 
 
-def load(store) -> dict | None:
+def load(store, key: str = KEY) -> dict | None:
     try:
-        raw = store.get_blob(KEY)
+        raw = store.get_blob(key)
         return json.loads(raw) if raw else None
     except Exception:
         return None
 
 
 def save(store, st: dict):
-    store.put_blob(KEY, json.dumps(st, ensure_ascii=False, separators=(",", ":")))
+    store.put_blob(st.get("key", KEY), json.dumps(st, ensure_ascii=False, separators=(",", ":")))
 
 
-def start(store, start_day: str, budget: float = 100.0) -> dict:
-    st = {"v": 1, "start": start_day, "end": (date.fromisoformat(start_day) + timedelta(days=DAYS)).isoformat(),
-          "cfg": dict(DEFAULT, budget=budget), "cash": budget, "positions": [], "pending": [], "closed": [], "log": [],
+def start(store, start_day: str, budget: float = 100.0, key: str = KEY, max_pos: int = 2) -> dict:
+    st = {"v": 1, "key": key, "start": start_day, "end": (date.fromisoformat(start_day) + timedelta(days=DAYS)).isoformat(),
+          "cfg": dict(DEFAULT, budget=budget, max_pos=max_pos), "cash": budget, "positions": [], "pending": [], "closed": [], "log": [],
           "equity": [], "checked": "", "violations": 0, "month_stops": [], "evaluated": None}
     save(store, st)
     return st
@@ -69,9 +70,9 @@ def _close(st, p, day, px, why):
     st["log"].append(f"{day} 매도 {p['t']} {qty}주 @{px:.2f} · {why}")
 
 
-def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str) -> dict | None:
+def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, key: str = KEY) -> dict | None:
     """picks: 앱 형식 후보(pick_view). market: {'regime','rest_day'}. 반환: 상태(없으면 None)."""
-    st = load(store)
+    st = load(store, key)
     if not st:
         return None
     cfg = st["cfg"]
@@ -207,7 +208,7 @@ def _mdd(vals):
     return mdd * 100
 
 
-def summary(st: dict) -> dict:
+def summary(st: dict, sig: dict | None = None) -> dict:
     cfg, eq = st["cfg"], st["equity"]
     budget = cfg["budget"]
     last = eq[-1][1] if eq else budget
@@ -217,7 +218,8 @@ def summary(st: dict) -> dict:
     spy0 = next((e[2] for e in eq if e[2]), None)
     spy_ret = (eq[-1][2] / spy0 - 1) * 100 if eq and spy0 and eq[-1][2] else None
     spy_vals = [e[2] for e in eq if e[2]]
-    first, lastn = closed[:20], closed[-20:]
+    half = max(1, len(closed) // 2)
+    first, lastn = closed[:half], closed[-half:]
     avg = lambda xs: sum(c["ret"] for c in xs) / len(xs) if xs else None
     aw = sum(c["pnl"] for c in wins) / len(wins) if wins else None
     al = -sum(c["pnl"] for c in losses) / len(losses) if losses else None
@@ -226,16 +228,20 @@ def summary(st: dict) -> dict:
     spy_mdd = _mdd(spy_vals) if spy_vals else None
     d0 = date.fromisoformat(st["start"])
     today = date.fromisoformat(eq[-1][0]) if eq else d0
+    d5 = (sig or {}).get("d5") or {}
     checks = [
-        ["거래 20번 이상", len(closed) >= 20, f"{len(closed)}번"],
+        ["모의 거래 12번 이상", len(closed) >= 12, f"{len(closed)}번"],
+        ["아침 후보 기록 100개 이상, 5일 뒤 평균이 SPY보다 나음",
+         d5.get("n", 0) >= 100 and d5.get("excess") is not None and d5["excess"] > 0,
+         f"{d5.get('n', 0)}개 · SPY 대비 {d5['excess']:+.2f}%p" if d5.get("excess") is not None else f"{d5.get('n', 0)}개"],
         ["SPY보다 수익률이 높거나 비슷하고 최대 낙폭은 더 작음",
          spy_ret is not None and ret >= spy_ret - 1 and (spy_mdd is None or mdd >= spy_mdd),
          f"내 {ret:+.1f}% (낙폭 {mdd:.1f}%) · SPY {spy_ret:+.1f}% (낙폭 {spy_mdd:.1f}%)" if spy_ret is not None and spy_mdd is not None else "자료 부족"],
         ["최대 낙폭 15% 이내, 손실 한도로 멈춘 달 없음", mdd >= -15 and not st["month_stops"], f"낙폭 {mdd:.1f}% · 멈춘 달 {len(st['month_stops'])}"],
         ["평균 이익 ÷ 평균 손실 1.5 이상", bool(aw and al and aw / al >= 1.5) or bool(aw and not losses and len(closed) >= 5),
          f"{aw / al:.2f}" if aw and al else "—"],
-        ["처음 20번보다 최근 20번이 나빠지지 않음, 규칙 위반 0번",
-         len(closed) >= 20 and avg(lastn) is not None and avg(lastn) >= avg(first) - 0.5 and st["violations"] == 0,
+        ["처음 절반보다 최근 절반이 나빠지지 않음, 규칙 위반 0번",
+         len(closed) >= 12 and avg(lastn) is not None and avg(lastn) >= avg(first) - 0.5 and st["violations"] == 0,
          f"처음 {avg(first):+.1f}% · 최근 {avg(lastn):+.1f}%" if closed else "—"],
         ["수수료·환전 비용을 빼고도 플러스", last > budget, f"${last - budget:+.2f}"],
     ]
@@ -249,11 +255,11 @@ def summary(st: dict) -> dict:
     }
 
 
-def maybe_evaluate(store, st: dict, notify_fn) -> dict | None:
+def maybe_evaluate(store, st: dict, notify_fn, sig: dict | None = None) -> dict | None:
     """시험 기간이 끝나면 한 번만 판단해서 알림을 보내요."""
     if not st or st.get("evaluated") or not st["equity"] or st["equity"][-1][0] < st["end"]:
         return None
-    s = summary(st)
+    s = summary(st, sig)
     ok = s["passed"]
     lines = [f"■ 3개월 자동 모의매매 결과 ({s['start']} ~ {st['equity'][-1][0]}, 가상 ${s['budget']:.0f})",
              f"평가 ${s['equity']:.2f} ({s['ret']:+.1f}%) · 같은 기간 SPY {s['spy_ret']:+.1f}%" if s["spy_ret"] is not None else f"평가 ${s['equity']:.2f}",
@@ -261,7 +267,7 @@ def maybe_evaluate(store, st: dict, notify_fn) -> dict | None:
     lines += [("✅ " if c[1] else "❌ ") + c[0] + " — " + c[2] for c in s["checks"]]
     lines.append("")
     if ok:
-        lines.append("6가지 기준을 모두 넘었어요. 실전으로 바꾸려면 Claude에게 '실전 전환해줘'라고 요청해 주세요. "
+        lines.append(f"{len(s['checks'])}가지 기준을 모두 넘었어요. 실전으로 바꾸려면 Claude에게 '실전 전환해줘'라고 요청해 주세요. "
                      "실전 계좌에 돈을 넣고 KIS_MODE를 real로 바꾸는 것까지 함께 진행해요. (자동으로 바뀌지는 않아요)")
         title = "실전 전환 검토 요청 — 3개월 모의 통과"
     else:

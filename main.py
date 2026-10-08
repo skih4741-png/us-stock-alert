@@ -497,12 +497,17 @@ def run_sim(store, app: dict, now):
     try:
         picks = [p for b in app.get("bands", []) for p in b["picks"] + b.get("etf_picks", [])]
         st = simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"))
+        try:
+            simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"), key=simtrade.REF_KEY)
+        except Exception as e:
+            log.warning("참고용 모의 실패: %s", e)
         if st:
             def tell(title, text):
                 notify.send_text(title, text)
                 appdata.add_alert(store, "sim", title, text.split("\n")[1] if "\n" in text else text, now.isoformat(timespec="minutes"), "info")
                 push.send(store, title, "성적 탭 → 자동 모의에서 결과를 봐요", "#/score", "system", tag="sim")
-            simtrade.maybe_evaluate(store, st, tell)
+            sig = performance.signal_summary(store.read("신호 기록"))
+            simtrade.maybe_evaluate(store, st, tell, sig)
     except Exception as e:
         log.warning("자동 모의매매 실패: %s", e)
 
@@ -513,7 +518,9 @@ def save_perf(store, now, notify_stops: bool = True) -> dict | None:
         perf = performance.update(store)
         perf["at"] = now.isoformat(timespec="minutes")
         st = simtrade.load(store)
-        perf["sim"] = simtrade.summary(st) if st else None
+        perf["sim"] = simtrade.summary(st, perf["signals"]) if st else None
+        ref = simtrade.load(store, simtrade.REF_KEY)
+        perf["sim_ref"] = simtrade.summary(ref, perf["signals"]) if ref else None
         store.put_blob("perf", appdata.dumps(appdata._clean(perf)))
         hit = [x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")]
         if hit and notify_stops:
@@ -572,7 +579,10 @@ def run_weekly(dry: bool):
     if sm:
         lines.append(f"\n■ 자동 모의매매 (가상 ${sm['budget']:.0f}, {sm['day']}/{sm['days']}일째)")
         lines.append(f"평가 ${sm['equity']:.2f} ({_fmt(sm['ret'])}) · SPY {_fmt(sm['spy_ret'])} · 번 돈 +${sm['gain']:.2f} · 잃은 돈 -${abs(sm['loss']):.2f}")
-        lines.append("실전 기준 " + str(sum(1 for c in sm["checks"] if c[1])) + "/6 통과 중 (3개월 끝에 최종 판단)")
+        lines.append("실전 기준 " + str(sum(1 for c in sm["checks"] if c[1])) + f"/{len(sm['checks'])} 통과 중 (3개월 끝에 최종 판단)")
+        rf = perf.get("sim_ref")
+        if rf:
+            lines.append(f"참고용 ${rf['budget']:.0f} 모의: {_fmt(rf['ret'])} · 거래 {rf['wins'] + rf['losses']}번 (판단에는 안 써요)")
 
     # 보유 결론 변화 (지난주 저장본과 비교)
     try:

@@ -669,6 +669,13 @@
       (spy != null ? " · SPY " + pct(spy) : "") + "</dd>";
   }
 
+  function refSimHtml(r) {
+    if (!r) return "";
+    return '<h2>참고용 $' + fmt(r.budget, 0) + ' 모의 <span class="small">(같은 규칙, 판단에는 안 써요)</span></h2><div class="card"><dl class="kv num">' +
+      "<dt>평가금액</dt><dd>$" + fmt(r.equity) + " (" + pct(r.ret) + ")</dd><dt>번 돈 · 잃은 돈</dt><dd>" + usd(r.gain) + " · " + usd(r.loss) + "</dd>" +
+      "<dt>거래</dt><dd>" + (r.wins + r.losses) + "번 · 보유 " + (r.positions || []).length + "종목</dd><dt>최대 낙폭</dt><dd>" + fmt(r.mdd, 1) + "%</dd></dl>" +
+      '<div class="small">금액에 따라 결과가 얼마나 달라지는지 비교하는 용도예요</div></div>';
+  }
   function autoSimHtml(m) {
     if (!m) return '<div class="empty">자동 모의매매는 다음 아침 리포트부터 시작돼요</div>';
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
@@ -691,7 +698,7 @@
         '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
         " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + "</div></div>").join("") + "</div>"
         : '<div class="empty">없음 (조건에 맞는 후보가 없거나 자리가 찼어요)</div>') +
-      "<h2>실전 기준 " + passN + "/6 <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
+      "<h2>실전 기준 " + passN + "/" + (m.checks || []).length + " <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
       '<div class="card"><ul class="checks">' + (m.checks || []).map(c => '<li class="' + (c[1] ? "ok" : "no") + '">' + (c[1] ? "✓ " : "– ") + esc(c[0]) +
         '<div class="small">' + esc(c[2]) + "</div></li>").join("") + "</ul></div>" +
       "<h2>판 거래</h2>" + ((m.closed || []).length ? '<div class="list">' + m.closed.map(c =>
@@ -711,7 +718,7 @@
     const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
     let body = "";
     if (seg === "auto") {
-      body = autoSimHtml(S.perf && S.perf.sim);
+      body = autoSimHtml(S.perf && S.perf.sim) + refSimHtml(S.perf && S.perf.sim_ref);
     } else if (seg === "acct") {
       body = '<div class="card"><div class="sub">모의 계좌 평가금액</div><div class="big num">$' + fmt(eq) + ' <span class="badge ' + signTone(ret) + '">' + pct(ret) + "</span></div>" +
         '<div class="small num">현금 $' + fmt(cash) + " · 보유 " + open.length + "종목 · 시작 $1,000" +
