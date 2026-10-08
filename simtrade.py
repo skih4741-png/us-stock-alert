@@ -76,6 +76,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     if not st:
         return None
     cfg = st["cfg"]
+    n_log = len(st["log"])
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
     hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
     H = lambda t: hist.get(t.replace(".", "-"))
@@ -191,6 +192,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                                   "why": f"총점 {p.get('total'):.0f} · 추세 합류 {t5}/5 · 손익비 {pl.get('rr')}"})
             cash -= qty * limit * (1 + FEE)
             slots -= 1
+    st["today"] = st["log"][n_log:]
     st["log"] = st["log"][-200:]
     st["updated"] = now_iso
     save(store, st)
@@ -251,7 +253,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "mdd": round(mdd, 2), "gain": round(sum(c["pnl"] for c in wins), 2), "loss": round(sum(c["pnl"] for c in losses), 2),
         "wins": len(wins), "losses": len(losses), "positions": st["positions"], "pending": st["pending"],
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
-        "evaluated": st.get("evaluated"), "curve": [[e[0], e[1]] for e in eq][-120:],
+        "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "curve": [[e[0], e[1]] for e in eq][-120:],
     }
 
 
@@ -280,3 +282,21 @@ def maybe_evaluate(store, st: dict, notify_fn, sig: dict | None = None) -> dict 
     save(store, st)
     notify_fn(title, "\n".join(lines))
     return {"title": title, "passed": ok, "text": "\n".join(lines)}
+
+
+def daily_text(st: dict, sig: dict | None = None) -> tuple[str, str, bool]:
+    """아침 일일 리포트용: (제목, 본문, 오늘 사고판 게 있나)."""
+    m = summary(st, sig)
+    today = st.get("today") or []
+    traded = any((" 매수 " in x or " 매도 " in x) for x in today)
+    lines = [f"평가 ${m['equity']:.2f} ({m['ret']:+.1f}%) · 같은 기간 SPY " + (f"{m['spy_ret']:+.1f}%" if m["spy_ret"] is not None else "—"),
+             f"번 돈 +${m['gain']:.2f} ({m['wins']}건) · 잃은 돈 -${abs(m['loss']):.2f} ({m['losses']}건) · 현금 ${m['cash']:.2f}", ""]
+    lines.append("■ 지난 거래일에 한 일")
+    lines += [f"• {x}" for x in today] or ["• 체결·매도 없음"]
+    lines.append("■ 가진 종목")
+    lines += [f"• {p['t']} {p['qty']}주 @{p['entry']:.2f} · 손절 {p['stop']:.2f} · 목표 {p['target']:.2f}" for p in m["positions"]] or ["• 없음"]
+    lines.append("■ 오늘 밤 주문 계획")
+    lines += [f"• {o['t']} {o['qty']}주 · 지정가 {o['limit']:.2f} 이하 · {o['why']}" for o in m["pending"]] or ["• 없음"]
+    lines.append(f"실전 기준 {sum(1 for c in m['checks'] if c[1])}/{len(m['checks'])} 통과 중")
+    title = f"자동 모의 {m['day']}/{m['days']}일째 · ${m['equity']:.2f} ({m['ret']:+.1f}%)"
+    return title, "\n".join(lines), traded

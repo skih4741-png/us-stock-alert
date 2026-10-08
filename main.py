@@ -507,6 +507,14 @@ def run_sim(store, app: dict, now):
                 appdata.add_alert(store, "sim", title, text.split("\n")[1] if "\n" in text else text, now.isoformat(timespec="minutes"), "info")
                 push.send(store, title, "성적 탭 → 자동 모의에서 결과를 봐요", "#/score", "system", tag="sim")
             sig = performance.signal_summary(store.read("신호 기록"))
+            # 일일 리포트: 슬랙 매일 + 앱 알림, 사고판 날만 푸시
+            title, text, traded = simtrade.daily_text(st, sig)
+            at = now.isoformat(timespec="minutes")
+            notify.send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
+                                      {"type": "section", "text": {"type": "mrkdwn", "text": "```" + text[:2800] + "```"}}])
+            appdata.add_alert(store, "sim", title, " / ".join(x for x in (st.get("today") or ["거래 없음"])[:3]), at, "info")
+            if traded:
+                push.send(store, title, " / ".join(st["today"][:3])[:170], "#/score", "daily", tag="sim")
             simtrade.maybe_evaluate(store, st, tell, sig)
     except Exception as e:
         log.warning("자동 모의매매 실패: %s", e)

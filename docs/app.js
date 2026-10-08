@@ -413,6 +413,15 @@
   const findPick = t => allPicks().find(p => p.t === t);
   const findHold = t => (S.data.holdings || []).find(h => h.t === t);
 
+  function homeSimCard() {
+    const m = S.perf && S.perf.sim;
+    if (!m) return "";
+    const today = (m.today || []).slice(0, 3);
+    return '<a class="card" href="#/score" style="display:block;color:var(--ink)"><div class="row between"><span class="sub">자동 모의 ' + m.day + "/" + m.days +
+      '일째 (가상 $' + fmt(m.budget, 0) + ')</span><b class="num ' + (m.ret >= 0 ? "good-t" : "bad-t") + '">$' + fmt(m.equity) + " " + pct(m.ret) + "</b></div>" +
+      '<div class="small num">번 돈 ' + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + " · 오늘 밤 주문 " + (m.pending || []).length + "건</div>" +
+      (today.length ? '<div class="small" style="margin-top:4px">' + today.map(esc).join("<br>") + "</div>" : '<div class="small">지난 거래일 체결·매도 없음</div>') + "</a>";
+  }
   function homePaperCard() {
     if (!(S.paper || []).length) return "";
     const m = moneySummary(paperTrades()), net = m.gain + m.loss;
@@ -436,7 +445,7 @@
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
-      homePaperCard() +
+      homeSimCard() + homePaperCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -691,6 +700,7 @@
       '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
       '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
       '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd></dl></div>" +
+      "<h2>지난 거래일에 한 일</h2>" + '<div class="card small">' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" +
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +
         "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
