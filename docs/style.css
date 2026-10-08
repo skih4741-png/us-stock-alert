@@ -181,3 +181,12 @@ pre.weekly { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-
 .plbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); margin: 4px 0 12px; }
 .plbar .g { background: var(--good); } .plbar .l { background: var(--bad); }
 .segs { overflow-x: auto; gap: 16px; } .segs button { white-space: nowrap; flex: none; }
+/* 4단계 */
+.quick { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.quick .chip { color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.chips.wrap { flex-wrap: wrap; overflow: visible; }
+.chips.wrap .chip { cursor: pointer; }
+textarea { width: 100%; font-size: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font-family: inherit; resize: vertical; }
+.bubble.me { background: var(--accent-bg); color: var(--ink); border-radius: 14px; padding: 10px 14px; margin: 12px 0 6px auto; max-width: 85%; width: fit-content; }
+.warn-t { color: var(--warn); }
+ol.plain { padding-left: 20px; margin: 6px 0; }

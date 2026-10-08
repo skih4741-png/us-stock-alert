@@ -1,17 +1,10 @@
-name: 장 전 점검·장중 감시
+name: 연결 점검 (GPT · 한국투자증권 모의)
 on:
-  schedule:
-    - cron: "0 13-21 * * 1-5"   # 한국 22:00~06:00 매시 (코드가 장중인지 확인)
   workflow_dispatch:
-permissions:
-  contents: write
-concurrency:
-  group: stock-alert
-  cancel-in-progress: false
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}
@@ -30,13 +23,8 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install yfinance pandas numpy requests gspread google-auth pywebpush
-      - run: python main.py premarket
-      - run: python main.py intraday
-      - name: 알림 기록 저장
-        run: |
-          git config user.name "stock-alert-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add data/state.json 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "장중 알림 기록"
-          git push || true
+      - run: pip install -r requirements.txt
+      - name: GPT 점검 (키 값은 출력하지 않아요)
+        run: python ai.py
+      - name: 한국투자증권 모의투자 점검 (주문은 안 내요)
+        run: python kis.py

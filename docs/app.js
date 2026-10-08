@@ -1,4 +1,4 @@
-/* 미국주식 알림 앱 — 1~3단계 (로그인 · 홈 · 후보 · 보유 · 상세 · 알림 · 성적·모의투자 · 설정) */
+/* 미국주식 알림 앱 — 1~4단계 (로그인 · 홈 · 후보 · 보유 · 상세 · 알림 · 성적·모의투자 · 설정) */
 (function () {
   "use strict";
   const CFG = window.APP_CONFIG || {};
@@ -26,9 +26,9 @@
   const S = {
     token: store.get("token") || store.get("token", sessionStorage),
     scope: store.get("scope") || store.get("scope", sessionStorage),
-    data: null, alerts: [], perf: null, weekly: null, paper: [], loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
+    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -99,7 +99,7 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || [];
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null;
         saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
@@ -110,7 +110,7 @@
   }
 
   function saveCache() {
-    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, at: Date.now() }));
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -445,7 +445,10 @@
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
-      homeSimCard() + homePaperCard() +
+      '<div class="quick"><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
+        (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
+        (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
+      briefCard() + homeSimCard() + homePaperCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -508,7 +511,7 @@
       '<div class="small">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
-      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) +
+      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
       "<dt>손절</dt><dd>" + fmt(pl.stop) + " (" + fmt(pl.risk_pct, 1) + "%)</dd>" +
@@ -523,8 +526,8 @@
       pro: '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
         (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
         '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>",
-      v4: '<div class="empty">버핏식 4관점 점검은 4단계에서 열려요</div>',
-      rep: '<div class="empty">쉬운 기업 리포트는 4단계에서 열려요</div>',
+      v4: b4Html(p.t),
+      rep: repHtml(p.t),
     };
     const seg = document.getElementById("seg");
     seg.innerHTML = segs.fin;
@@ -555,7 +558,9 @@
       '<div class="row between"><h1>' + esc(h.t) + '</h1><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
       '<div class="sub">' + esc(h.name || "") + "</div>" +
       (h.action ? '<div class="msg ' + (h.tone === "bad" ? "err" : "note") + '">규칙상 할 일: <b>' + esc(h.action) + "</b></div>" : "") +
-      '<h2>재무 5초</h2>' + finHtml(finFor(h.t)) +
+      '<h2>재무 5초</h2>' + finHtml(finFor(h.t)) + earnHtml(h.t) +
+      '<details class="sig"><summary><b>버핏 4관점</b></summary>' + b4Html(h.t) + "</details>" +
+      '<details class="sig"><summary><b>쉬운 리포트</b></summary>' + repHtml(h.t) + "</details>" +
       '<h2>지금 상태</h2><div class="card"><dl class="kv num">' +
       "<dt>현재가</dt><dd>$" + fmt(h.price) + "</dd><dt>평단</dt><dd>$" + fmt(h.avg) + "</dd><dt>수량</dt><dd>" + fmt(h.qty, 0) + "</dd>" +
       "<dt>수익률</dt><dd>" + pct(h.gain_pct) + "</dd><dt>손절선</dt><dd>$" + fmt(h.stop) + " (" + (h.to_stop_pct == null ? "—" : fmt(h.to_stop_pct, 1) + "% 위") + ")</dd>" +
@@ -678,6 +683,23 @@
       (spy != null ? " · SPY " + pct(spy) : "") + "</dd>";
   }
 
+  function vetoTag(t) {
+    const v = ((S.ai && S.ai.veto) || []).filter(x => x.t === t).slice(-1)[0];
+    if (!v) return "";
+    return '<br><span class="badge ' + (v.veto ? "bad" : "") + '">AI 거부권(기록만): ' + (v.veto ? "막을 이유 있음" : "통과") + "</span>" +
+      (S.ai && S.ai.pm && S.ai.pm[t] ? ' <a class="link" href="#/pick/' + encodeURIComponent(t) + '">사전 부검 →</a>' : "");
+  }
+  function kisHtml(k) {
+    let h = '<h2>한국투자증권 모의투자 계좌 <span class="small">(같은 주문을 실제 모의계좌에)</span></h2>';
+    if (!k) return h + '<div class="card sub">미국 장중 첫 감시 때부터 연결돼요. KIS 비밀 값과 KIS_MODE=paper가 필요해요.</div>';
+    if (!k.on) return h + '<div class="card sub">꺼져 있어요: ' + esc(k.why || "") + "</div>";
+    const today = (k.orders || []).slice().reverse().slice(0, 8);
+    return h + '<div class="card">' + (k.err ? '<div class="msg err">' + esc(k.err) + "</div>" : "") +
+      '<div class="small">' + esc(whenText(k.at)) + " 기준 · 보유 " + (k.holdings || []).length + "종목" + (k.summary && k.summary.pnl != null ? " · 평가손익 $" + fmt(k.summary.pnl) : "") + "</div>" +
+      ((k.holdings || []).length ? '<ul class="plain">' + k.holdings.map(x => "<li>" + esc(x.t) + " " + x.qty + "주 @$" + fmt(x.avg) + " → $" + fmt(x.now) + "</li>").join("") + "</ul>" : "") +
+      (today.length ? '<b>최근 주문</b><ul class="plain small">' + today.map(o => "<li>" + esc(o.date) + " " + esc(o.side) + " " + esc(o.t) + " " + o.qty + "주 @" + fmt(o.price) + " · " + esc(o.status) + "</li>").join("") + "</ul>" : '<div class="small">아직 주문 없음</div>') +
+      "</div>";
+  }
   function refSimHtml(r) {
     if (!r) return "";
     return '<h2>참고용 $' + fmt(r.budget, 0) + ' 모의 <span class="small">(같은 규칙, 판단에는 안 써요)</span></h2><div class="card"><dl class="kv num">' +
@@ -706,7 +728,7 @@
         "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
       "<h2>다음 거래일 주문 계획</h2>" + ((m.pending || []).length ? '<div class="list">' + m.pending.map(o =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
-        " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + "</div></div>").join("") + "</div>"
+        " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + vetoTag(o.t) + "</div></div>").join("") + "</div>"
         : '<div class="empty">없음 (조건에 맞는 후보가 없거나 자리가 찼어요)</div>') +
       "<h2>실전 기준 " + passN + "/" + (m.checks || []).length + " <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
       '<div class="card"><ul class="checks">' + (m.checks || []).map(c => '<li class="' + (c[1] ? "ok" : "no") + '">' + (c[1] ? "✓ " : "– ") + esc(c[0]) +
@@ -728,7 +750,7 @@
     const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
     let body = "";
     if (seg === "auto") {
-      body = autoSimHtml(S.perf && S.perf.sim) + refSimHtml(S.perf && S.perf.sim_ref);
+      body = autoSimHtml(S.perf && S.perf.sim) + kisHtml(S.kis) + refSimHtml(S.perf && S.perf.sim_ref);
     } else if (seg === "acct") {
       body = '<div class="card"><div class="sub">모의 계좌 평가금액</div><div class="big num">$' + fmt(eq) + ' <span class="badge ' + signTone(ret) + '">' + pct(ret) + "</span></div>" +
         '<div class="small num">현금 $' + fmt(cash) + " · 보유 " + open.length + "종목 · 시작 $1,000" +
@@ -817,11 +839,176 @@
     }));
   }
 
+  /* ---------- 4단계: GPT 화면 · 장 전 갭 · 성향 인터뷰 · AI에게 묻기 ---------- */
+  const checkNote = c => !c ? "" : (c.ok || !(c.issues || []).length) ? '<div class="small">검사관: 숫자 수정 없음</div>'
+    : '<div class="small warn-t">검사관: ' + c.issues.length + "건 확인 필요 — " + esc(c.issues.map(i => (i["원래"] || "") + " → " + (i["고친 값"] || "")).join(" · ")) + "</div>";
+  const tone3 = v => /통과|좋음|상회/.test(v || "") ? "good" : /탈락|나쁨|하회/.test(v || "") ? "bad" : "warn";
+  function aiOff() {
+    const a = S.ai;
+    if (!a) return "GPT 기능은 다음 아침 리포트부터 채워져요.";
+    if (a.off) return "GPT 기능이 꺼져 있어요: " + a.off + ". 매수·매도 규칙은 그대로 돌아가요.";
+    return "";
+  }
+  function b4Html(t) {
+    const x = S.ai && S.ai.b4 && S.ai.b4[t];
+    if (!x) return '<div class="empty">' + esc(aiOff() || "이 종목의 4관점 점검은 아직 없어요(보유·후보 상위만, 7일마다).") + "</div>";
+    return '<div class="card"><div class="row between"><b>종합</b><span class="badge ' + tone3(x["종합"]) + '">' + esc(x["종합"] || "") + "</span></div>" +
+      (x["한 줄"] ? '<div class="sub">' + esc(x["한 줄"]) + "</div>" : "") + "</div>" +
+      (x["관점"] || []).map(v => '<div class="card"><div class="row between"><b>' + esc(v["이름"]) + '</b><span class="badge ' + tone3(v["판정"]) + '">' + esc(v["판정"]) + "</span></div>" +
+        '<ul class="plain">' + (v["근거"] || []).map(g => "<li>" + esc(g) + "</li>").join("") + "</ul></div>").join("") +
+      '<div class="small">' + esc(x.date || "") + " · GPT 작성 · 숫자는 야후 재무 자료 기준</div>" + checkNote(x["_검사"]);
+  }
+  function repHtml(t) {
+    const x = S.ai && S.ai.rep && S.ai.rep[t];
+    if (!x) return '<div class="empty">' + esc(aiOff() || "이 종목의 쉬운 리포트는 아직 없어요(보유·후보 상위만, 7일마다).") + "</div>";
+    return '<div class="card"><b>7줄 요약</b><ol class="plain">' + (x["7줄 요약"] || []).map(l => "<li>" + esc(l) + "</li>").join("") + "</ol></div>" +
+      '<div class="card"><b>지표 신호</b><dl class="kv">' + (x["신호"] || []).map(g => "<dt>" + esc(g["지표"]) + '</dt><dd><span class="badge ' + tone3(g["좋음/나쁨"]) + '">' +
+        esc(g["좋음/나쁨"]) + "</span> " + esc(g["값"]) + '<div class="small">' + esc(g["한 줄"]) + "</div></dd>").join("") + "</dl></div>" +
+      (x["10년 주인이라면"] ? '<div class="card"><b>10년 가질 주인이라면</b><p class="sub">' + esc(x["10년 주인이라면"]) + "</p></div>" : "") +
+      '<div class="small">' + esc(x.date || "") + " · GPT 작성</div>" + checkNote(x["_검사"]);
+  }
+  function earnHtml(t) {
+    const x = S.ai && S.ai.earn && S.ai.earn[t];
+    if (!x) return "";
+    const v = x["판정"] || {};
+    return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2><div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
+      '<span class="badge ' + tone3(v["실적"]) + '">실적 ' + esc(v["실적"] || "") + '</span> <span class="badge ' + tone3(v["가이던스"]) + '">가이던스 ' + esc(v["가이던스"] || "") + "</span></span></div>" +
+      '<table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
+        "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
+      '<dl class="kv"><dt>가이던스</dt><dd>' + esc(x["가이던스"]) + "</dd><dt>마진</dt><dd>" + esc(x["마진이 변한 이유"]) + "</dd><dt>현금흐름</dt><dd>" + esc(x["현금흐름"]) + "</dd></dl>" +
+      (x["한 줄"] ? '<div class="sub">' + esc(x["한 줄"]) + "</div>" : "") + checkNote(x["_검사"]) + "</div>";
+  }
+  function pmHtml(t) {
+    const x = S.ai && S.ai.pm && S.ai.pm[t];
+    if (!x) return "";
+    const v = x["막을 이유"] || {};
+    return '<h2>사기 전에 실패부터 가정 (사전 부검)</h2><div class="card"><div class="small">6개월 뒤 30% 떨어졌다고 가정했을 때 · ' + esc(x.date || "") + "</div>" +
+      (x["원인"] || []).map((c, i) => '<div style="margin-top:8px"><b>' + (i + 1) + ". " + esc(c["시나리오"]) + '</b> <span class="badge ' + (c["가능성"] === "상" ? "bad" : "warn") + '">' + esc(c["가능성"]) +
+        '</span><div class="small">먼저 보일 신호: ' + esc(c["가장 먼저 보일 신호"]) + " · 지금 " + esc(c["지금 값"]) + " · 다음 확인 " + esc(c["다음 확인일"]) + "</div></div>").join("") +
+      '<dl class="kv" style="margin-top:8px"><dt>이미 반영된 기대</dt><dd>' + esc(x["이미 반영된 기대"]) + "</dd><dt>큰 하락 이력</dt><dd>" + esc(x["큰 하락 이력"]) + "</dd></dl>" +
+      '<b>맞으려면 필요한 조건</b><ul class="plain">' + (x["맞으려면 필요한 조건"] || []).map(c => "<li>" + esc(c) + "</li>").join("") + "</ul>" +
+      '<div class="msg ' + (v["있음"] ? "err" : "note") + '">AI 거부권(기록만): ' + (v["있음"] ? "막을 이유 있음 — " + esc(v["이유"]) : "막을 이유 없음") + "</div>" + checkNote(x["_검사"]) + "</div>";
+  }
+  function briefCard() {
+    const b = S.ai && S.ai.brief;
+    if (!b || (!(b.items || []).length && !b.note)) return "";
+    const imp = { "상": 0, "중": 1, "하": 2 };
+    const items = (b.items || []).slice().sort((x, y) => (imp[x["중요도"]] ?? 3) - (imp[y["중요도"]] ?? 3));
+    return '<h2>밤사이 브리핑 <span class="small">' + esc(b.date || "") + "</span></h2>" +
+      (items.length ? items.map(x => '<div class="card"><div class="row between"><b>' + esc(x["종목"]) + '</b><span class="badge ' + (x["중요도"] === "상" ? "bad" : x["중요도"] === "중" ? "warn" : "") + '">' +
+        esc(x["중요도"]) + "</span></div><div>" + esc(x["무슨 일"]) + '</div><div class="small">' + esc(x["닿는 곳"]) + " · " + esc(x["이유"]) + "</div>" +
+        (x["링크"] ? '<a class="small link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">출처 보기 →</a>' : "") + "</div>").join("")
+        : '<div class="card sub">' + esc(b.note || "특이사항 없음") + "</div>");
+  }
+
+  function viewGap() {
+    const g = S.gap;
+    appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button><h1>장 전 갭</h1>' + statusLine() +
+      (g ? '<div class="small">' + esc(whenText(g.at)) + " · " + esc(g.note || "") + "</div>" +
+        '<div class="list">' + ((g.items || []).length ? g.items.map(x => '<div class="item"' + (x.pick ? ' onclick="location.hash=\'#/pick/' + encodeURIComponent(x.t) + '\'"' : ' style="cursor:default"') + '>' +
+          '<span class="tk">' + esc(x.t) + '</span><div class="grow small">' + (x.held ? "보유 · " : "") + (x.pick ? "후보 · " : "") + "장 전 $" + fmt(x.pre) + " (전일 $" + fmt(x.prev) + ")" +
+          (x.vol ? " · 거래량 " + fmt(x.vol, 0) : "") + (x.news ? "<br>" + esc(x.news) : "") + '</div><span class="badge ' + (x.cond ? (x.gap > 0 ? "warn" : "bad") : "") + '">' + pct(x.gap) + "</span></div>").join("")
+          : '<div class="empty">오늘은 장 전 가격이 잡힌 종목이 없어요</div>') + "</div>" +
+        '<p class="foot">갭 5% 이상·주가 3달러 이상·장 전 거래량 5만 주 이상이면 색으로 표시해요. 추격 금지선 위에서 시작하면 모의매매는 사지 않아요.</p>'
+        : '<div class="empty">장 전 점검(미국 장 시작 1시간 전)이 한 번 돌면 여기에 나와요</div>'));
+  }
+
+  const PROFILE_Q = [
+    ["투자 목적", ["배당·현금흐름", "장기 자산 늘리기", "몇 달 안의 수익"]],
+    ["투자 기간", ["1년 미만", "1~3년", "3~10년", "10년 이상"]],
+    ["보유 종목이 한 달에 20% 떨어지면", ["바로 판다", "규칙(손절선)대로 한다", "더 산다"]],
+    ["한 달에 견딜 수 있는 손실", ["3%", "5%", "10%", "20% 이상"]],
+    ["좋아하는 종목", ["배당주", "대형 우량주", "성장주", "저가·소형주"]],
+    ["앱을 보는 횟수", ["아침에 한 번", "하루 몇 번", "주 1~2번"]],
+    ["받고 싶은 알림", ["중요한 것만", "웬만한 것 다"]],
+    ["더 알고 싶은 것", ["재무제표 읽기", "차트·추세", "시장 흐름", "기업 분석"]],
+  ];
+  function viewProfile() {
+    const p = S.profile || {};
+    appShell("settings", '<button class="back" onclick="history.back()">← 뒤로</button><h1>투자 성향 인터뷰</h1>' +
+      '<div class="small">8문항 · 답은 \'AI에게 묻기\' 답변의 기준으로만 쓰고, 매수·매도 규칙은 바꾸지 않아요.</div><form id="pf">' +
+      PROFILE_Q.map((q, i) => '<h2>' + (i + 1) + ". " + esc(q[0]) + '</h2><div class="chips wrap">' + q[1].map(o =>
+        '<label class="chip' + (p[q[0]] === o ? " on" : "") + '"><input type="radio" name="q' + i + '" value="' + esc(o) + '"' + (p[q[0]] === o ? " checked" : "") + ' hidden>' + esc(o) + "</label>").join("") + "</div>").join("") +
+      '<button class="btn" type="submit">저장</button><div class="out"></div></form>');
+    $app.querySelectorAll(".chips.wrap").forEach(box => box.addEventListener("change", () => {
+      box.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c.querySelector("input").checked));
+    }));
+    bindForm("pf", async (f, msg) => {
+      const answers = {};
+      PROFILE_Q.forEach((q, i) => { const v = f.querySelector('input[name="q' + i + '"]:checked'); if (v) answers[q[0]] = v.value; });
+      const j = await api("saveProfile", { token: S.token, answers: answers });
+      if (!j.ok) { msg.innerHTML = '<div class="msg err">' + esc(j.error) + "</div>"; return; }
+      S.profile = j.profile; saveCache(); toast("성향을 저장했어요"); go("#/settings");
+    });
+  }
+
+  function viewAsk() {
+    S.ask = S.ask || { mode: "quick", hist: [] };
+    const A = S.ask, u = S.aiUsage || {};
+    const modes = [["quick", "급할 때"], ["big", "큰 결정"], ["fact", "붙인 글 사실 확인"]];
+    const ansHtml = a => {
+      if (!a) return "";
+      if (a.err) return '<div class="msg err">' + esc(a.err) + "</div>";
+      const x = a.answer || {};
+      if (x["질문"]) return '<div class="card"><b>먼저 물어볼게요</b><div>' + esc(x["질문"]) + '</div><div class="small">' + esc(x["왜 묻나"] || "") + "</div></div>";
+      let h = '<div class="card">';
+      if ((x["가정"] || []).length) h += '<div class="small">가정: ' + esc(x["가정"].join(" · ")) + "</div>";
+      if (x["결론"]) h += "<b>" + esc(x["결론"]) + "</b>";
+      if ((x["근거"] || []).length) h += '<ul class="plain">' + x["근거"].map(g => "<li>" + esc(g["내용"] || g) + (g["출처"] ? ' <span class="small">(' + esc(g["출처"]) + ")</span>" : "") + "</li>").join("") + "</ul>";
+      if ((x["주장"] || []).length) h += '<table class="tbl"><tr><th>주장</th><th>판정</th></tr>' + x["주장"].map(c => "<tr><td style=\"text-align:left\">" + esc(c["주장"]) +
+        '<div class="small">' + esc(c["근거"] || "") + (c["다른 점"] ? " · " + esc(c["다른 점"]) : "") + '</div></td><td><span class="badge ' + tone3(c["판정"] === "맞음" ? "좋음" : c["판정"] === "틀림" ? "나쁨" : "") + '">' + esc(c["판정"]) + "</span></td></tr>").join("") + "</table>";
+      if ((x["빠진 반대 근거"] || []).length) h += '<div class="small">빠진 반대 근거: ' + esc(x["빠진 반대 근거"].join(" · ")) + "</div>";
+      if (x["보유 공개"]) h += '<div class="small">글쓴이 보유 공개: ' + esc(x["보유 공개"]) + "</div>";
+      if ((x["확인 못 함"] || []).length) h += '<div class="small">확인 못 함: ' + esc(x["확인 못 함"].join(" · ")) + "</div>";
+      h += checkNote(a.check ? { issues: a.check, ok: !a.check.length } : null);
+      if ((a.sources || []).length) h += '<div class="small">찾은 자료: ' + esc(a.sources.map(s => s["제목"] + " (" + s["날짜"] + ")").join(" · ")) + "</div>";
+      return h + "</div>";
+    };
+    appShell("home", '<button class="back" onclick="history.back()">← 뒤로</button><h1>AI에게 묻기</h1>' +
+      '<div class="small">내 보유·후보·재무·쌓인 자료(RAG)에서 찾아 출처와 함께 답해요 · 이번 달 GPT $' + fmt(u.total) + " / $" + fmt(u.cap, 0) + "</div>" +
+      (u.appKey === false ? '<div class="msg note">이 기능은 로그인 서버(Apps Script)의 스크립트 속성에 OPENAI_API_KEY가 있어야 해요. 설정 탭 안내를 봐 주세요.</div>' : "") +
+      '<div class="chips">' + modes.map(m => '<button class="chip' + (A.mode === m[0] ? " on" : "") + '" data-m="' + m[0] + '">' + m[1] + "</button>").join("") + "</div>" +
+      '<div class="small" style="margin:6px 0">' + (A.mode === "quick" ? "사소한 질문 없이 바로 답하고, 가정은 맨 위에 적어요." : A.mode === "big" ? "답을 바꾸는 질문만 하나씩, 최대 5개 묻고 답해요." : "리포트·커뮤니티 글을 붙이면 주장마다 맞음·틀림·기준이 다름·확인 못 함으로 가려요.") + "</div>" +
+      (A.hist || []).map(h => h.role === "me" ? '<div class="bubble me">' + esc(h.text) + "</div>" : ansHtml(h.a)).join("") +
+      '<form id="af">' + (A.mode === "fact" ? '<label>붙인 글</label><textarea id="ap" rows="6" maxlength="12000" placeholder="여기에 글을 붙여 넣어요"></textarea>' : "") +
+      '<label>' + (A.mode === "fact" ? "더 물을 것 (선택)" : "질문") + '</label><textarea id="aq" rows="3" maxlength="4000" placeholder="예: MO 지금 배당은 안전한가?"></textarea>' +
+      '<button class="btn" type="submit">묻기</button><div class="out"></div></form>' +
+      ((A.hist || []).length ? '<button class="btn ghost" id="aclear">새로 묻기</button>' : "") +
+      '<p class="foot">AI 답은 참고용이에요. 숫자는 검사관이 한 번 더 확인해요. ' + esc(DISCLAIMER) + "</p>");
+    $app.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => { A.mode = b.dataset.m; A.hist = []; viewAsk(); }));
+    const cl = document.getElementById("aclear"); if (cl) cl.onclick = () => { A.hist = []; viewAsk(); };
+    bindForm("af", async (f, msg) => {
+      const q = f.querySelector("#aq").value.trim(), pasted = (f.querySelector("#ap") || {}).value || "";
+      if (!q && !pasted) { msg.innerHTML = '<div class="msg err">질문을 적어 주세요.</div>'; return; }
+      msg.innerHTML = '<div class="small">찾아보고 검사하는 중… (20~40초)</div>';
+      const history = (A.hist || []).map(h => ({ role: h.role === "me" ? "me" : "ai", text: h.role === "me" ? h.text : JSON.stringify((h.a || {}).answer || {}) }));
+      const j = await api("askAI", { token: S.token, mode: A.mode, q: q, pasted: pasted, history: history });
+      A.hist.push({ role: "me", text: q || "(붙인 글 사실 확인)" });
+      A.hist.push({ role: "ai", a: j.ok ? j : { err: j.error } });
+      if (j.usage) S.aiUsage = Object.assign({}, S.aiUsage || {}, j.usage);
+      viewAsk();
+    });
+  }
+
+  function aiSettingsHtml() {
+    const u = S.aiUsage || {}, st = (S.ai && S.ai.status) || {};
+    const w = u.cap ? Math.min(100, (u.total || 0) / u.cap * 100) : 0;
+    return '<h2>GPT 사용량 (' + esc(u.month || "") + ")</h2><div class=\"card\"><div class=\"row between\"><b class=\"num\">$" + fmt(u.total) + " / $" + fmt(u.cap, 0) + "</b>" +
+      '<span class="badge ' + (S.ai && S.ai.off ? "warn" : "good") + '">' + (S.ai && S.ai.off ? "꺼짐" : "켜짐") + "</span></div>" +
+      '<div class="plbar"><span class="g" style="width:' + w + '%;background:' + (w >= 80 ? "var(--bad)" : "var(--accent)") + '"></span></div>' +
+      '<dl class="kv num"><dt>아침 분석(브리핑·리포트 등)</dt><dd>$' + fmt(u.program) + "</dd><dt>앱 질문</dt><dd>$" + fmt(u.app) + "</dd>" +
+      (S.ai && S.ai.off ? "<dt>꺼진 이유</dt><dd>" + esc(S.ai.off) + "</dd>" : "") + "</dl>" +
+      '<div class="small">80%·100%·크레딧 소진 때 푸시로 알려요. 한도는 구글 시트 \'설정\' 탭 \'AI 월 한도(달러)\'. 한도에 닿으면 GPT 없이 규칙만으로 돌아가요.</div>' +
+      (u.appKey === false ? '<div class="msg note">앱 \'AI에게 묻기\'를 쓰려면 Apps Script → 프로젝트 설정 → 스크립트 속성에 OPENAI_API_KEY를 직접 넣어 주세요.</div>' : "") + "</div>" +
+      '<a class="btn ghost" href="#/ask">AI에게 묻기</a><a class="btn ghost" href="#/profile">투자 성향 인터뷰' + (S.profile && Object.keys(S.profile).length ? " (다시 하기)" : "") + "</a>";
+  }
+
   function viewSettings() {
     appShell("settings", '<div class="head"><h1>설정</h1></div>' +
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
       '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
+      aiSettingsHtml() +
       '<h2>계정</h2><a class="btn ghost" href="#/password">비밀번호 바꾸기</a>' +
       '<button class="btn ghost" id="hist">최근 로그인 기록</button><div id="histOut"></div>' +
       '<button class="btn ghost" id="out">로그아웃</button><button class="btn danger" id="outAll">모든 기기 로그아웃</button>' +
@@ -896,6 +1083,9 @@
       case "hold": return viewHold(decodeURIComponent(arg || ""));
       case "alerts": return viewAlerts();
       case "score": return viewScore();
+      case "gap": return viewGap();
+      case "ask": return viewAsk();
+      case "profile": return viewProfile();
       case "settings": return viewSettings();
       case "password": return viewPassword();
       default: return viewHome();

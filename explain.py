@@ -1,4 +1,4 @@
-"""F-08 쉬운 설명 · F-21 위험 경고·주의 한 줄 (Claude).
+"""F-08 쉬운 설명 · F-21 위험 경고·주의 한 줄 (GPT, ai.py를 거쳐요).
 
 AI는 종목을 고르지 않아요. 규칙이 고른 후보와 내 보유 종목에 대해,
 계산된 숫자와 뉴스 제목만 보고 설명·경고를 써요. 판정에는 섞지 않아요.
@@ -26,30 +26,18 @@ SYSTEM = """너는 미국 주식 알림 메일에 붙는 짧은 해설을 쓰는
 
 
 def explain(items: list[dict], cfg: dict) -> dict[str, dict]:
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key or str(cfg.get("AI 설명 사용", "예")).strip() not in ("예", "y", "Y", "yes", "true", "1"):
-        return {}
+    """ai.init()이 먼저 불려 있어야 해요. 실패하면 빈 dict, 설명 없이 표만 보내요."""
+    import ai
     if not items:
         return {}
+    out: dict[str, dict] = {}
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=key)
-        out: dict[str, dict] = {}
         for i in range(0, len(items), 12):  # 12개씩 나눠서
-            chunk = items[i:i + 12]
-            msg = client.messages.create(
-                model=str(cfg.get("AI 모델") or "claude-sonnet-4-5"),
-                max_tokens=4000,
-                system=SYSTEM,
-                messages=[{"role": "user", "content": json.dumps(chunk, ensure_ascii=False)}],
-            )
-            text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-            m = re.search(r"\{.*\}", text, re.S)
-            if m:
-                out.update(json.loads(m.group(0)))
+            r = ai.chat_json("아침 설명", SYSTEM, items[i:i + 12], "small", 4000)
+            if isinstance(r, dict):
+                out.update(r)
         return _guard(out, items)
-    except Exception as e:  # 실패하면 설명 없이 표만 보내요
+    except Exception as e:
         log.warning("AI 설명 실패: %s", e)
         return {}
 

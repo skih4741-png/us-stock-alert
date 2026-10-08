@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import ai
 import appdata
 import config
 import financials
@@ -32,6 +33,7 @@ import notify
 import performance
 import prices
 import push
+import research
 import scoring
 import simtrade
 import timing
@@ -75,6 +77,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
     stage = "시작"
     store = Store()
     cfg, warn = config.merge_settings(store.settings())
+    ai.init(store, cfg)
     state = load_state()
     holdings = store.holdings()
     try:
@@ -292,9 +295,9 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         for s in sells:
             items.append({"종목코드": s["ticker"], "구분": "내 보유 매도 후보", "종가": s["close"], "수익률(%)": s["gain_pct"],
                           "매도 이유": s["why"], "뉴스": prices.news_headlines(s["ticker"].replace(".", "-"))})
-        ai = explain(items, cfg)
+        ai_out = explain(items, cfg)
         for p in picks:
-            a = ai.get(p["ticker"], {})
+            a = ai_out.get(p["ticker"], {})
             p["desc"], p["caution"], p["warn"] = a.get("설명", ""), a.get("주의", ""), a.get("경고", "")
             if p["warn"]:
                 p["tags"].append("AI 위험 경고")
@@ -362,6 +365,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 store.put_blob("daily", appdata.dumps(app))
                 print("[앱 데이터] 시트 '앱 데이터' 탭에 저장했어요")
                 run_sim(store, app, now)
+                run_ai(store, app, cfg, now, send=False)
                 save_perf(store, now)
             sent = {"mail": False, "slack": False}
         else:
@@ -380,6 +384,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
             run_sim(store, app, now)
+            run_ai(store, app, cfg, now)
             save_perf(store, now)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
@@ -418,6 +423,44 @@ def _us_market_open(now_utc) -> tuple[bool, bool]:
     return (9 * 60 + 30 <= mins <= 16 * 60), (8 * 60 + 30 <= mins < 9 * 60 + 30)
 
 
+def run_gap(store, holdings: list[dict], dry: bool):
+    """F-A7 장 전 갭 스캐너: 보유 + 어제 후보 + 모의 주문 계획 종목의 장 전 가격 (무료 자료라 대상이 좁아요)."""
+    import yfinance as yf
+    daily = json.loads(store.get_blob("daily") or "{}")
+    picks = [p["t"] for b in daily.get("bands", []) for p in b["picks"] + b.get("etf_picks", [])]
+    sim = simtrade.load(store) or {}
+    held = {h["ticker"] for h in holdings}
+    tickers = list(dict.fromkeys(list(held) + picks + [o["t"] for o in sim.get("pending", [])]))[:60]
+    items = []
+    for t in tickers:
+        try:
+            info = yf.Ticker(t.replace(".", "-")).info or {}
+            pre, prev = info.get("preMarketPrice"), info.get("regularMarketPreviousClose") or info.get("previousClose")
+            if not pre or not prev:
+                continue
+            gap = (pre / prev - 1) * 100
+            vol = info.get("preMarketVolume")
+            news = prices.news_headlines(t.replace(".", "-"), 1)
+            cond = abs(gap) >= 5 and pre >= 3 and (vol is None or vol >= 50000)
+            items.append({"t": t, "gap": round(gap, 2), "pre": round(pre, 2), "prev": round(prev, 2), "vol": vol,
+                          "news": news[0]["제목"] if news else "", "held": t in held, "pick": t in picks, "cond": cond})
+        except Exception:
+            continue
+    items.sort(key=lambda x: -abs(x["gap"]))
+    blob = {"at": config.now_kst().isoformat(timespec="minutes"), "items": items,
+            "note": "보유·어제 후보·모의 주문 종목만 봐요(무료 자료 한계). 장 전 거래량은 자료가 없으면 비어 있어요."}
+    if dry:
+        print(json.dumps(blob, ensure_ascii=False)[:1500])
+        return
+    store.put_blob("gap", appdata.dumps(blob))
+    big = [x for x in items if x["cond"]]
+    if big:
+        body = " / ".join(f"{x['t']} {x['gap']:+.1f}%" for x in big[:5])
+        appdata.add_alert(store, "gap", "장 전 갭 5% 이상", body, blob["at"], "warn")
+        if any(x["held"] or x["t"] in [o["t"] for o in sim.get("pending", [])] for x in big):
+            push.send(store, "장 전 갭 · 보유/모의 주문 종목", body, "#/gap", "watch", tag="gap")
+
+
 def run_watch(kind: str, dry: bool):
     from datetime import datetime, timezone
 
@@ -431,6 +474,17 @@ def run_watch(kind: str, dry: bool):
     store = Store()
     cfg, _ = config.merge_settings(store.settings())
     holdings = store.holdings()
+    if kind == "premarket":
+        try:
+            run_gap(store, holdings, dry)
+        except Exception as e:
+            log.warning("장 전 갭 실패: %s", e)
+    if kind == "intraday" and not dry:
+        try:
+            import kisbridge
+            kisbridge.run(store)
+        except Exception as e:
+            log.warning("한국투자증권 모의 연동 실패: %s", e)
     if not holdings:
         return
     state = load_state()
@@ -492,6 +546,25 @@ def run_watch(kind: str, dry: bool):
 # 주간 요약 · 신호 성적
 # ======================================================================
 
+def run_ai(store, app: dict, cfg: dict, now, send: bool = True):
+    """4단계 GPT 기능 (밤사이 브리핑·실적 카드·4관점·쉬운 리포트·사전 부검). GPT가 꺼져 있으면 건너뛰어요."""
+    try:
+        blob = research.run_daily(store, app, cfg, simtrade.load(store))
+        text = research.brief_text(blob or {})
+        items = ((blob or {}).get("brief") or {}).get("items") or []
+        if send and text and items:
+            notify.send_slack("밤사이 브리핑 · 보유 종목", [{"type": "header", "text": {"type": "plain_text", "text": "밤사이 브리핑 · 보유 종목"}},
+                                                     {"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}}])
+            top = [x for x in items if x.get("중요도") == "상"]
+            at = now.isoformat(timespec="minutes")
+            appdata.add_alert(store, "brief", "밤사이 브리핑", " / ".join(f"{x.get('종목')} {x.get('무슨 일')}" for x in items[:3]), at, "info")
+            if top:
+                push.send(store, "밤사이 중요 소식 · " + ", ".join(x.get("종목", "") for x in top[:3]),
+                          top[0].get("무슨 일", "")[:150], "#/home", "daily", tag="brief")
+    except Exception as e:
+        log.warning("GPT 기능 실패: %s", e)
+
+
 def run_sim(store, app: dict, now):
     """자동 모의매매 한 걸음 + 기간이 끝났으면 실전 전환 판단 알림. 실패해도 리포트는 그대로."""
     try:
@@ -549,7 +622,28 @@ def run_weekly(dry: bool):
     """F-A12 주간 리포트: 신호 성적 + 모의 계좌 + 보유 결론 변화 + 회고 알림 → 슬랙·메일·앱·푸시."""
     store = Store()
     now = config.now_kst()
+    cfg, _ = config.merge_settings(store.settings())
+    ai.init(store, cfg)
     perf = save_perf(store, now, notify_stops=False) if not dry else performance.update(store)
+    # RAG: 내 거래 기록·회고를 자료로 쌓아요 ('비슷한 지난 거래는 어땠나')
+    if not dry:
+        try:
+            import rag
+            docs = []
+            for x in (perf.get("paper") or {}).get("trades", []):
+                if x.get("sold"):
+                    docs.append({"종목": x["t"], "날짜": x.get("sold_date"), "종류": "내 모의 거래",
+                                 "제목": f"{x['t']} {x['date']}→{x['sold_date']} {x.get('ret')}%",
+                                 "내용": f"{x['t']}를 {x['date']}에 {x['price']}에 사서 {x['sold_date']}에 {x.get('exit')}에 팔았어요. "
+                                         f"수익률 {x.get('ret')}%, SPY 대비 {x.get('excess')}%p, 판 이유 {x.get('why_sold')}. 회고: {x.get('note') or '없음'}"})
+            for c in ((perf.get("sim") or {}).get("closed") or []):
+                docs.append({"종목": c["t"], "날짜": c["exit_date"], "종류": "자동 모의 거래", "제목": f"자동 {c['t']} {c['date']}→{c['exit_date']}",
+                             "내용": f"자동 모의매매: {c['t']} {c['qty']}주 {c['entry']}에 사서 {c['exit']}에 팔았어요. 이유 {c['why']}, 손익 {c['pnl']}달러({c['ret']}%)."})
+            n = rag.add(store, docs)
+            log.info("RAG 거래 기록 %d개 추가", n)
+            ai.flush()
+        except Exception as e:
+            log.warning("RAG 거래 기록 실패: %s", e)
     if perf is None:
         perf = {"signals": {"n": 0}, "paper": {"n": 0}}
     sg, pp = perf["signals"], perf["paper"]

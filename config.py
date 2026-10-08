@@ -48,7 +48,10 @@ DEFAULTS: dict[str, float | str] = {
     "보유 종목 탭": "내 종목",
     # AI
     "AI 설명 사용": "예",
-    "AI 모델": os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5"),
+    "AI 작은 모델": "gpt-5-nano",
+    "AI 큰 모델": "gpt-5-mini",
+    "AI 월 한도(달러)": 5,
+    "AI 브리핑 종목 수": 8,       # 밤사이 브리핑·4관점·쉬운 리포트를 만들 최대 종목 수 (보유 우선)
 }
 
 
