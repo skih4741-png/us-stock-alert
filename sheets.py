@@ -22,7 +22,9 @@ TABS = {
                 "이유", "매수 구간", "손절", "1차 목표", "유효 기한", "연속 일수", "어제 대비", "표시", "쉬운 설명", "주의 한 줄", "위험 경고"],
     "신호 기록": ["날짜", "시장 국면", "종목", "판정", "순위", "가격대", "그날 주가", "총점", "손절", "1차 목표", "5일 뒤 수익률", "20일 뒤 수익률"],
     "실행 기록": ["날짜", "시각", "종류", "성공/실패", "분석한 종목 수", "걸린 시간(초)", "막힌 단계", "메모"],
+    "앱 데이터": ["키", "순번", "내용"],
 }
+CHUNK = 40000  # 구글 시트 한 칸은 5만 자까지라 나눠서 저장
 
 
 class Store:
@@ -95,6 +97,29 @@ class Store:
             p = LOCAL / f"{tab}.csv"
             old = self.read(tab)
             pd.concat([old, df.astype(str)], ignore_index=True).to_csv(p, index=False, encoding="utf-8-sig")
+
+    def put_blob(self, key: str, text: str):
+        """'앱 데이터' 탭에 key 이름으로 긴 글(JSON)을 나눠 저장해요. 같은 key의 예전 내용은 지워요."""
+        df = self.read("앱 데이터")
+        keep = df[df["키"] != key] if len(df) else df
+        parts = [text[i:i + CHUNK] for i in range(0, len(text), CHUNK)] or [""]
+        new = pd.DataFrame([{"키": key, "순번": str(i), "내용": p} for i, p in enumerate(parts)])
+        out = pd.concat([keep, new], ignore_index=True)
+        if self.gs:
+            ws = self.gs.worksheet("앱 데이터")
+            ws.clear()
+            ws.update([TABS["앱 데이터"]] + out.reindex(columns=TABS["앱 데이터"]).fillna("").astype(str).values.tolist(),
+                      "A1", value_input_option="RAW")
+        else:
+            out.to_csv(LOCAL / "앱 데이터.csv", index=False, encoding="utf-8-sig")
+
+    def get_blob(self, key: str) -> str:
+        df = self.read("앱 데이터")
+        if not len(df):
+            return ""
+        part = df[df["키"] == key].copy()
+        part["n"] = pd.to_numeric(part["순번"], errors="coerce")
+        return "".join(part.sort_values("n")["내용"].tolist())
 
     # ----- 의미 단위 -----
     def holdings(self) -> list[dict]:

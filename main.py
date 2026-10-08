@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import appdata
 import config
 import lists
 import market
@@ -235,17 +236,24 @@ def run_daily(limit: int | None, dry: bool) -> dict:
         # ---- 내 보유 매도 후보 ----
         stage = "보유 종목 점검"
         sells = []
+        holdings_view = []
         for h in holdings:
             t = h["ticker"].replace(".", "-")
             if t not in hist:
                 warn.append(f"보유 종목 {h['ticker']}의 가격을 못 받았어요")
+                holdings_view.append(appdata.holding_view(h, None, [], None))
                 continue
             r = results.get(t)
             hits = timing.sell_check(h, hist[t], tech.get(t), r["total"] if r else None, regime_to_bear, days_to(t), cfg)
+            lv = timing.levels(h, hist[t], tech.get(t), cfg)
+            action = SELL_ACTION[hits[0]["rule"]] if hits else ""
+            holdings_view.append(appdata.holding_view(h, lv, hits, r, action))
             if hits:
                 top = hits[0]
-                sells.append({**top, "ticker": h["ticker"], "action": SELL_ACTION[top["rule"]],
+                sells.append({**top, "ticker": h["ticker"], "action": action,
                               "why": " · ".join(x["why"] for x in hits[:2])})
+        tone_rank = {"bad": 0, "warn": 1, "good": 2}
+        holdings_view.sort(key=lambda x: (tone_rank.get(x["tone"], 3), x["t"]))
 
         # ---- AI 설명·경고 ----
         stage = "AI 설명"
@@ -322,11 +330,21 @@ def run_daily(limit: int | None, dry: bool) -> dict:
         report = {"date_label": f"{now.month}월 {now.day}일", "market": mk, "sell": sells, "bands": bands,
                   "buy_total": len(picks), "stock_total": sum(len(b["picks"]) for b in bands), "new_count": new_count, "warnings": warn,
                   "web_url": __import__("os").environ.get("WEB_URL", "")}
+        app = appdata.build_daily(report, holdings_view, bar_date, now.isoformat(timespec="minutes"))
         if dry:
             print("\n" + notify.subject(report) + "\n\n" + notify.text_body(report))
+            print("\n[앱 데이터] 보유 " + ", ".join(f"{h['t']}={h['conclusion']}" for h in app["holdings"])
+                  + f" · 크기 {len(appdata.dumps(app)):,}자")
             sent = {"mail": False, "slack": False}
         else:
             sent = notify.send_report(report)
+            try:
+                store.put_blob("daily", appdata.dumps(app))
+                s = app["summary"]
+                appdata.add_alert(store, "daily", "아침 리포트 도착", f"매도 {s['sell']} · 신규 매수 {s['new']} · 매수 후보 {s['buy']}",
+                                  now.isoformat(timespec="minutes"), "info")
+            except Exception as e:
+                log.warning("앱 데이터 저장 실패: %s", e)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                   "성공/실패": "성공", "분석한 종목 수": len(base), "걸린 시간(초)": took,
@@ -384,6 +402,7 @@ def run_watch(kind: str, dry: bool):
     sent_today = set(state.get("alerts", {}).get(today, []))
     live = prices.last_price_intraday([h["ticker"].replace(".", "-") for h in holdings])
     lines = []
+    app_items = []
     for h in holdings:
         t = h["ticker"].replace(".", "-")
         q = live.get(t)
@@ -396,15 +415,18 @@ def run_watch(kind: str, dry: bool):
             near = (price / stop - 1) * 100
             if near <= float(cfg["손절선 근접(%)"]):
                 lines.append(f"• *{h['ticker']}* {price:.2f} · 손절선 {stop:.2f}까지 {near:.1f}%")
+                app_items.append((f"{h['ticker']} 손절선 근접", f"손절선 {stop:.2f}까지 {near:.1f}%", "warn"))
         else:
             reason = None
             if price <= stop:
                 reason = f"손절선 {stop:.2f} 도달"
             elif chg <= float(cfg["장중 급락 기준(%)"]):
                 reason = f"하루 {chg:.1f}% 하락"
-            if reason and f"{t}:{reason[:4]}" not in sent_today:
+            key = __import__("hashlib").sha1(f"{t}:{reason[:4] if reason else ''}".encode()).hexdigest()[:10]  # 공개 저장소라 종목명은 남기지 않아요
+            if reason and key not in sent_today:
                 lines.append(f"• *{h['ticker']}* 현재 {price:.2f} · {reason}")
-                sent_today.add(f"{t}:{reason[:4]}")
+                app_items.append((f"{h['ticker']} {reason}", f"현재 {price:.2f}", "bad" if "손절" in reason else "warn"))
+                sent_today.add(key)
     if not lines:
         return
     title = ":hourglass: 장 시작 전 점검 · 손절선에 가까운 보유 종목" if kind == "premarket" else ":rotating_light: 장중 경고 · 내 보유 종목"
@@ -413,6 +435,12 @@ def run_watch(kind: str, dry: bool):
         print(text)
         return
     notify.send_slack(text)
+    at = config.now_kst().isoformat(timespec="minutes")
+    for title_, body_, tone_ in app_items:
+        try:
+            appdata.add_alert(store, kind, title_, body_, at, tone_)
+        except Exception as e:
+            log.warning("앱 알림 기록 실패: %s", e)
     state.setdefault("alerts", {})[today] = sorted(sent_today)
     state["alerts"] = {k: v for k, v in state["alerts"].items() if k >= today}  # 오늘 것만 보관
     save_state(state)

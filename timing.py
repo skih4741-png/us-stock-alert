@@ -38,12 +38,9 @@ def shares_for_budgets(price: float, budgets: list[int]) -> dict[int, tuple[int,
     return {b: (int(b // price), round(b - int(b // price) * price, 2)) for b in budgets} if price > 0 else {}
 
 
-def sell_check(h: dict, df: pd.DataFrame, t: dict | None, total: float | None, regime_changed_to_bear: bool,
-               earnings_in: int | None, cfg: dict) -> list[dict]:
-    """보유 종목 하나에 매도 규칙을 적용해요. 반환: 걸린 규칙 목록(가장 급한 것 먼저)."""
-    hits = []
-    c = df["Close"]
-    close = float(c.iloc[-1])
+def levels(h: dict, df: pd.DataFrame, t: dict | None, cfg: dict) -> dict:
+    """보유 종목의 현재가·평단·손절선·1차 목표·수익률 (매도 규칙과 앱 화면이 같은 값을 써요)."""
+    close = float(df["Close"].iloc[-1])
     avg = float(h["avg"])
     max_loss = float(cfg["최대 손실(%)"]) / 100
     stop = h.get("stop")
@@ -52,8 +49,16 @@ def sell_check(h: dict, df: pd.DataFrame, t: dict | None, total: float | None, r
         stop = max(computed, avg * (1 - max_loss)) if computed < avg else avg * (1 - max_loss)
     stop = float(stop)
     risk = max(avg - stop, avg * 0.01)
-    target = avg + 2 * risk
-    gain = close / avg - 1
+    return {"close": close, "avg": avg, "stop": stop, "target": avg + 2 * risk, "gain": close / avg - 1}
+
+
+def sell_check(h: dict, df: pd.DataFrame, t: dict | None, total: float | None, regime_changed_to_bear: bool,
+               earnings_in: int | None, cfg: dict) -> list[dict]:
+    """보유 종목 하나에 매도 규칙을 적용해요. 반환: 걸린 규칙 목록(가장 급한 것 먼저)."""
+    hits = []
+    c = df["Close"]
+    lv = levels(h, df, t, cfg)
+    close, avg, stop, target, gain = lv["close"], lv["avg"], lv["stop"], lv["target"], lv["gain"]
     since = c
     if h.get("buy_date"):
         try:

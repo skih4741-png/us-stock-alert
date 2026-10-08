@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>미국주식 알림</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="주식알림">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/favicon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" aria-live="polite"><div class="boot">불러오는 중…</div></div>
+<nav id="tabs" hidden>
+  <a href="#/home" data-tab="home"><span class="ti">⌂</span>홈</a>
+  <a href="#/picks" data-tab="picks"><span class="ti">◎</span>후보</a>
+  <a href="#/holdings" data-tab="holdings"><span class="ti">▤</span>보유</a>
+  <a href="#/score" data-tab="score"><span class="ti">↗</span>성적</a>
+  <a href="#/settings" data-tab="settings"><span class="ti">⚙</span>설정</a>
+</nav>
+<div id="toast" role="status" hidden></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
