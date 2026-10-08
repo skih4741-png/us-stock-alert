@@ -161,7 +161,47 @@ const ACTIONS = {
   data: function (r) {
     if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
     const blobs = readBlobs_();
-    return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [] };
+    return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [],
+             perf: parse_(blobs.perf), weekly: parse_(blobs.weekly), paper: paperRows_() };
+  },
+
+  /* ---- 3단계: 모의투자 (가상 1,000달러, 실제 주문 없음) ---- */
+  paperAdd: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const t = String(r.t || '').toUpperCase();
+    const qty = Math.floor(Number(r.qty)), px = Number(r.price), day = String(r.date || '');
+    if (!/^[A-Z][A-Z.\-]{0,9}$/.test(t)) return { ok: false, error: '종목 코드가 올바르지 않아요.' };
+    if (!(qty >= 1 && qty <= 100000)) return { ok: false, error: '수량은 1주 이상으로 넣어 주세요.' };
+    if (!(px > 0 && px < 1e6) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: '가격 정보가 없어요. 새로고침 후 다시 해 주세요.' };
+    const rows = paperRows_();
+    const cash = paperCash_(rows);
+    if (qty * px > cash + 1e-6) return { ok: false, error: '모의 계좌 현금이 부족해요. 남은 현금 $' + cash.toFixed(2) };
+    const id = rows.reduce(function (m, x) { return Math.max(m, Number(x.id) || 0); }, 0) + 1;
+    const num = function (v) { const n = Number(v); return n > 0 ? String(Math.round(n * 100) / 100) : ''; };
+    paperWrite_(null, [String(id), day, t, String(qty), String(px), num(r.stop), num(r.target), '', '', '', '']);
+    return { ok: true, id: id, cash: Math.round((cash - qty * px) * 100) / 100, paper: paperRows_() };
+  },
+
+  paperSell: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const px = Number(r.price), day = String(r.date || '');
+    if (!(px > 0 && px < 1e6) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: '가격 정보가 없어요.' };
+    const row = paperRows_().filter(function (x) { return x.id === String(r.id) && !x.sold_date; })[0];
+    if (!row) return { ok: false, error: '이미 팔았거나 없는 거래예요.' };
+    const v = row.values.slice();
+    v[7] = day; v[8] = String(px); v[9] = String(r.why || '직접 팔기').slice(0, 60);
+    paperWrite_(row.rowNo, v);
+    return { ok: true, paper: paperRows_() };
+  },
+
+  paperNote: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const row = paperRows_().filter(function (x) { return x.id === String(r.id); })[0];
+    if (!row) return { ok: false, error: '없는 거래예요.' };
+    const v = row.values.slice();
+    v[10] = String(r.note || '').replace(/[\r\n]+/g, ' ').slice(0, 200);
+    paperWrite_(row.rowNo, v);
+    return { ok: true, paper: paperRows_() };
   },
 
   history: function (r) {
@@ -231,6 +271,46 @@ function readBlobs_() {
     outp[k] = parts[k].sort(function (x, y) { return x[0] - y[0]; }).map(function (x) { return x[1]; }).join('');
   });
   return outp;
+}
+
+const PAPER_COLS = ['번호', '담은 날', '종목', '수량', '담은 가격', '손절', '1차 목표', '판 날', '판 가격', '판 이유', '회고'];
+const PAPER_START = 1000;
+function paperSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
+  let sh = ss.getSheetByName('모의 거래');
+  if (!sh) {
+    sh = ss.insertSheet('모의 거래');
+    sh.getRange(1, 1, 1, PAPER_COLS.length).setValues([PAPER_COLS]);
+  }
+  return sh;
+}
+function paperRows_() {
+  const sh = paperSheet_();
+  const vals = sh.getDataRange().getDisplayValues();
+  const out = [];
+  for (let i = 1; i < vals.length; i++) {
+    const v = vals[i].slice(0, PAPER_COLS.length);
+    while (v.length < PAPER_COLS.length) v.push('');
+    if (!v[0]) continue;
+    out.push({ rowNo: i + 1, values: v, id: String(v[0]), date: v[1], t: v[2], qty: Number(v[3]), price: Number(v[4]),
+               stop: Number(v[5]) || null, target: Number(v[6]) || null, sold_date: v[7], sold_price: Number(v[8]) || null,
+               why: v[9], note: v[10] });
+  }
+  return out;
+}
+function paperCash_(rows) {
+  return rows.reduce(function (c, x) {
+    c -= x.qty * x.price;
+    if (x.sold_date && x.sold_price) c += x.qty * x.sold_price;
+    return c;
+  }, PAPER_START);
+}
+function paperWrite_(rowNo, values) {
+  const sh = paperSheet_();
+  const n = rowNo || sh.getLastRow() + 1;
+  const rg = sh.getRange(n, 1, 1, PAPER_COLS.length);
+  rg.setNumberFormat('@');   // 날짜·숫자를 글자 그대로 저장 (시트가 날짜로 바꾸지 않게)
+  rg.setValues([values]);
 }
 
 function pushSheet_() {

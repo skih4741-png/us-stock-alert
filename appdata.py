@@ -39,9 +39,32 @@ def _num(x, nd=2):
     return None if math.isnan(x) or math.isinf(x) else round(x, nd)
 
 
+TREND5 = [
+    ("주가가 200일선 위", lambda t: t["close"] > t["ma200"]),
+    ("이평선 정배열 (20 > 50 > 200일)", lambda t: t["ma20"] > t["ma50"] > t["ma200"]),
+    ("MACD가 신호선 위", lambda t: bool(t.get("macd_above"))),
+    ("RSI 40~70 (과열 아님)", lambda t: t.get("rsi") is not None and 40 <= t["rsi"] <= 70),
+    ("거래량이 20일 평균 이상", lambda t: (t.get("vol_ratio") or 0) >= 1.0),
+]
+
+
+def trend5(t: dict | None) -> list:
+    """F-A8 추세 합류 5조건 (참고용, 점수에는 섞지 않아요). [[조건, 충족], ...]"""
+    if not t:
+        return []
+    out = []
+    for label, fn in TREND5:
+        try:
+            out.append([label, bool(fn(t))])
+        except Exception:
+            out.append([label, False])
+    return out
+
+
 def pick_view(p: dict) -> dict:
     pl = p.get("plan") or {}
     return {
+        "trend5": trend5(p.get("tech")),
         "t": p["ticker"], "name": p.get("name", ""), "price": _num(p["price"]), "total": _num(p["total"], 0),
         "cats": {k: _num(v, 0) for k, v in (p.get("cats") or {}).items()},
         "reasons": p.get("reasons", []), "tags": p.get("tags", []), "etf": bool(p.get("etf")),
@@ -87,6 +110,7 @@ def holding_view(h: dict, lv: dict | None, hits: list[dict], r: dict | None, act
     label, tone = conclusion(hits)
     out = {"t": h["ticker"], "name": (r or {}).get("name", ""), "qty": _num(h.get("qty")), "avg": _num(h.get("avg")),
            "conclusion": label, "tone": tone, "action": action, "hits": [x["why"] for x in hits],
+           "rules": sorted({x["rule"] for x in hits}),
            "total": _num((r or {}).get("total"), 0), "cats": {k: _num(v, 0) for k, v in ((r or {}).get("cats") or {}).items()},
            "reasons": (r or {}).get("reasons", [])}
     if lv:

@@ -161,3 +161,22 @@ details.sig .kv { padding: 0 2px 12px 22px; }
 #sheet[hidden] { display: none; }
 .sheet-in { background: var(--bg); width: 100%; max-width: 560px; border-radius: 16px 16px 0 0; padding: 20px 20px calc(20px + var(--safe-b)); }
 .sheet-in p { margin: 8px 0 0; line-height: 1.6; }
+/* 3단계: 추세 합류 · 매도 규칙 · 성적 */
+ul.checks { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+ul.checks li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+ul.checks li:last-child { border-bottom: 0; }
+ul.checks li.ok { color: var(--ink); }
+ul.checks li.no { color: var(--sub); }
+ul.checks li.hit { color: var(--bad); font-weight: 600; }
+.btn.sm { min-height: 40px; padding: 8px; font-size: 14px; margin-top: 10px; }
+.note-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.note-row input { flex: 1; margin: 0; }
+select { width: 100%; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin: 4px 0 4px; }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.tbl th, table.tbl td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
+table.tbl th:first-child, table.tbl td:first-child { text-align: left; color: var(--sub); }
+pre.weekly { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
+.good-t { color: var(--good); } .bad-t { color: var(--bad); }
+.pl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.plbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); margin: 4px 0 12px; }
+.plbar .g { background: var(--good); } .plbar .l { background: var(--bad); }

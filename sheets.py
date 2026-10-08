@@ -20,10 +20,12 @@ TABS = {
     "설정": ["항목", "값", "설명"],
     "오늘 리스트": ["날짜", "시장 국면", "가격대", "판정", "순위", "종목", "회사명", "주가", "총점", "추세", "가치", "성장", "안전",
                 "이유", "매수 구간", "손절", "1차 목표", "유효 기한", "연속 일수", "어제 대비", "표시", "쉬운 설명", "주의 한 줄", "위험 경고"],
-    "신호 기록": ["날짜", "시장 국면", "종목", "판정", "순위", "가격대", "그날 주가", "총점", "손절", "1차 목표", "5일 뒤 수익률", "20일 뒤 수익률"],
+    "신호 기록": ["날짜", "시장 국면", "종목", "판정", "순위", "가격대", "그날 주가", "총점", "손절", "1차 목표", "5일 뒤 수익률", "20일 뒤 수익률",
+              "SPY 5일", "SPY 20일", "결과"],
     "실행 기록": ["날짜", "시각", "종류", "성공/실패", "분석한 종목 수", "걸린 시간(초)", "막힌 단계", "메모"],
     "앱 데이터": ["키", "순번", "내용"],
     "푸시 구독": ["등록 시각", "기기", "종류", "구독"],
+    "모의 거래": ["번호", "담은 날", "종목", "수량", "담은 가격", "손절", "1차 목표", "판 날", "판 가격", "판 이유", "회고"],
 }
 CHUNK = 40000  # 구글 시트 한 칸은 5만 자까지라 나눠서 저장
 
@@ -83,6 +85,9 @@ class Store:
         df = df.reindex(columns=TABS[tab]).fillna("")
         if self.gs:
             ws = self.gs.worksheet(tab)
+            need_r, need_c = len(df) + 1, len(TABS[tab])
+            if ws.row_count < need_r or ws.col_count < need_c:
+                ws.resize(rows=max(ws.row_count, need_r + 50), cols=max(ws.col_count, need_c))
             ws.clear()
             ws.update([TABS[tab]] + df.astype(str).values.tolist(), "A1")
         else:
@@ -93,7 +98,10 @@ class Store:
             return
         df = pd.DataFrame(rows).reindex(columns=TABS[tab]).fillna("")
         if self.gs:
-            self.gs.worksheet(tab).append_rows(df.astype(str).values.tolist(), value_input_option="USER_ENTERED")
+            ws = self.gs.worksheet(tab)
+            if ws.col_count < len(TABS[tab]):
+                ws.resize(cols=len(TABS[tab]))
+            ws.append_rows(df.astype(str).values.tolist(), value_input_option="USER_ENTERED")
         else:
             p = LOCAL / f"{tab}.csv"
             old = self.read(tab)

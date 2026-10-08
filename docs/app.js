@@ -1,4 +1,4 @@
-/* 미국주식 알림 앱 — 1단계 (로그인 · 홈 · 후보 · 보유 · 상세 · 알림 · 설정) */
+/* 미국주식 알림 앱 — 1~3단계 (로그인 · 홈 · 후보 · 보유 · 상세 · 알림 · 성적·모의투자 · 설정) */
 (function () {
   "use strict";
   const CFG = window.APP_CONFIG || {};
@@ -26,9 +26,9 @@
   const S = {
     token: store.get("token") || store.get("token", sessionStorage),
     scope: store.get("scope") || store.get("scope", sessionStorage),
-    data: null, alerts: [], loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
+    data: null, alerts: [], perf: null, weekly: null, paper: [], loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -39,7 +39,7 @@
   }
   function clearAll() {
     setSession(null, null);
-    store.del("cache"); S.data = null; S.alerts = [];
+    store.del("cache"); S.data = null; S.alerts = []; S.perf = null; S.weekly = null; S.paper = [];
   }
 
   /* ---------- 서버 ---------- */
@@ -99,14 +99,18 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || [];
-        store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, at: Date.now() }));
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || [];
+        saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
       S.error = navigator.onLine ? e.message : "인터넷이 없어요. 마지막으로 받은 내용을 보여드려요.";
     }
     S.loading = false;
     render();
+  }
+
+  function saveCache() {
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -409,6 +413,12 @@
   const findPick = t => allPicks().find(p => p.t === t);
   const findHold = t => (S.data.holdings || []).find(h => h.t === t);
 
+  function homePaperCard() {
+    if (!(S.paper || []).length) return "";
+    const m = moneySummary(paperTrades()), net = m.gain + m.loss;
+    return '<a class="card" href="#/score" style="display:block;color:var(--ink)"><div class="row between"><span class="sub">모의 계좌 (가상 $1,000)</span><b class="num ' +
+      (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + '</b></div><div class="small num">번 돈 ' + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + " · 성적 보기 →</div></a>";
+  }
   function viewHome() {
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
@@ -426,6 +436,7 @@
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
+      homePaperCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -488,14 +499,16 @@
       '<div class="small">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
-      "<h2>점수</h2>" + scoreBars(p.cats) +
+      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
       "<dt>손절</dt><dd>" + fmt(pl.stop) + " (" + fmt(pl.risk_pct, 1) + "%)</dd>" +
       "<dt>1차 목표</dt><dd>" + fmt(pl.target) + " (손익비 " + fmt(pl.rr, 1) + ")</dd>" +
       "<dt>이 위로 시작하면 추격 금지</dt><dd>" + fmt(pl.skip_if_open_above) + "</dd>" +
       "<dt>유효 기한</dt><dd>" + esc(pl.valid_until || "") + "</dd></dl></div>" +
+      paperAddHtml(p) +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
+    bindPaperAdd(p);
     const segs = {
       fin: finHtml(finFor(p.t)),
       pro: '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
@@ -538,8 +551,8 @@
       "<dt>현재가</dt><dd>$" + fmt(h.price) + "</dd><dt>평단</dt><dd>$" + fmt(h.avg) + "</dd><dt>수량</dt><dd>" + fmt(h.qty, 0) + "</dd>" +
       "<dt>수익률</dt><dd>" + pct(h.gain_pct) + "</dd><dt>손절선</dt><dd>$" + fmt(h.stop) + " (" + (h.to_stop_pct == null ? "—" : fmt(h.to_stop_pct, 1) + "% 위") + ")</dd>" +
       "<dt>1차 목표</dt><dd>$" + fmt(h.target) + "</dd><dt>총점</dt><dd>" + (h.total == null ? "—" : fmt(h.total, 0)) + "</dd></dl></div>" +
-      "<h2>걸린 매도 규칙</h2>" + (h.hits && h.hits.length ? '<div class="card"><ul class="plain">' + h.hits.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>"
-        : '<div class="card">걸린 규칙이 없어요. 원칙대로 보유하면 돼요.</div>') +
+      "<h2>매도 규칙 7개</h2>" + rulesHtml7(h) +
+      (h.hits && h.hits.length ? '<div class="card"><b>걸린 이유</b><ul class="plain">' + h.hits.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>" : "") +
       (h.cats && Object.keys(h.cats).length ? "<h2>점수</h2>" + scoreBars(h.cats) : "") +
       (h.reasons && h.reasons.length ? '<h2>좋은 점</h2><div class="card"><ul class="plain">' + h.reasons.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>" : "") +
       '<p class="foot">손절선을 바꾸려면 구글 시트 \'보유 종목\' 탭에 적어 주세요 · ' + esc(DISCLAIMER) + "</p>");
@@ -556,9 +569,202 @@
         : '<div class="empty">아직 알림이 없어요</div>') + "</div>");
   }
 
+  /* ---------- 3단계: 추세 합류 · 매도 규칙 7개 · 모의투자 · 성적 ---------- */
+  const PAPER_START = 1000;
+  function trendHtml(list) {
+    if (!list || !list.length) return "";
+    const n = list.filter(x => x[1]).length;
+    return '<h2>추세 합류 ' + n + '/5 <span class="small">(참고용 · 점수에 안 섞어요)</span></h2><div class="card"><ul class="checks">' +
+      list.map(x => '<li class="' + (x[1] ? "ok" : "no") + '">' + (x[1] ? "✓" : "–") + " " + esc(x[0]) + "</li>").join("") + "</ul></div>";
+  }
+  const RULES7 = [["stop", "손절선"], ["target", "1차 목표 (분할익절)"], ["trail", "이익 지키기 (추적 손절)"], ["stale", "제자리 (오래 안 오름)"],
+    ["score", "점수 하락"], ["regime", "시장 국면 (하락장 전환)"], ["earnings", "실적 발표 전"]];
+  function rulesHtml7(h) {
+    if (!h.rules) return '<div class="card sub">규칙별 상태는 다음 아침 리포트부터 보여요.</div>';
+    const hit = h.rules;
+    return '<div class="card"><ul class="checks">' + RULES7.map(r => {
+      const on = hit.indexOf(r[0]) >= 0;
+      return '<li class="' + (on ? "hit" : "ok") + '">' + (on ? "●" : "✓") + " " + esc(r[1]) + '<span class="small"> · ' + (on ? "걸림" : "괜찮음") + "</span></li>";
+    }).join("") + "</ul></div>";
+  }
+  function paperCash() {
+    return (S.paper || []).reduce((c, x) => c - x.qty * x.price + (x.sold_date && x.sold_price ? x.qty * x.sold_price : 0), PAPER_START);
+  }
+  function suggestQty(p) {
+    const pl = p.plan || {}, cash = paperCash();
+    if (!p.price || p.price > cash) return 0;
+    const risk = pl.stop && p.price > pl.stop ? p.price - pl.stop : p.price * 0.07;
+    const byRisk = Math.floor(PAPER_START * 0.03 / risk);
+    const byCap = Math.floor(cash * 0.6 / p.price);
+    return Math.max(1, Math.min(byRisk, byCap));
+  }
+  function paperAddHtml(p) {
+    const cash = paperCash(), q = suggestQty(p);
+    const held = (S.paper || []).some(x => x.t === p.t && !x.sold_date);
+    return '<h2>모의투자에 담기</h2><div class="card" id="paperAdd"><div class="small">가상 1,000달러 계좌 · 오늘 기준가 $' + fmt(p.price) +
+      " (미국 " + esc(S.data.date) + " 종가) · 남은 현금 $" + fmt(cash) + "</div>" +
+      (held ? '<div class="msg note">이미 모의 계좌에 담은 종목이에요. 더 담으면 따로 기록돼요.</div>' : "") +
+      (q ? '<label for="pq">수량 (추천 ' + q + '주 · 한 번에 잃는 돈이 계좌의 3% 이내)</label><input id="pq" inputmode="numeric" value="' + q + '">' +
+        '<div class="small num" id="pqc"></div><button class="btn" id="pqBtn">모의 계좌에 담기</button><div id="pqMsg"></div>'
+        : '<div class="small">남은 현금보다 비싸서 담을 수 없어요.</div>') + "</div>";
+  }
+  function bindPaperAdd(p) {
+    const inp = document.getElementById("pq"), btn = document.getElementById("pqBtn");
+    if (!inp) return;
+    const show = () => { const q = Math.floor(Number(inp.value) || 0); document.getElementById("pqc").textContent = q > 0 ? "금액 $" + fmt(q * p.price) : ""; };
+    inp.addEventListener("input", show); show();
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const out = document.getElementById("pqMsg");
+      try {
+        const pl = p.plan || {};
+        const j = await api("paperAdd", { token: S.token, t: p.t, qty: Math.floor(Number(inp.value) || 0), price: p.price, date: S.data.date, stop: pl.stop, target: pl.target });
+        if (!j.ok) { out.innerHTML = '<div class="msg err">' + esc(j.error) + "</div>"; btn.disabled = false; return; }
+        S.paper = j.paper || S.paper; saveCache();
+        toast(p.t + " 모의 계좌에 담았어요"); go("#/score");
+      } catch (e) { out.innerHTML = '<div class="msg err">' + esc(e.message) + "</div>"; btn.disabled = false; }
+    };
+  }
+  function lastPrice(t) {
+    const pr = S.perf && S.perf.prices && S.perf.prices[t];
+    const pk = S.data && findPick(t);
+    if (pk && S.data.date && (!pr || S.data.date >= pr.date)) return { close: pk.price, date: S.data.date };
+    return pr || null;
+  }
+  function paperTrades() {
+    const extra = {};
+    ((S.perf && S.perf.paper && S.perf.paper.trades) || []).forEach(x => { extra[x.id] = x; });
+    return (S.paper || []).map(x => {
+      const e = extra[x.id] || {}, lp = x.sold_date ? null : lastPrice(x.t);
+      const now = x.sold_date ? x.sold_price : (lp ? lp.close : null);
+      const ret = now ? (now / x.price - 1) * 100 : null;
+      return Object.assign({}, x, { now: now, nowDate: lp ? lp.date : x.sold_date, ret: ret, pnl: now ? x.qty * (now - x.price) : null,
+        spy: e.spy, excess: e.excess, pred: e.pred || "", below: !x.sold_date && now && x.stop && now < x.stop });
+    }).reverse();
+  }
+  const usd = v => v == null ? "—" : (v > 0 ? "+$" : v < 0 ? "-$" : "$") + fmt(Math.abs(v));
+  function moneySummary(trades) {
+    const t = trades.filter(x => x.pnl != null);
+    const sum = f => t.filter(f).reduce((a, x) => a + x.pnl, 0);
+    const best = t.slice().sort((a, b) => b.pnl - a.pnl)[0], worst = t.slice().sort((a, b) => a.pnl - b.pnl)[0];
+    return { gain: sum(x => x.pnl > 0), loss: sum(x => x.pnl <= 0), wins: t.filter(x => x.pnl > 0).length, losses: t.filter(x => x.pnl <= 0).length,
+      realized: sum(x => !!x.sold_date), unrealized: sum(x => !x.sold_date), best: best, worst: worst };
+  }
+  function moneyCard(m) {
+    const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
+    return '<div class="card"><div class="sub">얼마 벌고 얼마 잃었나</div>' +
+      '<div class="pl"><div><div class="small">번 돈 (' + m.wins + '건)</div><div class="big num good-t">' + usd(m.gain) + "</div></div>" +
+      '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
+      '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
+      '<dl class="kv num"><dt>합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd>" +
+      "<dt>판 거래 (확정)</dt><dd>" + usd(m.realized) + "</dd><dt>보유 중 (아직 안 판 것)</dt><dd>" + usd(m.unrealized) + "</dd>" +
+      (m.best ? "<dt>가장 많이 번 거래</dt><dd>" + esc(m.best.t) + " " + usd(m.best.pnl) + "</dd>" : "") +
+      (m.worst && m.worst.pnl < 0 ? "<dt>가장 많이 잃은 거래</dt><dd>" + esc(m.worst.t) + " " + usd(m.worst.pnl) + "</dd>" : "") +
+      "</dl><div class=\"small\">수수료·환전 비용은 빼지 않은 가상 숫자예요</div></div>";
+  }
+  const signTone = v => v == null ? "" : v > 0 ? "good" : v < 0 ? "bad" : "";
+  function statRow(label, st, spy) {
+    if (!st || !st.n) return "<dt>" + esc(label) + "</dt><dd>아직 없음</dd>";
+    return "<dt>" + esc(label) + "</dt><dd>" + st.n + "개 · 평균 " + pct(st.avg) + " · 수익 비율 " + st.win + "%" +
+      (spy != null ? " · SPY " + pct(spy) : "") + "</dd>";
+  }
+
   function viewScore() {
-    appShell("score", '<div class="head"><h1>성적 · 모의투자</h1></div><div class="card"><b>3단계에서 열려요</b>' +
-      '<p class="sub">모의 계좌, SPY 대비 성적, "처음 20번 vs 최근 20번" 비교, 회고 한 줄이 들어올 자리예요. 그전까지 신호 성적은 일요일 주간 요약(슬랙)으로 받아요.</p></div>');
+    if (!S.token) return;
+    const pf = (S.perf && S.perf.paper) || {}, sg = (S.perf && S.perf.signals) || {};
+    const trades = paperTrades(), open = trades.filter(x => !x.sold_date), closed = trades.filter(x => x.sold_date);
+    const cash = paperCash();
+    const eq = cash + open.reduce((s, x) => s + x.qty * (x.now || x.price), 0);
+    const ret = (eq / PAPER_START - 1) * 100;
+    const seg = S.scoreSeg || "acct";
+    const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
+    let body = "";
+    if (seg === "acct") {
+      body = '<div class="card"><div class="sub">모의 계좌 평가금액</div><div class="big num">$' + fmt(eq) + ' <span class="badge ' + signTone(ret) + '">' + pct(ret) + "</span></div>" +
+        '<div class="small num">현금 $' + fmt(cash) + " · 보유 " + open.length + "종목 · 시작 $1,000" +
+        (pf.excess_pct != null ? " · 같은 돈을 SPY에 넣었을 때보다 " + pct(pf.excess_pct) + "p" : "") + "</div></div>" +
+        (trades.length ? moneyCard(moneySummary(trades)) : "") +
+        (open.some(x => x.below) ? '<div class="band bad">손절선 아래 종목이 있어요. 규칙대로라면 팔 차례예요.</div>' : "") +
+        "<h2>보유 중</h2>" + (open.length ? open.map(x =>
+          '<div class="card"><div class="row between"><b>' + esc(x.t) + '</b><span class="badge ' + (x.below ? "bad" : signTone(x.ret)) + '">' + (x.below ? "손절선 아래" : pct(x.ret)) + "</span></div>" +
+          '<div class="small num">' + esc(x.date) + " · " + fmt(x.qty, 0) + "주 × $" + fmt(x.price) + " → $" + fmt(x.now) + (x.nowDate ? " (" + esc(x.nowDate) + ")" : "") +
+          " · 손절 " + fmt(x.stop) + " · 목표 " + fmt(x.target) + "</div>" +
+          '<div class="num ' + (x.pnl >= 0 ? "good-t" : "bad-t") + '"><b>' + usd(x.pnl) + "</b> 평가손익</div>" +
+          '<button class="btn ghost sm" data-sell="' + esc(x.id) + '">팔기</button><div id="sell' + esc(x.id) + '"></div></div>').join("")
+          : '<div class="empty">아직 담은 종목이 없어요. 매수 후보 → 종목 상세 → "모의투자에 담기"</div>') +
+        "<h2>판 거래 · 회고</h2>" + (closed.length ? closed.map(x =>
+          '<div class="card"><div class="row between"><b>' + esc(x.t) + '</b><span class="badge ' + signTone(x.ret) + '">' + pct(x.ret) + "</span></div>" +
+          '<div class="small num">' + esc(x.date) + " → " + esc(x.sold_date) + " · $" + fmt(x.price) + " → $" + fmt(x.sold_price) + " · " + esc(x.why || "") +
+          (x.excess != null ? " · SPY 대비 " + pct(x.excess) + "p" : "") + "</div>" +
+          '<div class="num ' + (x.pnl >= 0 ? "good-t" : "bad-t") + '"><b>' + usd(x.pnl) + "</b> " + (x.pnl >= 0 ? "벌었어요" : "잃었어요") + "</div>" +
+          '<div class="note-row"><input type="text" maxlength="200" data-note="' + esc(x.id) + '" placeholder="회고 한 줄 (왜 샀고, 무엇을 배웠나)" value="' + esc(x.note || "") + '">' +
+          '<button class="chip" data-save="' + esc(x.id) + '">저장</button></div></div>').join("")
+          : '<div class="empty">판 거래가 생기면 여기에 회고를 남겨요</div>');
+    } else if (seg === "skill") {
+      const f = pf.first20 || {}, l = pf.last20 || {}, n = pf.n || trades.length;
+      body = '<div class="card"><b>실력일까, 운일까</b><p class="sub">한두 번 번 것은 운일 수 있어요. 거래가 20번 넘게 쌓였을 때 아래 숫자가 SPY보다 꾸준히 나으면 실력 쪽에 가까워요.</p>' +
+        '<dl class="kv num"><dt>거래 수</dt><dd>' + n + "번" + (n < 20 ? " (20번 전에는 판단 보류)" : "") + "</dd>" +
+        "<dt>예상 적중 (목표가 먼저 닿음)</dt><dd>" + (pf.pred && pf.pred.n ? pf.pred.hit + "/" + pf.pred.n + " (" + pf.pred.rate + "%)" : "아직 없음") + "</dd>" +
+        "<dt>평균 이익 ÷ 평균 손실</dt><dd>" + (pf.all && pf.all.pf != null ? fmt(pf.all.pf, 2) + (pf.all.pf >= 1.5 ? " ✓" : "") : "—") + "</dd>" +
+        "<dt>거래당 SPY 대비</dt><dd>" + (pf.avg_excess != null ? pct(pf.avg_excess) + "p" : "—") + "</dd></dl></div>" +
+        '<h2>처음 20번 vs 최근 20번</h2><div class="card"><table class="tbl num"><tr><th></th><th>처음</th><th>최근</th></tr>' +
+        "<tr><td>거래</td><td>" + (f.n || 0) + "</td><td>" + (l.n || 0) + "</td></tr>" +
+        "<tr><td>평균 수익</td><td>" + pct(f.avg) + "</td><td>" + pct(l.avg) + "</td></tr>" +
+        "<tr><td>SPY 대비</td><td>" + pct(f.excess) + "</td><td>" + pct(l.excess) + "</td></tr>" +
+        "<tr><td>수익 비율</td><td>" + (f.win == null ? "—" : f.win + "%") + "</td><td>" + (l.win == null ? "—" : l.win + "%") + "</td></tr></table>" +
+        '<div class="small">' + (n < 40 ? "거래가 40번이 되기 전에는 두 묶음이 겹쳐요." : "최근이 처음보다 나빠지지 않는지가 증액 기준 중 하나예요(11장).") + "</div></div>" +
+        '<p class="foot">숫자는 매일 아침 리포트 때 다시 계산돼요' + (S.perf && S.perf.at ? " · " + esc(whenText(S.perf.at)) : "") + "</p>";
+    } else if (seg === "sig") {
+      const hit = sg.hit || {};
+      body = '<div class="card"><b>아침 후보를 그대로 샀다면</b><p class="sub">매일 아침 매수 후보를 기록해 두고, 5일·20일 뒤 수익률을 같은 기간 SPY와 비교해요.</p><dl class="kv num">' +
+        statRow("5일 뒤", sg.d5, sg.d5 && sg.d5.spy) + statRow("20일 뒤", sg.d20, sg.d20 && sg.d20.spy) +
+        "<dt>목표 먼저 / 손절 먼저</dt><dd>" + (hit.n ? hit.target + " / " + hit.stop + " (둘 다 안 닿음 " + hit.none + ")" : "아직 없음") + "</dd></dl>" +
+        '<div class="small">기록 ' + (sg.n || 0) + "개" + (sg.since ? " · " + esc(sg.since) + "부터" : "") + "</div></div>" +
+        [5, 20].map(n => { const d = sg["d" + n]; return d && d.n && d.usd_gain != null ? '<div class="card"><div class="sub">후보마다 100달러씩 사서 ' + n + "일 뒤 팔았다면</div>" +
+          '<div class="pl"><div><div class="small">번 돈</div><div class="big num good-t">' + usd(d.usd_gain) + '</div></div><div><div class="small">잃은 돈</div><div class="big num bad-t">' + usd(d.usd_loss) + "</div></div></div>" +
+          '<dl class="kv num"><dt>합계 (' + d.n + "번)</dt><dd><b class=\"" + (d.usd_net >= 0 ? "good-t" : "bad-t") + "\">" + usd(d.usd_net) + "</b></dd><dt>같은 돈으로 SPY</dt><dd>" + usd(d.spy * d.n) + "</dd></dl></div>" : ""; }).join("") +
+        Object.keys(sg.groups || {}).map(k => (sg.groups[k] || []).length ? "<h2>" + esc(k) + "별 (5일 뒤)</h2><div class=\"card\"><dl class=\"kv num\">" +
+          sg.groups[k].map(g => "<dt>" + esc(g.name) + "</dt><dd>" + g.n + "개 · " + pct(g.avg) + " · " + g.win + "%</dd>").join("") + "</dl></div>" : "").join("") +
+        "<h2>최근 신호</h2><div class=\"list\">" + ((sg.recent || []).length ? sg.recent.map(r =>
+          '<div class="item" style="cursor:default"><span class="tk">' + esc(r.t) + '</span><div class="grow small">' + esc(r.date) + " · " + esc(r.band || "") +
+          "<br>5일 " + (r.r5 == null ? "—" : pct(r.r5)) + " · 20일 " + (r.r20 == null ? "—" : pct(r.r20)) + '</div><span class="badge ' +
+          (r.result === "목표 먼저" ? "good" : r.result === "손절 먼저" ? "bad" : "") + '">' + esc(r.result || "진행 중") + "</span></div>").join("")
+          : '<div class="empty">아직 기록이 없어요</div>') + "</div>";
+    } else {
+      const w = S.weekly;
+      body = w && w.lines ? '<div class="card"><div class="small">' + esc(whenText(w.at)) + '</div><pre class="weekly">' + esc(w.lines.join("\n")) + "</pre></div>"
+        : '<div class="empty">주간 리포트는 일요일에 만들어져요</div>';
+    }
+    appShell("score", '<div class="head"><div><h1>성적 · 모의투자</h1><div class="small">가상 1,000달러 · 실제 주문 없음</div></div></div>' + statusLine() +
+      '<div class="segs">' + segBtn("acct", "모의 계좌") + segBtn("skill", "실력 vs 운") + segBtn("sig", "신호 성적") + segBtn("week", "주간 리포트") + "</div>" +
+      body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
+    $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
+    $app.querySelectorAll("[data-sell]").forEach(b => b.addEventListener("click", () => {
+      const x = open.find(o => o.id === b.dataset.sell), box = document.getElementById("sell" + x.id);
+      box.innerHTML = '<label>판 가격 (최근 종가 기준, 바꿀 수 있어요)</label><input type="text" inputmode="decimal" id="sp' + x.id + '" value="' + (x.now ? x.now.toFixed(2) : "") + '">' +
+        '<label>판 이유</label><select id="sw' + x.id + '"><option>손절선 아래</option><option>1차 목표 도달</option><option>매도 규칙 (점수·추세)</option><option>직접 판단</option></select>' +
+        '<button class="btn" id="sb' + x.id + '">팔기 기록</button><div id="sm' + x.id + '"></div>';
+      if (x.below) document.getElementById("sw" + x.id).value = "손절선 아래";
+      document.getElementById("sb" + x.id).onclick = async ev => {
+        ev.target.disabled = true;
+        const price = Number(document.getElementById("sp" + x.id).value);
+        const day = (x.nowDate && /^\d{4}-\d{2}-\d{2}$/.test(x.nowDate)) ? x.nowDate : new Date().toISOString().slice(0, 10);
+        try {
+          const j = await api("paperSell", { token: S.token, id: x.id, price: price, date: day, why: document.getElementById("sw" + x.id).value });
+          if (!j.ok) { document.getElementById("sm" + x.id).innerHTML = '<div class="msg err">' + esc(j.error) + "</div>"; ev.target.disabled = false; return; }
+          S.paper = j.paper; saveCache(); toast(x.t + " 팔기를 기록했어요. 회고 한 줄 남겨 주세요"); viewScore();
+        } catch (e) { document.getElementById("sm" + x.id).innerHTML = '<div class="msg err">' + esc(e.message) + "</div>"; ev.target.disabled = false; }
+      };
+    }));
+    $app.querySelectorAll("[data-save]").forEach(b => b.addEventListener("click", async () => {
+      const id = b.dataset.save, inp = $app.querySelector('[data-note="' + id + '"]');
+      b.disabled = true;
+      try {
+        const j = await api("paperNote", { token: S.token, id: id, note: inp.value });
+        if (j.ok) { S.paper = j.paper; saveCache(); toast("회고를 저장했어요"); } else toast(j.error);
+      } catch (e) { toast(e.message); }
+      b.disabled = false;
+    }));
   }
 
   function viewSettings() {

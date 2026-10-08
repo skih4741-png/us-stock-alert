@@ -29,6 +29,7 @@ import financials
 import lists
 import market
 import notify
+import performance
 import prices
 import push
 import scoring
@@ -359,6 +360,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             if app_only:
                 store.put_blob("daily", appdata.dumps(app))
                 print("[앱 데이터] 시트 '앱 데이터' 탭에 저장했어요")
+                save_perf(store, now)
             sent = {"mail": False, "slack": False}
         else:
             sent = notify.send_report(report)
@@ -375,6 +377,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 log.info("푸시 %d개 보냄", n)
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
+            save_perf(store, now)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                   "성공/실패": "성공", "분석한 종목 수": len(base), "걸린 시간(초)": took,
@@ -486,57 +489,90 @@ def run_watch(kind: str, dry: bool):
 # 주간 요약 · 신호 성적
 # ======================================================================
 
+def save_perf(store, now, notify_stops: bool = True) -> dict | None:
+    """3단계: 신호 성적·모의 계좌를 계산해 앱 '성적' 탭 데이터로 저장. 실패해도 리포트는 그대로."""
+    try:
+        perf = performance.update(store)
+        perf["at"] = now.isoformat(timespec="minutes")
+        store.put_blob("perf", appdata.dumps(appdata._clean(perf)))
+        hit = [x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")]
+        if hit and notify_stops:
+            body = ", ".join(hit) + " — 모의 계좌 종목이 손절선 아래예요. 성적 탭에서 팔지 정해 주세요."
+            appdata.add_alert(store, "paper", "모의 계좌 손절선 아래", body, perf["at"], "warn")
+            push.send(store, "모의 계좌 손절선 아래", body, "#/score", "daily", tag="paper")
+        return perf
+    except Exception as e:
+        log.warning("성적 계산 실패: %s", e)
+        return None
+
+
+def _fmt(v, unit="%"):
+    return "—" if v is None else f"{v:+.1f}{unit}"
+
+
 def run_weekly(dry: bool):
+    """F-A12 주간 리포트: 신호 성적 + 모의 계좌 + 보유 결론 변화 + 회고 알림 → 슬랙·메일·앱·푸시."""
     store = Store()
-    log_df = store.read("신호 기록")
-    if log_df.empty:
-        msg = "아직 신호 기록이 없어요."
-        print(msg) if dry else notify.send_text("주간 요약", msg)
-        return
-    tickers = sorted(set(log_df["종목"]))
-    hist = prices.download_history([t.replace(".", "-") for t in tickers], period="90d")
-    r5, r20 = [], []
-    for _, row in log_df.iterrows():
-        df = hist.get(row["종목"].replace(".", "-"))
-        v5 = v20 = ""
-        try:
-            base = float(row["그날 주가"])
-            idx = df.index.strftime("%Y-%m-%d")
-            pos = int(np.searchsorted(idx, row["날짜"]))
-            if pos + 5 < len(df):
-                v5 = f"{(df['Close'].iloc[pos + 5] / base - 1) * 100:.1f}"
-            if pos + 20 < len(df):
-                v20 = f"{(df['Close'].iloc[pos + 20] / base - 1) * 100:.1f}"
-        except Exception:
-            pass
-        r5.append(v5)
-        r20.append(v20)
-    log_df["5일 뒤 수익률"], log_df["20일 뒤 수익률"] = r5, r20
-    if not dry:
-        store.overwrite("신호 기록", log_df)
-    done = log_df[log_df["5일 뒤 수익률"] != ""].copy()
-    done["r5"] = done["5일 뒤 수익률"].astype(float)
-    lines = ["■ 지난 신호 성적 (5일 뒤 기준)"]
-    if len(done):
-        lines.append(f"전체 {len(done)}개 · 수익 비율 {(done['r5'] > 0).mean() * 100:.0f}% · 평균 {done['r5'].mean():+.1f}%")
-        for col in ("순위", "시장 국면", "가격대"):
-            g = done.groupby(col)["r5"].agg(["count", "mean", lambda s: (s > 0).mean() * 100])
-            lines.append(f"\n[{col}별]")
-            for k, v in g.iterrows():
-                lines.append(f"  {k}: {int(v['count'])}개 · 평균 {v['mean']:+.1f}% · 수익 비율 {v.iloc[2]:.0f}%")
+    now = config.now_kst()
+    perf = save_perf(store, now, notify_stops=False) if not dry else performance.update(store)
+    if perf is None:
+        perf = {"signals": {"n": 0}, "paper": {"n": 0}}
+    sg, pp = perf["signals"], perf["paper"]
+    lines = ["■ 지난 신호 성적"]
+    d5, d20 = sg.get("d5", {}), sg.get("d20", {})
+    if d5.get("n"):
+        lines.append(f"5일 뒤: {d5['n']}개 · 수익 비율 {d5['win']}% · 평균 {_fmt(d5['avg'])} (같은 기간 SPY {_fmt(d5.get('spy'))})")
+        lines.append(f"후보마다 100달러씩 샀다면(5일 뒤 팔기): 번 돈 +${d5['usd_gain']:,.2f} · 잃은 돈 -${abs(d5['usd_loss']):,.2f} · 합계 {d5['usd_net']:+,.2f}달러")
     else:
         lines.append("아직 5거래일이 지난 신호가 없어요.")
+    if d20.get("n"):
+        lines.append(f"20일 뒤: {d20['n']}개 · 수익 비율 {d20['win']}% · 평균 {_fmt(d20['avg'])} (SPY {_fmt(d20.get('spy'))})")
+    hit = sg.get("hit", {})
+    if hit.get("n"):
+        lines.append(f"목표가 먼저 {hit['target']} · 손절 먼저 {hit['stop']} · 20일 안에 둘 다 안 닿음 {hit['none']}")
+    for col, g in (sg.get("groups") or {}).items():
+        if g:
+            lines.append(f"[{col}별 5일] " + " / ".join(f"{x['name']} {x['n']}개 {_fmt(x.get('avg'))}" for x in g[:5]))
+
+    lines.append("\n■ 모의 계좌 (가상 1,000달러)")
+    if pp.get("n"):
+        lines.append(f"평가 ${pp['equity']:,.2f} ({_fmt(pp['ret'])}) · 같은 돈을 SPY에 넣었을 때보다 {_fmt(pp['excess_pct'])}p")
+        m = pp.get("money") or {}
+        if m:
+            lines.append(f"번 돈 +${m['gain']:,.2f} ({m['wins']}건) · 잃은 돈 -${abs(m['loss']):,.2f} ({m['losses']}건) · "
+                         f"판 거래 손익 {m['realized']:+,.2f}달러 · 보유 중 평가손익 {m['unrealized']:+,.2f}달러")
+        if pp["pred"]["n"]:
+            lines.append(f"예상 적중(목표가 먼저 닿음) {pp['pred']['hit']}/{pp['pred']['n']}")
+        if pp["no_note"]:
+            lines.append(f"회고를 안 쓴 거래 {pp['no_note']}개 — 앱 성적 탭에서 한 줄 남겨 주세요")
+    else:
+        lines.append("아직 담은 종목이 없어요. 종목 상세에서 '모의투자에 담기'를 눌러 시작해요.")
+
+    # 보유 결론 변화 (지난주 저장본과 비교)
+    try:
+        daily = json.loads(store.get_blob("daily") or "{}")
+        now_c = {h["t"]: h["conclusion"] for h in daily.get("holdings", [])}
+        prev_c = json.loads(store.get_blob("weekly_prev") or "{}")
+        changed = [f"{t} {prev_c[t]}→{c}" for t, c in now_c.items() if t in prev_c and prev_c[t] != c]
+        if prev_c:
+            lines.append("\n■ 보유 결론 변화 (지난주 대비)")
+            lines.append(", ".join(changed) if changed else "바뀐 종목이 없어요")
+        if not dry and now_c:
+            store.put_blob("weekly_prev", appdata.dumps(now_c))
+    except Exception as e:
+        log.info("보유 결론 비교 건너뜀: %s", e)
     lines.append("\n표본이 적을 때의 숫자는 우연일 수 있어요. 한 달 이상 쌓인 뒤에 판단하세요.")
     text = "\n".join(lines)
     if dry:
         print(text)
         return
     notify.send_text("주간 요약 · 신호 성적", text)
-    at = config.now_kst().isoformat(timespec="minutes")
+    at = now.isoformat(timespec="minutes")
     first = lines[1] if len(lines) > 1 else "지난 신호 성적이 나왔어요"
     try:
+        store.put_blob("weekly", appdata.dumps({"at": at, "lines": lines}))
         appdata.add_alert(store, "weekly", "주간 요약", first, at, "info")
-        push.send(store, "주간 요약 · 신호 성적", first, "#/alerts", "weekly")
+        push.send(store, "주간 요약 · 신호 성적", first, "#/score", "weekly")
     except Exception as e:
         log.warning("주간 요약 앱 알림 실패: %s", e)
 
