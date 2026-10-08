@@ -396,7 +396,14 @@
     $tabs.hidden = false;
     [...$tabs.querySelectorAll("a")].forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
     $app.innerHTML = html;
+    stickOffsets();
   }
+  // 위에 고정되는 줄(뒤로·제목) 높이를 재서, 그 아래 탭·필터 줄이 겹치지 않게 붙여요
+  function stickOffsets() {
+    const top = $app.querySelector(":scope > .back, :scope > .head");
+    document.documentElement.style.setProperty("--stickH", (top ? top.offsetHeight : 0) + "px");
+  }
+  window.addEventListener("resize", () => stickOffsets());
   function statusLine() {
     let s = "";
     if (S.loading) s += '<div class="small">새로 불러오는 중…</div>';

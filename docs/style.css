@@ -195,3 +195,13 @@ ol.plain { padding-left: 20px; margin: 6px 0; }
   width: calc(100% + 32px); margin: calc(-12px - var(--safe-t)) -16px 8px; padding: calc(10px + var(--safe-t)) 16px 10px;
   background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line); cursor: pointer; }
+/* 맨 위 제목 줄과 탭·필터 줄을 고정 (스크롤해도 바로 누를 수 있게) */
+#app > .head { position: sticky; top: 0; z-index: 30; box-sizing: border-box;
+  width: calc(100% + 32px); margin: calc(-12px - var(--safe-t)) -16px 8px; padding: calc(10px + var(--safe-t)) 16px 8px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); }
+#app > .head h1 { margin: 0; }
+#app > .segs, #app > .chips { position: sticky; top: var(--stickH, 0px); z-index: 29; box-sizing: border-box;
+  width: calc(100% + 32px); margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+#app > .chips { padding-top: 6px; padding-bottom: 6px; margin-top: 0; }
