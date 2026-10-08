@@ -10,7 +10,8 @@ DEFAULTS: dict[str, float | str] = {
     # 리스트
     "가격대 단위(달러)": 10,
     "가격대 개수": 11,            # 0~10 … 90~100, 100 이상
-    "보여줄 개수": 3,             # 가격대마다 매수 후보 수 (최대 15)
+    "보여줄 개수": 3,             # 가격대마다 개별 종목 매수 후보 수 (최대 15)
+    "ETF 개수": 1,                # 가격대마다 ETF·펀드 매수 후보 수 (0이면 ETF는 안 보냄)
     "보고 싶은 가격대 최대(달러)": 0,  # 0이면 전체, 50이면 50달러 이하 가격대만
     "예산 목록(달러)": "10,20,30,50,100",
     # 기본 거름망
@@ -72,6 +73,7 @@ def merge_settings(sheet_values: dict[str, str] | None) -> tuple[dict, list[str]
         else:
             cfg[key] = str(raw).strip()
     cfg["보여줄 개수"] = int(max(1, min(15, cfg["보여줄 개수"])))
+    cfg["ETF 개수"] = int(max(0, min(5, cfg["ETF 개수"])))
     return cfg, warnings
 
 

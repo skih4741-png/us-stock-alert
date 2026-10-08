@@ -38,6 +38,8 @@ from terms import REASON_LABEL, REGIME, SELL_ACTION, VERDICT
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
 STATE = Path(__file__).parent / "data" / "state.json"
+import re as _re
+FUND_NAME = _re.compile(r"\bETF\b|\bFund\b|Term Trust|Income Trust|Premium Income|Municipal|\bETN\b|Closed[- ]End|Opportunities Trust|Strategies Trust|Equity Trust|Technology Trust|Sciences Trust|Growth Trust", _re.I)
 
 
 def load_state() -> dict:
@@ -124,7 +126,18 @@ def run_daily(limit: int | None, dry: bool) -> dict:
         # ---- 재무 (추세 상·하위 + 보유) ----
         stage = "재무 점수"
         prelim = {t: scoring._scale(*scoring.score_trend(x, rs_pct.get(t))) for t, x in base.items()}
-        is_etf = lambda t: bool(meta.loc[t, "is_etf"]) if t in meta.index and not isinstance(meta.loc[t, "is_etf"], pd.Series) else False
+        fund_cache = prices._load_cache()
+
+        def is_etf(t: str) -> bool:
+            """ETF·폐쇄형 펀드·신탁이면 True (재무제표로 평가할 수 없는 종목)."""
+            if t in meta.index and not isinstance(meta.loc[t, "is_etf"], pd.Series) and bool(meta.loc[t, "is_etf"]):
+                return True
+            qt = (fund_cache.get(t) or {}).get("quote_type")
+            if qt and qt.upper() in ("ETF", "MUTUALFUND", "CLOSEDENDFUND"):
+                return True
+            name = str(meta.loc[t, "name"]) if t in meta.index and not isinstance(meta.loc[t, "name"], pd.Series) else ""
+            return bool(FUND_NAME.search(name))
+
         stocks = [t for t in base if not is_etf(t)]
         ranked = sorted(stocks, key=lambda t: -(prelim[t] or 0))
         need_f = list(dict.fromkeys(ranked[:450] + ranked[-120:] + [t for t in hold_t if t in tech]))
@@ -175,8 +188,18 @@ def run_daily(limit: int | None, dry: bool) -> dict:
         else:
             reference = []
             buys_for_list = buys
-        bands, new_count = lists.build_bands(buys_for_list, cfg, prev, today_iso)
-        picks = [p for b in bands for p in b["picks"]]
+        # 개별 종목과 ETF·펀드는 따로 순위를 매겨요 (ETF는 재무 점수 없이 추세·안전만으로 점수가 높게 나오기 쉬워서)
+        stock_buys = [b for b in buys_for_list if not b["etf"]]
+        fund_buys = [b for b in buys_for_list if b["etf"]]
+        for b in fund_buys:
+            b["tags"].insert(0, "ETF·펀드")
+        bands, new_count = lists.build_bands(stock_buys, cfg, prev, today_iso)
+        etf_cfg = dict(cfg, **{"보여줄 개수": max(1, int(cfg["ETF 개수"]))})
+        etf_bands, etf_new = lists.build_bands(fund_buys if int(cfg["ETF 개수"]) > 0 else [], etf_cfg, prev, today_iso)
+        for b, e in zip(bands, etf_bands):
+            b["etf_picks"], b["etf_count"] = e["picks"], e["count"]
+        new_count += etf_new
+        picks = [p for b in bands for p in b["picks"] + b["etf_picks"]]
 
         # 실적 발표 표시
         stage = "실적 일정"
@@ -297,7 +320,7 @@ def run_daily(limit: int | None, dry: bool) -> dict:
         # ---- 발송 ----
         stage = "발송"
         report = {"date_label": f"{now.month}월 {now.day}일", "market": mk, "sell": sells, "bands": bands,
-                  "buy_total": len(picks), "new_count": new_count, "warnings": warn,
+                  "buy_total": len(picks), "stock_total": sum(len(b["picks"]) for b in bands), "new_count": new_count, "warnings": warn,
                   "web_url": __import__("os").environ.get("WEB_URL", "")}
         if dry:
             print("\n" + notify.subject(report) + "\n\n" + notify.text_body(report))

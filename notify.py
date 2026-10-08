@@ -74,14 +74,18 @@ def text_body(r: dict) -> str:
     if not r["market"]["rest_day"]:
         out.append("■ 가격대별 개수 (조건 맞은 종목 → 보내는 상위)")
         for b in r["bands"]:
-            out.append(f"{b['name']:<12} {b['count']:>3} → {len(b['picks'])}")
+            out.append(f"{b['name']:<12} {b['count']:>3} → 종목 {len(b['picks'])}" + (f" + ETF {len(b.get('etf_picks', []))}" if b.get("etf_picks") else ""))
         out.append("")
         for b in r["bands"]:
-            if not b["picks"]:
+            if not b["picks"] and not b.get("etf_picks"):
                 continue
-            out.append(f"■ {b['name']} · 매수 상위 {len(b['picks'])}")
+            out.append(f"■ {b['name']} · 개별 종목 상위 {len(b['picks'])}")
             for p in b["picks"]:
                 out += pick_lines(p)
+            if b.get("etf_picks"):
+                out.append(f"  ▷ ETF·펀드 상위 {len(b['etf_picks'])}")
+                for p in b["etf_picks"]:
+                    out += pick_lines(p)
             if b["dropped"]:
                 out.append("어제에서 빠짐: " + ", ".join(b["dropped"]))
             out.append("")
@@ -114,13 +118,13 @@ def html_body(r: dict) -> str:
         h.append('<h3 style="margin:18px 0 6px">가격대별 개수</h3><table style="border-collapse:collapse">')
         for b in r["bands"]:
             h.append(f'<tr><td style="padding:2px 12px 2px 0">{e(b["name"])}</td><td style="text-align:right">조건 맞음 {b["count"]}</td>'
-                     f'<td style="padding-left:12px">→ 상위 {len(b["picks"])}</td></tr>')
+                     f'<td style="padding-left:12px">→ 종목 {len(b["picks"])} · ETF {len(b.get("etf_picks", []))}</td></tr>')
         h.append("</table>")
         for b in r["bands"]:
-            if not b["picks"]:
+            if not b["picks"] and not b.get("etf_picks"):
                 continue
-            h.append(f'<h3 style="margin:18px 0 6px">{e(b["name"])} · 매수 상위 {len(b["picks"])}</h3>')
-            for p in b["picks"]:
+            h.append(f'<h3 style="margin:18px 0 6px">{e(b["name"])} · 개별 종목 {len(b["picks"])} · ETF {len(b.get("etf_picks", []))}</h3>')
+            for p in b["picks"] + b.get("etf_picks", []):
                 pl = p["plan"]
                 tags = " ".join(f'<span style="background:#ddf4ff;border-radius:10px;padding:0 6px;font-size:12px">{e(t)}</span>' for t in p["tags"])
                 inner = (f"<b>{p['rank']} {e(p['ticker'])}</b> {pl and ''}{p['price']:.2f}달러 · <b>{p['total']:.0f}점</b> {tags}<br>"
@@ -153,12 +157,14 @@ def slack_blocks(r: dict) -> list[dict]:
     if r["sell"]:
         blocks.append(sec("*:red_circle: 내 보유 · 매도 후보*\n" + "\n".join(f"• {sell_line(s)}" for s in r["sell"])))
     if not r["market"]["rest_day"]:
-        blocks.append(sec("*가격대별 개수*\n" + "\n".join(f"{b['name']}: {b['count']} → {len(b['picks'])}" for b in r["bands"])))
+        blocks.append(sec("*가격대별 개수*\n" + "\n".join(f"{b['name']}: {b['count']} → 종목 {len(b['picks'])} · ETF {len(b.get('etf_picks', []))}" for b in r["bands"])))
         for b in r["bands"]:
-            if not b["picks"]:
+            if not b["picks"] and not b.get("etf_picks"):
                 continue
-            lines = [f"*:large_green_circle: {b['name']} · 매수 상위 {len(b['picks'])}*"]
-            for p in b["picks"]:
+            lines = [f"*:large_green_circle: {b['name']} · 개별 종목 {len(b['picks'])} · ETF {len(b.get('etf_picks', []))}*"]
+            for p in b["picks"] + b.get("etf_picks", []):
+                if p is (b.get("etf_picks") or [None])[0]:
+                    lines.append("_ETF·펀드_")
                 pl = p["plan"]
                 tags = f" `{' · '.join(p['tags'])}`" if p["tags"] else ""
                 lines.append(f"{p['rank']}. *{p['ticker']}* {p['price']:.2f} · {p['total']:.0f}점{tags}\n"

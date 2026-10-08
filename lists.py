@@ -47,7 +47,7 @@ def build_bands(cands: list[dict], cfg: dict, prev: dict[str, dict], today_iso: 
 
 def dropped_reasons(bands: list[dict], prev: dict[str, dict], why: dict[str, str]):
     """어제 있었는데 오늘 빠진 종목 + 이유 한 줄."""
-    today = {p["ticker"] for b in bands for p in b["picks"]}
+    today = {p["ticker"] for b in bands for p in b["picks"] + b.get("etf_picks", [])}
     for t, info in prev.items():
         if t in today:
             continue
