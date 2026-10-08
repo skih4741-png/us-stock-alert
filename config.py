@@ -42,6 +42,9 @@ DEFAULTS: dict[str, float | str] = {
     # 장중 감시
     "손절선 근접(%)": 5,
     "장중 급락 기준(%)": -7,
+    # 보유 종목을 다른 시트에서 읽을 때
+    "보유 종목 시트 주소": "",
+    "보유 종목 탭": "내 종목",
     # AI
     "AI 설명 사용": "예",
     "AI 모델": os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-5"),

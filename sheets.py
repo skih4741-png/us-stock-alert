@@ -36,7 +36,8 @@ class Store:
 
             creds = Credentials.from_service_account_info(
                 json.loads(key), scopes=["https://www.googleapis.com/auth/spreadsheets"])
-            self.gs = gspread.authorize(creds).open_by_key(sid)
+            self.gc = gspread.authorize(creds)
+            self.gs = self.gc.open_by_key(sid)
         else:
             LOCAL.mkdir(parents=True, exist_ok=True)
         self.ensure_tabs()
@@ -97,6 +98,107 @@ class Store:
 
     # ----- 의미 단위 -----
     def holdings(self) -> list[dict]:
+        own = self._own_holdings()
+        ext = self._external_holdings()
+        if not ext:
+            return own
+        by = {h["ticker"]: h for h in ext}
+        for h in own:  # 이 시트 '보유 종목' 탭에 적은 손절선·매수일·산 이유가 있으면 그걸 우선
+            if h["ticker"] in by:
+                e = by[h["ticker"]]
+                e["stop"] = h["stop"] or e["stop"]
+                e["buy_date"] = h["buy_date"] or e["buy_date"]
+                e["why"] = h["why"] or e["why"]
+            else:
+                by[h["ticker"]] = h
+        return list(by.values())
+
+    @staticmethod
+    def _num(x) -> float | None:
+        try:
+            return float(str(x).replace(",", "").replace("$", "").replace("원", "").strip())
+        except ValueError:
+            return None
+
+    def _external_holdings(self) -> list[dict]:
+        """설정 '보유 종목 시트 주소'에 적은 다른 구글 시트(예: 배당투자 대시보드 '내 종목' 탭)에서 보유 종목을 읽어요."""
+        if not self.gs:
+            return []
+        cfg = self.settings()
+        ref = str(cfg.get("보유 종목 시트 주소", "")).strip()
+        if not ref:
+            return []
+        tab = str(cfg.get("보유 종목 탭", "") or "내 종목").strip()
+        try:
+            import re
+            m = re.search(r"/d/([A-Za-z0-9_-]+)", ref)
+            book = self.gc.open_by_key(m.group(1) if m else ref)
+            rows = self._find_ws(book, tab).get_all_values()
+        except Exception as e:
+            log.warning("보유 종목 시트를 못 읽었어요: %s", e)
+            return []
+        short = lambda r, w: any(w in c and len(c) <= 12 for c in r)  # 설명 문장이 아닌 머리글 칸만
+        hdr_i = next((i for i, r in enumerate(rows) if short(r, "수량") and short(r, "평단")), None)
+        if hdr_i is None:
+            log.warning("보유 종목 시트에서 '수량'·'평단' 머리글을 못 찾았어요")
+            return []
+        hdr = [c.replace("\n", " ") for c in rows[hdr_i]]
+        def col(*words):
+            return next((j for j, c in enumerate(hdr) if len(c) <= 12 and all(w in c for w in words)), None)
+        ct, cq, ca = col("종목") if col("종목") is not None else col("티커"), col("수량"), col("평단")
+        first_buy = self._first_buy_dates(book)
+        out = []
+        for r in rows[hdr_i + 1:]:
+            if ct is None or ct >= len(r):
+                continue
+            t = r[ct].strip().upper()
+            if not t or not t.replace("-", "").replace(".", "").isalnum() or len(t) > 6:
+                continue
+            qty = self._num(r[cq]) if cq is not None and cq < len(r) else None
+            avg = self._num(r[ca]) if ca is not None and ca < len(r) else None
+            if not qty or qty <= 0 or not avg:
+                continue
+            out.append({"ticker": t, "qty": qty, "avg": avg, "stop": None,
+                        "buy_date": first_buy.get(t), "why": "", "source": "external"})
+        return out
+
+    @staticmethod
+    def _find_ws(book, name: str):
+        """탭 이름 앞에 이모지가 붙어 있어도 찾아요 (예: '📋 내 종목')."""
+        for ws in book.worksheets():
+            if ws.title == name:
+                return ws
+        for ws in book.worksheets():
+            if ws.title.strip().endswith(name) and "원본" not in ws.title:
+                return ws
+        raise KeyError(name)
+
+    def _first_buy_dates(self, book) -> dict:
+        """'매매기록' 탭이 있으면 종목별 첫 매수일을 찾아요(추적 매도·제자리 규칙용)."""
+        try:
+            rows = self._find_ws(book, "매매기록").get_all_values()
+        except Exception:
+            return {}
+        hdr_i = next((i for i, r in enumerate(rows) if any(c.strip() == "거래일자" for c in r)), None)
+        if hdr_i is None:
+            return {}
+        hdr = rows[hdr_i]
+        cd = next((j for j, c in enumerate(hdr) if c.strip() == "거래일자"), None)
+        ct = next((j for j, c in enumerate(hdr) if len(c) <= 12 and ("종목" in c or "티커" in c)), None)
+        ck = next((j for j, c in enumerate(hdr) if len(c) <= 12 and "구분" in c), None)
+        out = {}
+        for r in rows[hdr_i + 1:]:
+            try:
+                d, t = r[cd].strip(), r[ct].strip().upper()
+                if not d or not t or (ck is not None and "매수" not in r[ck]):
+                    continue
+                if t not in out or d < out[t]:
+                    out[t] = d
+            except (IndexError, TypeError):
+                continue
+        return out
+
+    def _own_holdings(self) -> list[dict]:
         df = self.read("보유 종목")
         out = []
         for _, r in df.iterrows():
