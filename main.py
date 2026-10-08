@@ -25,6 +25,7 @@ import pandas as pd
 
 import appdata
 import config
+import financials
 import lists
 import market
 import notify
@@ -219,6 +220,23 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 if d <= int(cfg["실적 발표 보류 거래일"]):
                     p["tags"].append("신규 매수 보류")
 
+        # 쉬운 재무제표 (매수 후보 + 내 보유)
+        stage = "재무제표"
+        fin_meta = {}
+        for t in [p["ticker"] for p in picks] + hold_t:
+            r0 = results.get(t)
+            fin_meta[t] = {"price": (r0 or {}).get("price") or (float(hist[t]["Close"].iloc[-1]) if t in hist else None),
+                           "sector": (r0 or {}).get("sector"), "name": (r0 or {}).get("name"),
+                           "etf": bool((r0 or {}).get("etf")) or is_etf(t)}
+        try:
+            fin = financials.summaries(list(fin_meta), fin_meta)
+        except Exception as e:
+            log.warning("재무제표 단계 실패: %s", e)
+            fin = {}
+        for p in picks:
+            if (fin.get(p["ticker"]) or {}).get("verdict") == "bad":
+                p["tags"].append("재무 주의")
+
         # 어제에서 빠진 이유
         why = {}
         for t in prev:
@@ -332,7 +350,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         report = {"date_label": f"{now.month}월 {now.day}일", "market": mk, "sell": sells, "bands": bands,
                   "buy_total": len(picks), "stock_total": sum(len(b["picks"]) for b in bands), "new_count": new_count, "warnings": warn,
                   "web_url": __import__("os").environ.get("WEB_URL", "")}
-        app = appdata.build_daily(report, holdings_view, bar_date, now.isoformat(timespec="minutes"))
+        app = appdata.build_daily(report, holdings_view, bar_date, now.isoformat(timespec="minutes"), fin)
         if dry:
             print("\n" + notify.subject(report) + "\n\n" + notify.text_body(report))
             print("\n[앱 데이터] 보유 " + ", ".join(f"{h['t']}={h['conclusion']}" for h in app["holdings"])

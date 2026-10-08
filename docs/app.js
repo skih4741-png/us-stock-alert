@@ -194,6 +194,122 @@
     });
   }
 
+
+  /* ---------- 쉬운 재무제표 (F-1~F-5) ---------- */
+  const TERMS = {
+    "체력 점수": "피오트로스키 점수예요. 돈을 버는지, 빚이 줄고 있는지, 효율이 좋아지는지를 예/아니오 9개로 본 점수예요. 7 이상이면 튼튼, 4~6 보통, 3 이하 약함.",
+    "버핏 체크": "워런 버핏이 '오래 돈을 잘 버는 회사'의 흔적으로 보는 재무 습관 8개예요. 참고용이고 절대 기준은 아니에요.",
+    "영업이익률": "물건을 팔아 회사 운영비까지 빼고 남는 비율이에요. 100달러 팔아 18달러가 남으면 18%.",
+    "순이익률": "세금·이자까지 다 빼고 최종으로 남는 비율이에요.",
+    "순이익": "1년 동안 모든 비용과 세금을 빼고 남은 돈이에요(장부상).",
+    "매출 연평균 성장률": "매출이 1년에 평균 몇 %씩 커졌는지예요.",
+    "최근 매출": "가장 최근 1년 동안 판 금액이에요.",
+    "부채비율(빚÷주주 몫)": "갚아야 할 빚이 주주 몫(자본)의 몇 %인지예요. 100%면 빚과 주주 몫이 같아요. 보통 100~200%를 흔한 범위로 봐요(업종마다 달라요).",
+    "이자보상배율": "영업으로 번 돈이 이자의 몇 배인지예요. 1보다 작으면 번 돈으로 이자도 못 내요.",
+    "부도 위험 점수(알트만 Z)": "망할 위험을 보는 점수예요. 2.99 넘으면 안전, 1.81~2.99 회색, 1.81 아래면 위험 구간이에요. 금융사에는 쓰지 않아요.",
+    "영업현금흐름": "장사로 실제 통장에 들어온 현금이에요. 장부상 이익보다 속이기 어려워요.",
+    "자유현금흐름": "장사로 번 현금에서 공장·설비 투자를 빼고 남은 현금이에요. 배당·자사주·빚 갚기에 쓸 수 있는 돈이에요.",
+    "주식 수 변화(1년)": "주식 수가 늘면 같은 회사를 더 많은 사람이 나눠 가져서 내 몫이 줄어요.",
+    "배당": "회사가 1년 동안 주주에게 나눠 준 현금이에요.",
+    "자사주 매입": "회사가 자기 주식을 사들인 금액이에요. 주식 수가 줄면 내 몫이 커져요.",
+    "가진 것": "회사가 가진 모든 재산(자산)이에요. 현금, 공장, 받을 돈 등.",
+    "빚": "회사가 갚아야 할 돈(부채)이에요.",
+    "주주 몫": "재산에서 빚을 빼고 주주에게 남는 몫(자본)이에요.",
+  };
+  const toneColor = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", info: "var(--sub)", none: "var(--line)" };
+  const ti = k => '<button class="tip" data-term="' + esc(k) + '" aria-label="' + esc(k) + ' 뜻">ⓘ</button>';
+  const big = v => {
+    if (v == null) return "—";
+    const a = Math.abs(v), sg = v < 0 ? "-" : "";
+    if (a >= 1e12) return sg + "$" + (a / 1e12).toFixed(1) + "조";
+    if (a >= 1e8) return sg + "$" + Math.round(a / 1e8).toLocaleString() + "억";
+    if (a >= 1e4) return sg + "$" + Math.round(a / 1e4).toLocaleString() + "만";
+    return sg + "$" + Math.round(a).toLocaleString();
+  };
+  function finFor(t) {
+    const f = S.data && S.data.fin ? S.data.fin : {};
+    return f[t] || f[String(t).replace(".", "-")] || null;
+  }
+  function finHtml(f) {
+    if (!f) return '<div class="card sub">이 종목의 재무제표는 다음 아침 리포트부터 나와요.</div>';
+    if (!f.available) return '<div class="card sub">' + esc(f.reason || "재무 자료가 없어요") + "</div>";
+    const bandCls = { good: "band good", warn: "band warn", bad: "band bad" }[f.verdict] || "band";
+    let h = '<div class="' + bandCls + '"><b>' + esc(f.verdict_text) + '</b><div class="small" style="color:inherit">' + esc(f.reason) + "</div></div>";
+    h += '<div class="small" style="margin:8px 0 4px">체력 ' + f.fscore + "/" + f.fscore_max + " " + ti("체력 점수") +
+      " · 버핏 체크 " + f.buffett_pass + "/" + f.buffett_max + " " + ti("버핏 체크") + " · " + esc((f.fy || "").slice(0, 4)) + "년 연간 공시</div>";
+    h += '<div class="list">' + f.signals.map(sg =>
+      '<details class="sig"><summary><span class="sdot" style="background:' + (toneColor[sg.tone] || "var(--line)") + '"></span><span class="grow"><b>' + esc(sg.title) +
+      '</b><span class="small">' + esc(sg.text) + '</span></span><span class="small">숫자 ▾</span></summary><dl class="kv num">' +
+      Object.entries(sg.nums || {}).map(([k, v]) => "<dt>" + esc(k) + " " + (TERMS[k] ? ti(k) : "") + "</dt><dd>" +
+        (v == null ? "—" : esc(typeof v === "number" ? (/%|률|비율|변화/.test(k) && !/배율/.test(k) ? v + "%" : v) : v)) + "</dd>").join("") +
+      "</dl></details>").join("") + "</div>";
+    // F-2 100달러를 팔면
+    if (f.flow100) {
+      const parts = f.flow100.parts, shades = ["var(--seg1)", "var(--seg2)", "var(--seg3)"];
+      const last = parts[parts.length - 1], loss = last.per100 < 0;
+      h += '<h2>100달러를 팔면 (최근 1년 매출 ' + esc(f.flow100.revenue) + ")</h2>";
+      h += '<div class="flowbar">' + parts.map((p, i) => {
+        const w = Math.max(0, p.per100);
+        const col = i === parts.length - 1 ? (loss ? "var(--bad)" : "var(--accent)") : shades[i % 3];
+        return w > 0 ? '<span style="width:' + w + "%;background:" + col + '"></span>' : "";
+      }).join("") + "</div>";
+      h += '<div class="legend">' + parts.map((p, i) => {
+        const col = i === parts.length - 1 ? (loss ? "var(--bad)" : "var(--accent)") : shades[i % 3];
+        return '<div><span class="sdot" style="background:' + col + '"></span>' + esc(p.label) + ' <b class="num">$' + Math.abs(p.per100).toFixed(0) + "</b></div>";
+      }).join("") + "</div>";
+    }
+    // 5년 추세
+    const tr = f.trend || {}, rv = tr.revenue || [], opv = tr.op || [];
+    const mx = Math.max(1, ...rv.filter(x => x != null).map(Math.abs), ...opv.filter(x => x != null).map(Math.abs));
+    if (rv.filter(x => x != null).length >= 2) {
+      const first = rv.find(x => x != null), lastv = rv[rv.length - 1];
+      const ch = first && lastv ? (lastv / first - 1) * 100 : null;
+      h += "<h2>" + esc(f.years[0] || "") + "→" + esc(f.years[f.years.length - 1] || "") + " 매출·영업이익</h2><div class=\"trend\">" +
+        rv.map((v, i) => '<div class="tcol"><div class="tbars"><span class="tb rev" style="height:' + (v == null ? 0 : Math.max(2, Math.abs(v) / mx * 100)) + '%"></span>' +
+          '<span class="tb op' + ((opv[i] || 0) < 0 ? " neg" : "") + '" style="height:' + (opv[i] == null ? 0 : Math.max(2, Math.abs(opv[i]) / mx * 100)) + '%"></span></div>' +
+          '<div class="small">' + esc((f.years[i] || "").slice(2)) + "</div></div>").join("") + "</div>" +
+        '<div class="small"><span class="sdot" style="background:var(--seg1)"></span>매출 <span class="sdot" style="background:var(--accent)"></span>영업이익' +
+        (ch == null ? "" : " · 매출 " + (ch >= 0 ? "+" : "") + ch.toFixed(0) + "% (" + esc(f.years[0]) + "년 대비)") + "</div>";
+    }
+    // F-3 회사 살림
+    const b = f.balance || {};
+    if (b.assets) {
+      const lh = Math.max(0, Math.min(100, (b.liab || 0) / b.assets * 100)), eh = Math.max(0, 100 - lh);
+      h += "<h2>회사 살림 (가진 것 = 빚 + 주주 몫)</h2><div class=\"bal\">" +
+        '<div class="bcol"><div class="bstack"><span style="height:100%;background:var(--accent-bg);border-color:var(--accent)"></span></div><div class="small">가진 것 ' + ti("가진 것") + "<br><b>" + big(b.assets) + "</b></div></div>" +
+        '<div class="bcol"><div class="bstack"><span style="height:' + eh + '%;background:var(--good-bg);border-color:var(--good)"></span><span style="height:' + lh + '%;background:var(--bad-bg);border-color:var(--bad)"></span></div>' +
+        '<div class="small">주주 몫 ' + ti("주주 몫") + " <b>" + big(b.equity) + "</b><br>빚 " + ti("빚") + " <b>" + big(b.liab) + "</b></div></div></div>";
+    }
+    const c = f.cash || {};
+    if (c.ocf != null) {
+      h += '<h2>1년 통장 입출금</h2><div class="card"><dl class="kv num">' +
+        "<dt>+ 장사로 들어온 돈 " + ti("영업현금흐름") + '</dt><dd style="color:' + (c.ocf >= 0 ? "var(--good)" : "var(--bad)") + '">' + big(c.ocf) + "</dd>" +
+        (c.capex != null ? "<dt>− 공장·설비에 쓴 돈</dt><dd>" + big(-Math.abs(c.capex)) + "</dd>" : "") +
+        (c.dividends ? "<dt>− 주주에게 배당</dt><dd>" + big(-Math.abs(c.dividends)) + "</dd>" : "") +
+        (c.buyback ? "<dt>− 자사주 매입</dt><dd>" + big(-Math.abs(c.buyback)) + "</dd>" : "") +
+        (c.debt_repay ? "<dt>− 빚 갚기</dt><dd>" + big(-Math.abs(c.debt_repay)) + "</dd>" : "") +
+        "<dt>= 남는 현금 " + ti("자유현금흐름") + "</dt><dd><b>" + big(c.fcf) + "</b></dd></dl></div>";
+    }
+    // F-4 버핏 체크
+    h += '<h2>버핏 체크 ' + f.buffett_pass + "/" + f.buffett_max + " " + ti("버핏 체크") + '</h2><div class="list">' + (f.buffett || []).map(x =>
+      '<div class="item" style="cursor:default;align-items:flex-start"><span class="bk ' + (x.ok === true ? "ok" : x.ok === false ? "no" : "na") + '">' +
+      (x.ok === true ? "✓" : x.ok === false ? "✕" : "—") + '</span><div class="grow"><b>' + esc(x.title) + "</b>" +
+      (x.value != null ? ' <span class="small num">(' + esc(x.value) + ")</span>" : "") +
+      '<div class="small">' + esc(x.why) + "</div></div></div>").join("") + "</div>";
+    if (f.financial_company) h += '<div class="msg note">금융·리츠·BDC는 빚을 장사 도구로 써요. 부채비율 대신 배당을 이익·현금으로 감당하는지를 보세요.</div>';
+    h += '<p class="foot">' + esc(f.source || "") + " · 지난 숫자예요. 재무가 좋아도 비싸게 사면 손해를 볼 수 있어요.</p>";
+    return h;
+  }
+  document.addEventListener("click", ev => {
+    const b = ev.target.closest && ev.target.closest(".tip");
+    if (!b) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const k = b.dataset.term, sh = document.getElementById("sheet");
+    sh.innerHTML = '<div class="sheet-in"><b>' + esc(k) + '</b><p>' + esc(TERMS[k] || "") + '</p><button class="btn ghost" id="sheetClose">닫기</button></div>';
+    sh.hidden = false;
+    document.getElementById("sheetClose").onclick = () => { sh.hidden = true; };
+  });
+
   /* ---------- 화면: 앱 ---------- */
   function appShell(tab, html) {
     $tabs.hidden = false;
@@ -292,6 +408,7 @@
       '<div class="big num" style="margin-top:6px">$' + fmt(p.price) + "</div>" +
       '<div class="small">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) +
+      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
@@ -299,9 +416,9 @@
       "<dt>1차 목표</dt><dd>" + fmt(pl.target) + " (손익비 " + fmt(pl.rr, 1) + ")</dd>" +
       "<dt>이 위로 시작하면 추격 금지</dt><dd>" + fmt(pl.skip_if_open_above) + "</dd>" +
       "<dt>유효 기한</dt><dd>" + esc(pl.valid_until || "") + "</dd></dl></div>" +
-      '<div class="segs"><button class="on" data-s="pro">찬반 근거</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     const segs = {
+      fin: finHtml(finFor(p.t)),
       pro: '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
         (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
         '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>",
@@ -309,7 +426,7 @@
       rep: '<div class="empty">쉬운 기업 리포트는 4단계에서 열려요</div>',
     };
     const seg = document.getElementById("seg");
-    seg.innerHTML = segs.pro;
+    seg.innerHTML = segs.fin;
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => {
       $app.querySelectorAll(".segs button").forEach(x => x.classList.toggle("on", x === b)); seg.innerHTML = segs[b.dataset.s];
     }));
@@ -337,6 +454,7 @@
       '<div class="row between"><h1>' + esc(h.t) + '</h1><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
       '<div class="sub">' + esc(h.name || "") + "</div>" +
       (h.action ? '<div class="msg ' + (h.tone === "bad" ? "err" : "note") + '">규칙상 할 일: <b>' + esc(h.action) + "</b></div>" : "") +
+      '<h2>재무 5초</h2>' + finHtml(finFor(h.t)) +
       '<h2>지금 상태</h2><div class="card"><dl class="kv num">' +
       "<dt>현재가</dt><dd>$" + fmt(h.price) + "</dd><dt>평단</dt><dd>$" + fmt(h.avg) + "</dd><dt>수량</dt><dd>" + fmt(h.qty, 0) + "</dd>" +
       "<dt>수익률</dt><dd>" + pct(h.gain_pct) + "</dd><dt>손절선</dt><dd>$" + fmt(h.stop) + " (" + (h.to_stop_pct == null ? "—" : fmt(h.to_stop_pct, 1) + "% 위") + ")</dd>" +
@@ -429,6 +547,7 @@
       return go("#/reset");
     }
     window.scrollTo(0, 0);
+    const sh = document.getElementById("sheet"); if (sh) sh.hidden = true;
     switch (route) {
       case "login": return viewLogin();
       case "forgot": return viewForgot();

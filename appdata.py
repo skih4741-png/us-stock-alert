@@ -51,7 +51,7 @@ def pick_view(p: dict) -> dict:
     }
 
 
-def build_daily(report: dict, holdings_view: list[dict], bar_date: str, run_at: str) -> dict:
+def build_daily(report: dict, holdings_view: list[dict], bar_date: str, run_at: str, fin: dict | None = None) -> dict:
     mk = report["market"]
     bands = []
     for b in report["bands"]:
@@ -67,8 +67,20 @@ def build_daily(report: dict, holdings_view: list[dict], bar_date: str, run_at: 
         "summary": {"sell": sells, "buy": report["buy_total"], "stock": report.get("stock_total", 0),
                     "new": report["new_count"]},
         "holdings": holdings_view, "bands": bands, "warnings": report.get("warnings", []),
+        "fin": _clean(fin or {}),
         "disclaimer": DISCLAIMER,
     }
+
+
+def _clean(o):
+    """JSON에 못 들어가는 NaN·무한대를 없애요."""
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_clean(v) for v in o]
+    if isinstance(o, float):
+        return None if math.isnan(o) or math.isinf(o) else round(o, 4)
+    return o
 
 
 def holding_view(h: dict, lv: dict | None, hits: list[dict], r: dict | None, action: str = "") -> dict:

@@ -12,3 +12,5 @@ data/*.log
 
 data/*.log
 data/*.ps1
+data/financials_cache.json
+data/*.py
