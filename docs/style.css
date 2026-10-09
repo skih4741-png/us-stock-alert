@@ -211,3 +211,10 @@ input.search { margin: 8px 0 4px; }
 .srow:last-child { border-bottom: 0; }
 .srow .sname { white-space: nowrap; color: var(--sub); font-size: 14px; }
 .badge.wrap { white-space: normal; text-align: right; overflow-wrap: anywhere; }
+
+/* 홈 맨 위 모의투자 진행 카드 */
+.card.simlive{display:block;color:var(--ink);border:1.5px solid var(--accent)}
+.live{display:inline-block;width:9px;height:9px;border-radius:50%;background:#22c55e;margin-right:6px;vertical-align:1px;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:livep 1.8s infinite}
+.live.off{background:var(--muted,#999);animation:none}
+@keyframes livep{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 7px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+@media (prefers-reduced-motion:reduce){.live{animation:none}}

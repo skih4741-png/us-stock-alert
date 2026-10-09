@@ -438,14 +438,23 @@
       '<div class="row between"><span class="big num">$' + fmt(val) + '</span><b class="num ' + (pl >= 0 ? "good-t" : "bad-t") + '">' + usd(pl) + " (" + pct(cost ? pl / cost * 100 : 0) + ")</b></div>" +
       '<div class="small">수익 ' + up + "종목 · 손실 " + (hs.length - up) + "종목 · 보유 탭에서 자세히 →</div></a>";
   }
+  // 홈 맨 위: 지금 모의투자가 돌아가고 있다는 걸 한눈에
   function homeSimCard() {
     const m = S.perf && S.perf.sim;
-    if (!m) return "";
-    const today = (m.today || []).slice(0, 3);
-    return '<a class="card" href="#/score" style="display:block;color:var(--ink)"><div class="row between"><span class="sub">자동 모의 ' + m.day + "/" + m.days +
-      '일째 (가상 $' + fmt(m.budget, 0) + ')</span><b class="num ' + (m.ret >= 0 ? "good-t" : "bad-t") + '">$' + fmt(m.equity) + " " + pct(m.ret) + "</b></div>" +
-      '<div class="small num">번 돈 ' + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + " · 오늘 밤 주문 " + (m.pending || []).length + "건</div>" +
-      (today.length ? '<div class="small" style="margin-top:4px">' + today.map(esc).join("<br>") + "</div>" : '<div class="small">지난 거래일 체결·매도 없음</div>') + "</a>";
+    if (!m) return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live off"></span>모의투자 준비 중</b><span class="badge info">가상 $100</span></div>' +
+      '<div class="small">다음 아침 리포트부터 3개월 자동 모의투자가 시작돼요</div></a>';
+    const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
+    const pos = m.positions || [], pend = m.pending || [], today = (m.today || []).slice(0, 3);
+    return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live"></span>모의투자 진행 중</b>' +
+      '<span class="badge info">' + m.day + "/" + m.days + "일째</span></div>" +
+      '<div class="plbar" style="margin:8px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
+      '<div class="row between"><span class="big num">$' + fmt(m.equity) + '</span><b class="num ' + (m.ret >= 0 ? "good-t" : "bad-t") + '">' + pct(m.ret) +
+      ' <span class="small">(SPY ' + pct(m.spy_ret) + ")</span></b></div>" +
+      '<div class="small num">가상 $' + fmt(m.budget, 0) + " 시작 · 현금 $" + fmt(m.cash) + " · 번 돈 " + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + "</div>" +
+      '<div class="small" style="margin-top:6px"><b>보유</b> ' + (pos.length ? pos.map(p => esc(p.t) + " " + p.qty + "주").join(", ") : "없음") +
+      " · <b>다음 주문</b> " + (pend.length ? pend.map(o => esc(o.t)).join(", ") : "없음") + "</div>" +
+      (today.length ? '<div class="small" style="margin-top:4px">' + today.map(esc).join("<br>") + "</div>" : "") +
+      '<div class="small" style="margin-top:6px;opacity:.8">' + esc(m.start) + " ~ " + esc(m.end) + " · 실제 돈·실제 주문 없음 · 자세히 →</div></a>";
   }
   function homePaperCard() {
     if (!(S.paper || []).length) return "";
@@ -463,7 +472,7 @@
     appShell("home",
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button></div>" +
-      statusLine() +
+      statusLine() + homeSimCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -473,7 +482,7 @@
       '<div class="quick"><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
         (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
-      freshBanner() + assetCard() + briefCard() + homeSimCard() + homePaperCard() +
+      freshBanner() + assetCard() + briefCard() + homePaperCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -728,9 +737,11 @@
         reps.slice(1).map(r => '<div class="card"><b>' + esc(r.title) + '</b><div class="small">' + esc(r.date) + '</div><pre class="weekly">' + esc(r.text) + "</pre></div>").join("") + "</details>" : "");
   }
   function kisHtml(k) {
-    let h = '<h2>한국투자증권 모의투자 계좌 <span class="small">(같은 주문을 실제 모의계좌에)</span></h2>';
-    if (!k) return h + '<div class="card sub">미국 장중 첫 감시 때부터 연결돼요. KIS 비밀 값과 KIS_MODE=paper가 필요해요.</div>';
-    if (!k.on) return h + '<div class="card sub">꺼져 있어요: ' + esc(k.why || "") + "</div>";
+    const h = '<h2>증권사 모의계좌 연결 <span class="small">(선택 사항)</span></h2>';
+    const calm = why => h + '<div class="card small">' + esc(why) + "<br>위의 3개월 자동 모의투자는 증권사 연결 없이 가상 장부로 <b>정상 진행 중</b>이에요. 실전 직전에 연결해 봐도 충분해요.</div>";
+    if (!k) return calm("아직 연결 안 함.");
+    if (!k.on) return calm("꺼져 있어요.");
+    if (k.err && !(k.orders || []).length && !(k.holdings || []).length) return calm("연결 시도 중 오류: " + k.err);
     const today = (k.orders || []).slice().reverse().slice(0, 8);
     return h + '<div class="card">' + (k.err ? '<div class="msg err">' + esc(k.err) + "</div>" : "") +
       '<div class="small">' + esc(whenText(k.at)) + " 기준 · 보유 " + (k.holdings || []).length + "종목" + (k.summary && k.summary.pnl != null ? " · 평가손익 $" + fmt(k.summary.pnl) : "") + "</div>" +
@@ -847,7 +858,7 @@
       body = w && w.lines ? '<div class="card"><div class="small">' + esc(whenText(w.at)) + '</div><pre class="weekly">' + esc(w.lines.join("\n")) + "</pre></div>"
         : '<div class="empty">주간 리포트는 일요일에 만들어져요</div>';
     }
-    appShell("score", '<div class="head"><div><h1>성적 · 모의투자</h1><div class="small">모두 가상 돈 · 실제 주문 없음</div></div></div>' + statusLine() +
+    appShell("score", '<div class="head"><div><h1>모의투자 · 성적</h1><div class="small">모두 가상 돈 · 실제 주문 없음</div></div></div>' + statusLine() +
       '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
       body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
@@ -1036,9 +1047,9 @@
     const perm = typeof Notification !== "undefined" ? Notification.permission : "";
     return '<h2>시스템 상태</h2><div class="card">' +
       row("아침 리포트", !!d.run_at, d.run_at ? whenText(d.run_at) : "아직 없음") +
-      row("자동 모의매매", !!sim, sim ? sim.day + "/" + sim.days + "일째" : "꺼짐") +
+      row("모의투자 (가상 장부)", !!sim, sim ? "진행 중 · " + sim.day + "/" + sim.days + "일째" : "다음 리포트부터") +
       row("GPT", a.off ? false : (a.at ? true : null), a.off ? "꺼짐 · " + a.off : a.at ? "켜짐" : "다음 리포트부터") +
-      row("증권사 모의계좌", k ? (k.on && !k.err) : null, !k ? "연결 전" : !k.on ? "꺼짐" : k.err ? "오류 · " + String(k.err).slice(0, 40) : "연결됨") +
+      row("증권사 모의계좌 (선택)", k && k.on && !k.err ? true : null, !k || !k.on ? "안 씀" : k.err ? "미연결 · 모의투자엔 영향 없음" : "연결됨") +
       row("이 기기 푸시", perm === "granted" ? true : perm === "denied" ? false : null, perm === "granted" ? "켜짐" : perm === "denied" ? "차단됨" : "꺼짐") +
       "</div>";
   }
