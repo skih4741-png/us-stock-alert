@@ -4,14 +4,22 @@
  1) 어제 낸 '주문 계획'을 지난 거래일 시세로 체결해 봐요 (시작가가 추격 금지선 위면 취소, 저가가 지정가 이하면 체결)
  2) 가진 종목에 매도 규칙을 날마다 적용해요 (손절 → 1차 목표 절반 + 손절을 매수가로 → 추적 손절 → 제자리)
  3) 오늘 후보로 다음 거래일 주문 계획을 세워요 (돈에 맞춰 스스로 고르기)
- 4) 90일이 지나면 6가지 기준으로 실전 가능 여부를 판단해 푸시·슬랙·메일로 알려요 (실전 전환은 본인이 요청해야 해요)
+ 4) 90일이 지나면 8가지 기준(리허설 주문표 체결률 포함)으로 실전 가능 여부를 판단해 푸시·슬랙·메일로 알려요 (실전 전환은 본인이 요청해야 해요)
 수수료·환전 비용은 추정치(한쪽 0.25% + 0.10%)를 빼요.
+
+증권사처럼 체결 (2026-10-10~):
+ - 미국 장중 매시간(장중 감시 때) 5분봉으로 주문을 확인해요: 지정가를 0.1% 넘어서야 매수 체결, 손절선·목표가에 닿은 시각에 매도.
+   '바로 팔기'(손절·추적 손절·제자리)는 0.15% 불리한 값(미끄러짐)으로 계산해요. 체결 시각을 같이 남겨요.
+ - 아침 리포트 때는 지난 거래일 일봉으로 한 번 더 확인해요(장중에 못 본 시간대 보완). 그날 안 닿은 주문은 '미체결'.
+ - 리허설 주문표: 매일 주문 계획을 증권사 앱에 그대로 넣을 모양으로 남기고, 결과(체결·미체결·안 냄)를 채점해 체결률을 실전 기준에 넣어요.
 """
 from __future__ import annotations
 
 import json
 import logging
 from datetime import date, datetime, timedelta
+
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -21,6 +29,10 @@ log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
 REF_KEY = "sim_ref"  # 참고용 1,000달러 · 최대 2종목 집중형 (판단용 5종목 분산과 비교, 판단에 안 씀)
 FEE = 0.0025 + 0.0010      # 한쪽 거래 비용 추정 (수수료 + 환전)
+SLIP = 0.0015              # 미끄러짐: 손절·추적 손절·제자리처럼 '바로 팔기'는 0.15% 불리하게 체결
+TOUCH = 0.001              # 지정가에 '딱 닿기만' 하면 못 산 것으로: 0.1% 넘어서야 체결
+TICKET_RATE = 0.6          # 실전 기준: 리허설 주문표 체결률
+TICKET_MIN = 10
 DAYS = 90                  # 시험 기간 (달력 기준)
 DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
 AVOID = ("신규 매수 보류", "재무 주의", "급등", "출렁임", "참고용")
@@ -60,6 +72,31 @@ def _bars_between(df, after: str, upto: str):
             yield d, df.iloc[i], i
 
 
+def _ticket(st, t: str, signal: str, **kw):
+    """리허설 주문표의 매수 한 줄을 찾아(없으면 만들어) 결과를 적어요."""
+    tk = st.setdefault("tickets", [])
+    for x in reversed(tk):
+        if x["t"] == t and x["signal"] == signal and x["side"] == "매수":
+            x.update(kw)
+            return x
+    x = {"t": t, "signal": signal, "side": "매수", "result": "대기"}
+    x.update(kw)
+    tk.append(x)
+    del tk[:-200]
+    return x
+
+
+def ticket_stats(st: dict) -> dict:
+    tk = st.get("tickets") or []
+    done = [x for x in tk if x.get("result") in ("체결", "미체결")]
+    filled = [x for x in done if x["result"] == "체결"]
+    diffs = [(x["fill_px"] / x["limit"] - 1) * 100 for x in filled if x.get("fill_px") and x.get("limit")]
+    return {"n": len(done), "filled": len(filled), "rate": (len(filled) / len(done)) if done else None,
+            "skipped": sum(1 for x in tk if str(x.get("result", "")).startswith("안 냄")),
+            "avg_vs_limit": round(sum(diffs) / len(diffs), 2) if diffs else None,
+            "intraday": sum(1 for x in filled if x.get("at") and "장중" not in str(x.get("at")))}
+
+
 def _close(st, p, day, px, why):
     qty = p["qty"]
     proceeds = qty * px * (1 - FEE)
@@ -93,18 +130,22 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         op, lo = float(row["Open"]), float(row["Low"])
         if op > o["skip_above"]:
             st["log"].append(f"{d} 취소 {o['t']} · 시작가 {op:.2f}가 추격 금지선 {o['skip_above']:.2f} 위")
-        elif lo <= o["limit"]:
+            _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=d, limit=o["limit"], qty=o["qty"])
+        elif lo <= o["limit"] * (1 - TOUCH):
             px = min(op, o["limit"])
             cost = o["qty"] * px * (1 + FEE)
             if cost > st["cash"] + 1e-9:  # 돈이 모자라면 사지 않음
                 st["log"].append(f"{d} 취소 {o['t']} · 현금 부족")
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=d, limit=o["limit"], qty=o["qty"])
             else:
                 st["cash"] -= cost
                 st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": d, "stop": o["stop"],
-                                        "target": o["target"], "peak": px, "half": False, "why": o["why"]})
+                                        "target": o["target"], "peak": px, "half": False, "why": o["why"], "fill_time": "장중(일봉 확인)"})
                 st["log"].append(f"{d} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {o['why']}")
+                _ticket(st, o["t"], o["signal_date"], result="체결", day=d, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at="장중(일봉 확인)")
         else:
-            st["log"].append(f"{d} 미체결 {o['t']} · 지정가 {o['limit']:.2f}까지 안 내려옴")
+            st["log"].append(f"{d} 미체결 {o['t']} · 지정가 {o['limit']:.2f}보다 0.1% 넘게 안 내려옴")
+            _ticket(st, o["t"], o["signal_date"], result="미체결", day=d, limit=o["limit"], qty=o["qty"], low=round(lo, 2))
     st["pending"] = still
 
     # 2) 매도 규칙 (날마다)
@@ -119,9 +160,10 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if d <= p["date"]:
                 continue
             op, hi, lo, cl = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
-            if lo <= p["stop"]:
-                _close(st, p, d, min(op, p["stop"]), "손절선" if not p["half"] else "본전 손절"); closed = True; break
-            if not p["half"] and hi >= p["target"]:
+            seen = p.get("seen_to", "")[:10] >= d   # 장중에 5분봉으로 이미 확인한 날은 손절·목표를 다시 보지 않아요 (순서를 모르니까)
+            if not seen and lo <= p["stop"]:
+                _close(st, p, d, min(op, p["stop"]) * (1 - SLIP), "손절선" if not p["half"] else "본전 손절"); closed = True; break
+            if not seen and not p["half"] and hi >= p["target"] * (1 + TOUCH):
                 px = max(op, p["target"])
                 if p["qty"] >= 2:
                     half = dict(p, qty=p["qty"] // 2)
@@ -132,10 +174,10 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                     _close(st, p, d, px, "1차 목표"); closed = True; break
             p["peak"] = max(p["peak"], cl)
             if p["half"] and (cl < p["peak"] * 0.92 or (not np.isnan(ma20.iloc[i]) and cl < ma20.iloc[i])):
-                _close(st, p, d, cl, "이익 지키기 (추적 손절)"); closed = True; break
+                _close(st, p, d, cl * (1 - SLIP), "이익 지키기 (추적 손절)"); closed = True; break
             held = int(np.busday_count(date.fromisoformat(p["date"]), date.fromisoformat(d)))
             if held >= cfg["stale_days"] and cl < p["entry"] * 1.02:
-                _close(st, p, d, cl, f"{held}거래일 제자리"); closed = True; break
+                _close(st, p, d, cl * (1 - SLIP), f"{held}거래일 제자리"); closed = True; break
         if not closed:
             if market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
@@ -192,13 +234,138 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             st["pending"].append({"t": p["t"], "qty": qty, "limit": round(limit, 2), "skip_above": float(pl.get("skip_if_open_above") or limit * 1.03),
                                   "stop": float(pl["stop"]), "target": float(pl["target"]), "signal_date": bar_date,
                                   "why": f"총점 {p.get('total'):.0f} · 추세 합류 {t5}/5 · 손익비 {pl.get('rr')}"})
+            o = st["pending"][-1]
+            _ticket(st, o["t"], bar_date, result="대기", limit=o["limit"], qty=qty, skip_above=o["skip_above"], stop=o["stop"], target=o["target"])
             cash -= qty * limit * (1 + FEE)
             slots -= 1
-    st["today"] = st["log"][n_log:] or [x for x in st["log"] if x[:10] == bar_date]
+    st["today"] = list(dict.fromkeys([x for x in st["log"] if x[:10] == bar_date] + st["log"][n_log:]))  # 장중 체결 + 아침 확인
     st["log"] = st["log"][-200:]
     st["updated"] = now_iso
     save(store, st)
     return st
+
+
+# ---------------- 장중 체결 (매시간) ----------------
+
+def _bars5(tickers: list[str]) -> dict:
+    import pandas as pd
+    import yfinance as yf
+    out = {}
+    if not tickers:
+        return out
+    raw = yf.download(tickers, period="1d", interval="5m", group_by="ticker", progress=False, auto_adjust=True, prepost=False)
+    for t in tickers:
+        try:
+            m = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
+            m = m.dropna(subset=["Close"])
+            if len(m):
+                if m.index.tz is not None:
+                    m.index = m.index.tz_convert("America/New_York")
+                out[t] = m
+        except Exception:
+            pass
+    return out
+
+
+def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None) -> list[str]:
+    """미국 장중 매시간: 오늘 5분봉으로 주문 계획·손절·목표를 증권사처럼 체결해요. 반환: 새로 생긴 일(문장)."""
+    st = load(store, key)
+    if not st:
+        return []
+    day = now_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    pend = [o for o in st["pending"] if day > o["signal_date"]]
+    tick = sorted({o["t"] for o in pend} | {p["t"] for p in st["positions"]})
+    if not tick:
+        return []
+    bars = bars if bars is not None else _bars5([t.replace(".", "-") for t in tick])
+    today = {}
+    for t in tick:
+        m = bars.get(t.replace(".", "-"))
+        if m is not None:
+            m = m[m.index.strftime("%Y-%m-%d") == day]
+            if len(m):
+                today[t] = m
+    events, n_log = [], len(st["log"])
+    hm = lambda i: i.strftime("%H:%M")
+    # 1) 주문 계획 → 매수
+    keep = []
+    for o in st["pending"]:
+        m = today.get(o["t"])
+        if day <= o["signal_date"] or m is None:
+            keep.append(o); continue
+        if not o.get("open_px"):
+            o["open_px"] = round(float(m["Open"].iloc[0]), 4)
+            if o["open_px"] > o["skip_above"]:
+                st["log"].append(f"{day} 취소 {o['t']} · 시작가 {o['open_px']:.2f}가 추격 금지선 {o['skip_above']:.2f} 위 (장중 확인)")
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=day, limit=o["limit"], qty=o["qty"])
+                events.append(f"{o['t']} 주문 안 냄 · 시작가가 추격 금지선 위")
+                continue
+        done = False
+        for i, row in m.iterrows():
+            ts = i.strftime("%Y-%m-%d %H:%M")
+            if ts <= o.get("seen_to", ""):
+                continue
+            o["seen_to"] = ts
+            if float(row["Low"]) <= o["limit"] * (1 - TOUCH):
+                px = min(float(row["Open"]), o["limit"])
+                cost = o["qty"] * px * (1 + FEE)
+                if cost > st["cash"] + 1e-9:
+                    st["log"].append(f"{day} 취소 {o['t']} · 현금 부족")
+                    _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=day, limit=o["limit"], qty=o["qty"])
+                else:
+                    st["cash"] -= cost
+                    st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": day, "stop": o["stop"], "target": o["target"],
+                                            "peak": px, "half": False, "why": o["why"], "fill_time": f"{hm(i)} ET", "seen_to": ts})
+                    st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {hm(i)} ET 체결 · {o['why']}")
+                    _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{hm(i)} ET")
+                    events.append(f"매수 체결 {o['t']} {o['qty']}주 @${px:.2f} ({hm(i)} ET)")
+                done = True
+                break
+        if not done:
+            keep.append(o)
+    st["pending"] = keep
+    # 2) 가진 종목 → 손절·1차 목표
+    alive = []
+    for p in st["positions"]:
+        m = today.get(p["t"])
+        if m is None:
+            alive.append(p); continue
+        closed = False
+        for i, row in m.iterrows():
+            ts = i.strftime("%Y-%m-%d %H:%M")
+            if ts <= p.get("seen_to", ""):
+                continue
+            p["seen_to"] = ts
+            op, hi, lo = float(row["Open"]), float(row["High"]), float(row["Low"])
+            if lo <= p["stop"]:
+                px = min(op, p["stop"]) * (1 - SLIP)
+                why = ("손절선" if not p["half"] else "본전 손절") + f" ({hm(i)} ET)"
+                _close(st, p, day, px, why)
+                events.append(f"매도 {p['t']} {p['qty']}주 @${px:.2f} · {why}")
+                closed = True
+                break
+            if not p["half"] and hi >= p["target"] * (1 + TOUCH):
+                px = max(op, p["target"])
+                if p["qty"] >= 2:
+                    half = dict(p, qty=p["qty"] // 2)
+                    _close(st, half, day, px, f"1차 목표 (절반, {hm(i)} ET)")
+                    p["qty"] -= half["qty"]
+                    p["half"], p["stop"] = True, p["entry"]
+                    events.append(f"매도 {p['t']} {half['qty']}주 @${px:.2f} · 1차 목표 절반 ({hm(i)} ET)")
+                else:
+                    _close(st, p, day, px, f"1차 목표 ({hm(i)} ET)")
+                    events.append(f"매도 {p['t']} {p['qty']}주 @${px:.2f} · 1차 목표 ({hm(i)} ET)")
+                    closed = True
+                    break
+        if not closed:
+            alive.append(p)
+    st["positions"] = alive
+    st["intra_at"] = now_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
+    if events:
+        st["today"] = (st.get("today") or []) + st["log"][n_log:]
+    st["log"] = st["log"][-200:]
+    save(store, st)
+    return events
 
 
 # ---------------- 판단 ----------------
@@ -234,6 +401,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
     import config
     today = config.now_kst().date()
     d5 = (sig or {}).get("d5") or {}
+    ts = ticket_stats(st)
     checks = [
         ["모의 거래 12번 이상", len(closed) >= 12, f"{len(closed)}번"],
         ["아침 후보 기록 100개 이상, 5일 뒤 평균이 SPY보다 나음",
@@ -249,6 +417,8 @@ def summary(st: dict, sig: dict | None = None) -> dict:
          len(closed) >= 12 and avg(lastn) is not None and avg(lastn) >= avg(first) - 0.5 and st["violations"] == 0,
          f"처음 {avg(first):+.1f}% · 최근 {avg(lastn):+.1f}%" if closed else "—"],
         ["수수료·환전 비용을 빼고도 플러스", last > budget, f"${last - budget:+.2f}"],
+        [f"리허설 주문표 {TICKET_MIN}건 이상 · 체결률 {TICKET_RATE:.0%} 이상", ts["n"] >= TICKET_MIN and (ts["rate"] or 0) >= TICKET_RATE,
+         f"{ts['n']}건 · 체결률 {ts['rate']:.0%}" if ts["rate"] is not None else f"{ts['n']}건"],
     ]
     return {
         "start": st["start"], "end": st["end"], "day": max(1, (today - d0).days + 1), "days": DAYS, "budget": budget, "max_pos": cfg["max_pos"],
@@ -257,6 +427,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "wins": len(wins), "losses": len(losses), "fees": round(sum(c["qty"] * (c["entry"] + c["exit"]) * FEE for c in closed) + sum(p["qty"] * p["entry"] * FEE for p in st["positions"]), 2), "positions": st["positions"], "pending": st["pending"],
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
         "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
+        "tickets": (st.get("tickets") or [])[::-1][:30], "ticket_stats": ts, "intra_at": st.get("intra_at"),
     }
 
 
@@ -299,8 +470,17 @@ def daily_text(st: dict, sig: dict | None = None) -> tuple[str, str, bool]:
     lines += [f"• {x}" for x in today] or ["• 체결·매도 없음"]
     lines.append("■ 가진 종목")
     lines += [f"• {p['t']} {p['qty']}주 @{p['entry']:.2f} · 손절 {p['stop']:.2f} · 목표 {p['target']:.2f}" for p in m["positions"]] or ["• 없음"]
-    lines.append("■ 오늘 밤 주문 계획")
-    lines += [f"• {o['t']} {o['qty']}주 · 지정가 {o['limit']:.2f} 이하 · {o['why']}" for o in m["pending"]] or ["• 없음"]
+    ts = m["ticket_stats"]
+    prev = [x for x in (st.get("tickets") or []) if x.get("day") and x.get("result") != "대기"][-5:]
+    lines.append("■ 지난 주문표 채점")
+    lines += [f"• {x['t']} {x.get('qty', '')}주 지정가 {x.get('limit', 0):.2f} → {x['result']}" + (f" @{x['fill_px']:.2f} ({x.get('at', '')})" if x.get("fill_px") else "") for x in prev] or ["• 아직 없음"]
+    if ts["rate"] is not None:
+        lines.append(f"  누적 {ts['n']}건 · 체결률 {ts['rate']:.0%}" + (f" · 지정가 대비 평균 {ts['avg_vs_limit']:+.2f}%" if ts["avg_vs_limit"] is not None else ""))
+    lines.append("■ 오늘의 리허설 주문표 (증권사 앱에 넣는다면)")
+    lines += [f"• 매수 {o['t']} {o['qty']}주 · 지정가 ${o['limit']:.2f} · 당일 유효 · 시작가가 ${o['skip_above']:.2f} 위면 주문 취소 · {o['why']}" for o in m["pending"]]
+    lines += [f"• 매도 {p['t']} {p['qty']}주 · 손절 ${p['stop']:.2f} 이하 · " + ("목표 달성 후 본전 손절" if p.get("half") else f"목표 ${p['target']:.2f}에 절반 지정가 매도") for p in m["positions"]]
+    if not m["pending"] and not m["positions"]:
+        lines.append("• 없음")
     lines.append(f"실전 기준 {sum(1 for c in m['checks'] if c[1])}/{len(m['checks'])} 통과 중")
     title = f"자동 모의 {m['day']}/{m['days']}일째 · ${m['equity']:.2f} ({m['ret']:+.1f}%)"
     return title, "\n".join(lines), traded

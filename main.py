@@ -463,6 +463,27 @@ def run_gap(store, holdings: list[dict], dry: bool):
             push.send(store, "장 전 갭 · 보유/모의 주문 종목", body, "#/gap", "watch", tag="gap")
 
 
+def run_sim_intraday(store):
+    """장중 매시간: 자동 모의매매 주문을 5분봉으로 증권사처럼 체결. 체결이 있으면 앱 알림·푸시 (판단용만)."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    for key in (simtrade.KEY, simtrade.REF_KEY):
+        try:
+            ev = simtrade.intraday(store, now, key)
+        except Exception as e:
+            log.warning("장중 모의 체결 실패(%s): %s", key, e)
+            continue
+        if ev and key == simtrade.KEY:
+            at = config.now_kst().isoformat(timespec="minutes")
+            body = " / ".join(ev)[:200]
+            appdata.add_alert(store, "sim", "자동 모의 장중 체결", body, at, "info")
+            try:
+                push.send(store, "자동 모의 · 장중 체결", body[:170], "#/score", "daily", tag="sim")
+            except Exception as e:
+                log.warning("푸시 실패: %s", e)
+            save_perf(store, config.now_kst(), notify_stops=False)
+
+
 def run_watch(kind: str, dry: bool):
     from datetime import datetime, timezone
 
@@ -487,6 +508,7 @@ def run_watch(kind: str, dry: bool):
             kisbridge.run(store)
         except Exception as e:
             log.warning("한국투자증권 모의 연동 실패: %s", e)
+        run_sim_intraday(store)
     if not holdings:
         return
     state = load_state()

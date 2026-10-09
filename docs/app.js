@@ -741,6 +741,7 @@
     const calm = why => h + '<div class="card small">' + esc(why) + "<br>위의 3개월 자동 모의투자는 증권사 연결 없이 가상 장부로 <b>정상 진행 중</b>이에요. 실전 직전에 연결해 봐도 충분해요.</div>";
     if (!k) return calm("아직 연결 안 함.");
     if (!k.on) return calm("꺼져 있어요.");
+    if (k.disabled) return calm("자동으로 꺼 뒀어요: " + (k.disabled.why || "") + ". 모의투자용 앱키로 바꾸면 자동으로 다시 켜져요.");
     if (k.err && !(k.orders || []).length && !(k.holdings || []).length) return calm("연결 시도 중 오류: " + k.err);
     const today = (k.orders || []).slice().reverse().slice(0, 8);
     return h + '<div class="card">' + (k.err ? '<div class="msg err">' + esc(k.err) + "</div>" : "") +
@@ -755,6 +756,25 @@
       "<dt>평가금액</dt><dd>$" + fmt(r.equity) + " (" + pct(r.ret) + ")</dd><dt>번 돈 · 잃은 돈</dt><dd>" + usd(r.gain) + " · " + usd(r.loss) + "</dd>" +
       "<dt>거래</dt><dd>" + (r.wins + r.losses) + "번 · 보유 " + (r.positions || []).length + "종목</dd><dt>최대 낙폭</dt><dd>" + fmt(r.mdd, 1) + "%</dd></dl>" +
       '<div class="small">종목 수를 적게(집중) 가져가면 결과가 어떻게 달라지는지 비교하는 용도예요</div></div>';
+  }
+  // 리허설 주문표: 증권사 앱에 그대로 넣는다면 + 채점(체결률)
+  function ticketHtml(m) {
+    const ts = m.ticket_stats || {}, pend = m.pending || [], pos = m.positions || [];
+    const rows = pend.map(o => "매수 " + o.t + " " + o.qty + "주 · 지정가 $" + fmt(o.limit) + " · 당일 유효 · 시작가 $" + fmt(o.skip_above) + " 위면 취소")
+      .concat(pos.map(p => "매도 " + p.t + " " + p.qty + "주 · 손절 $" + fmt(p.stop) + " 이하" + (p.half ? " (본전 손절)" : " · 목표 $" + fmt(p.target) + "에 절반 지정가")));
+    const RES = { "체결": "good", "미체결": "warn", "대기": "info" };
+    const tk = (m.tickets || []).slice(0, 10);
+    return '<h2>🧾 오늘의 리허설 주문표 <span class="small">(증권사 앱에 넣는다면)</span></h2><div class="card">' +
+      (rows.length ? '<ol class="plain small" style="padding-left:18px;list-style:decimal">' + rows.map(r => "<li>" + esc(r) + "</li>").join("") + "</ol>" +
+        '<button class="btn ghost" id="tkcopy" type="button">주문표 복사</button>' : '<div class="small">오늘은 낼 주문이 없어요</div>') +
+      '<div class="small" style="margin-top:6px">미국 장중 매시간 5분봉으로 증권사처럼 체결해요 · 지정가는 0.1% 넘어서야 체결 · 손절은 0.15% 불리하게' + (m.intra_at ? " · 마지막 확인 " + esc(m.intra_at) : "") + "</div></div>" +
+      '<h2>🎯 주문표 채점</h2><div class="card"><div class="row between"><b>체결률 ' + (ts.rate != null ? Math.round(ts.rate * 100) + "%" : "—") + '</b><span class="small">' +
+      (ts.n || 0) + "건 중 " + (ts.filled || 0) + "건 체결 · 안 냄 " + (ts.skipped || 0) + "건</span></div>" +
+      '<div class="plbar" style="margin:6px 0"><span class="g" style="width:' + Math.round((ts.rate || 0) * 100) + '%;background:var(--accent)"></span></div>' +
+      '<div class="small">실전 기준: 10건 이상 · 체결률 60% 이상' + (ts.avg_vs_limit != null ? " · 체결가는 지정가 대비 평균 " + (ts.avg_vs_limit >= 0 ? "+" : "") + fmt(ts.avg_vs_limit) + "%" : "") + "</div>" +
+      (tk.length ? '<div class="list" style="margin-top:6px">' + tk.map(x => '<div class="item" style="cursor:default"><span class="tk">' + esc(x.t) + '</span><span class="grow small num">' +
+        esc(x.day || x.signal) + " · " + (x.qty || "") + "주 지정가 $" + fmt(x.limit) + (x.fill_px ? " → $" + fmt(x.fill_px) + " (" + esc(x.at || "") + ")" : "") + '</span><span class="badge ' +
+        (RES[x.result] || "") + '">' + esc(x.result) + "</span></div>").join("") + "</div>" : '<div class="small">첫 주문표 결과는 다음 거래일부터 쌓여요</div>') + "</div>";
   }
   function autoSimHtml(m) {
     if (!m) return '<div class="empty">자동 모의매매는 다음 아침 리포트부터 시작돼요</div>';
@@ -774,9 +794,10 @@
       (m.fees != null ? "<dt>수수료·환전 비용(추정, 포함됨)</dt><dd>$" + fmt(m.fees) + "</dd>" : "") + "</dl></div>" +
       reportsHtml(m.reports) +
       "<h2>지난 거래일에 한 일</h2>" + '<div class="card small">' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" +
+      ticketHtml(m) +
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +
-        "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
+        "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + (p.fill_time ? " · 체결 " + esc(p.fill_time) : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
       "<h2>다음 거래일 주문 계획</h2>" + ((m.pending || []).length ? '<div class="list">' + m.pending.map(o =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
         " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + vetoTag(o.t) + "</div></div>").join("") + "</div>"
@@ -862,6 +883,9 @@
       '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
       body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
+    const tc = document.getElementById("tkcopy");
+    if (tc) tc.onclick = () => { const t = [...$app.querySelectorAll("ol.plain li")].map((li, i) => (i + 1) + ". " + li.textContent).join("\n");
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("주문표를 복사했어요"), () => toast("복사가 안 돼요. 길게 눌러 복사해 주세요")); };
     $app.querySelectorAll("[data-sell]").forEach(b => b.addEventListener("click", () => {
       const x = open.find(o => o.id === b.dataset.sell), box = document.getElementById("sell" + x.id);
       box.innerHTML = '<label>판 가격 (최근 종가 기준, 바꿀 수 있어요)</label><input type="text" inputmode="decimal" id="sp' + x.id + '" value="' + (x.now ? x.now.toFixed(2) : "") + '">' +
@@ -1249,7 +1273,7 @@
       row("아침 리포트", !!d.run_at, d.run_at ? whenText(d.run_at) : "아직 없음") +
       row("모의투자 (가상 장부)", !!sim, sim ? "진행 중 · " + sim.day + "/" + sim.days + "일째" : "다음 리포트부터") +
       row("GPT", a.off ? false : (a.at ? true : null), a.off ? "꺼짐 · " + a.off : a.at ? "켜짐" : "다음 리포트부터") +
-      row("증권사 모의계좌 (선택)", k && k.on && !k.err ? true : null, !k || !k.on ? "안 씀" : k.err ? "미연결 · 모의투자엔 영향 없음" : "연결됨") +
+      row("증권사 모의계좌 (선택)", k && k.on && !k.err ? true : null, !k || !k.on ? "안 씀" : k.disabled ? "꺼짐 · 실전 키 감지 (모의투자 영향 없음)" : k.err ? "미연결 · 모의투자엔 영향 없음" : "연결됨") +
       row("이 기기 푸시", perm === "granted" ? true : perm === "denied" ? false : null, perm === "granted" ? "켜짐" : perm === "denied" ? "차단됨" : "꺼짐") +
       "</div>";
   }

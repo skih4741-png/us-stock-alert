@@ -1,4 +1,5 @@
 """11장: 자동 모의매매(판단용 규칙)를 한국투자증권 **모의투자 계좌**에 실제 주문으로 따라 내요.
+(실전용 앱키가 들어 있으면 EGW02007을 한 번 보고 스스로 꺼져요. 키가 바뀔 때까지 다시 시도·경고하지 않아요.)
 
 장중 감시(매시) 때 돌아요.
  1) 그날 첫 실행: 모의매매가 세운 '오늘 밤 주문 계획'을 지정가 매수로 냄 (지금가가 추격 금지선 위면 안 냄)
@@ -32,9 +33,26 @@ def _load(store) -> dict:
         return {}
 
 
+LIVE_KEY_ERR = ("EGW02007", "모의투자용 앱키가 아닙니다")
+
+
+def _kid() -> str:
+    import hashlib
+    import os
+    return hashlib.sha256((os.environ.get("KIS_APP_KEY") or "").encode()).hexdigest()[:12]
+
+
 def run(store, now_utc: datetime | None = None) -> dict | None:
     ok, why = kis.configured()
     st = _load(store)
+    dis = st.get("disabled") or {}
+    if dis and dis.get("kid") == _kid():
+        log.info("증권사 모의 연결 꺼둠: %s (키가 바뀌면 다시 시도)", dis.get("why"))
+        return st          # 같은 키면 다시 시도하지 않고 경고도 안 보내요
+    if dis:
+        st.pop("disabled", None)
+        st["err"] = ""
+        log.info("앱키가 바뀌어서 증권사 모의 연결을 다시 시도해요")
     if not ok:
         st.update({"on": False, "why": why})
         store.put_blob(KEY, json.dumps(st, ensure_ascii=False))
@@ -125,6 +143,14 @@ def run(store, now_utc: datetime | None = None) -> dict | None:
         st["err"] = ""
     except kis.KisError as e:
         st["err"] = str(e)
+        if any(k in str(e) for k in LIVE_KEY_ERR):
+            st["disabled"] = {"why": "넣어 둔 앱키가 실전용이라 모의 서버가 거절해요", "kid": _kid(), "at": kst.isoformat(timespec="minutes")}
+            st["err"] = ""
+            notify.send_slack(":information_source: 증권사 모의 연결을 자동으로 껐어요 — 넣어 둔 한국투자증권 앱키가 실전용이에요. "
+                              "자동 모의투자(가상 장부·장중 체결·리허설 주문표)는 그대로 정상 진행돼요. 모의투자용 키로 바꾸면 자동으로 다시 켜져요.")
+            st["at"] = kst.isoformat(timespec="minutes")
+            store.put_blob(KEY, json.dumps(st, ensure_ascii=False, default=str))
+            return st
         if st.get("err_day") != day:
             st["err_day"] = day
             notify.send_slack(f":warning: 증권사 모의투자 연결 실패 — {e}")
