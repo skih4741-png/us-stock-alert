@@ -696,6 +696,13 @@
     return '<br><span class="badge ' + (v.veto ? "bad" : "") + '">AI 거부권(기록만): ' + (v.veto ? "막을 이유 있음" : "통과") + "</span>" +
       (S.ai && S.ai.pm && S.ai.pm[t] ? ' <a class="link" href="#/pick/' + encodeURIComponent(t) + '">사전 부검 →</a>' : "");
   }
+  function reportsHtml(reps) {
+    if (!reps || !reps.length) return '<div class="card sub">일일 리포트는 다음 아침 리포트부터 여기에 쌓여요.</div>';
+    const r0 = reps[0];
+    return '<h2>오늘의 일일 리포트</h2><div class="card"><b>' + esc(r0.title) + '</b><div class="small">' + esc(whenText(r0.at)) + '</div><pre class="weekly">' + esc(r0.text) + "</pre></div>" +
+      (reps.length > 1 ? '<details class="sig"><summary><b>지난 일일 리포트 ' + (reps.length - 1) + "개</b></summary>" +
+        reps.slice(1).map(r => '<div class="card"><b>' + esc(r.title) + '</b><div class="small">' + esc(r.date) + '</div><pre class="weekly">' + esc(r.text) + "</pre></div>").join("") + "</details>" : "");
+  }
   function kisHtml(k) {
     let h = '<h2>한국투자증권 모의투자 계좌 <span class="small">(같은 주문을 실제 모의계좌에)</span></h2>';
     if (!k) return h + '<div class="card sub">미국 장중 첫 감시 때부터 연결돼요. KIS 비밀 값과 KIS_MODE=paper가 필요해요.</div>';
@@ -729,6 +736,7 @@
       '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
       '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
       '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd></dl></div>" +
+      reportsHtml(m.reports) +
       "<h2>지난 거래일에 한 일</h2>" + '<div class="card small">' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" +
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +

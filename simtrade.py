@@ -147,7 +147,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     spy = H("SPY")
     val = st["cash"] + sum(p["qty"] * float(H(p["t"])["Close"].iloc[-1]) for p in st["positions"] if H(p["t"]) is not None)
     spy_px = float(spy["Close"].iloc[-1]) if spy is not None else None
-    if not st["equity"] or st["equity"][-1][0] != bar_date:
+    if st["equity"] and st["equity"][-1][0] == bar_date:
+        st["equity"][-1] = [bar_date, round(val, 2), spy_px]   # 같은 날 다시 돌면 최신 값으로
+    else:
         st["equity"].append([bar_date, round(val, 2), spy_px])
 
     # 월 손실 한도
@@ -192,7 +194,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                                   "why": f"총점 {p.get('total'):.0f} · 추세 합류 {t5}/5 · 손익비 {pl.get('rr')}"})
             cash -= qty * limit * (1 + FEE)
             slots -= 1
-    st["today"] = st["log"][n_log:]
+    st["today"] = st["log"][n_log:] or [x for x in st["log"] if x[:10] == bar_date]
     st["log"] = st["log"][-200:]
     st["updated"] = now_iso
     save(store, st)
@@ -229,7 +231,8 @@ def summary(st: dict, sig: dict | None = None) -> dict:
     mdd = _mdd([e[1] for e in eq])
     spy_mdd = _mdd(spy_vals) if spy_vals else None
     d0 = date.fromisoformat(st["start"])
-    today = date.fromisoformat(eq[-1][0]) if eq else d0
+    import config
+    today = config.now_kst().date()
     d5 = (sig or {}).get("d5") or {}
     checks = [
         ["모의 거래 12번 이상", len(closed) >= 12, f"{len(closed)}번"],
@@ -248,12 +251,12 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         ["수수료·환전 비용을 빼고도 플러스", last > budget, f"${last - budget:+.2f}"],
     ]
     return {
-        "start": st["start"], "end": st["end"], "day": (today - d0).days, "days": DAYS, "budget": budget,
+        "start": st["start"], "end": st["end"], "day": max(1, (today - d0).days + 1), "days": DAYS, "budget": budget,
         "equity": round(last, 2), "cash": round(st["cash"], 2), "ret": round(ret, 2), "spy_ret": None if spy_ret is None else round(spy_ret, 2),
         "mdd": round(mdd, 2), "gain": round(sum(c["pnl"] for c in wins), 2), "loss": round(sum(c["pnl"] for c in losses), 2),
         "wins": len(wins), "losses": len(losses), "positions": st["positions"], "pending": st["pending"],
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
-        "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "curve": [[e[0], e[1]] for e in eq][-120:],
+        "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
     }
 
 
@@ -300,3 +303,10 @@ def daily_text(st: dict, sig: dict | None = None) -> tuple[str, str, bool]:
     lines.append(f"실전 기준 {sum(1 for c in m['checks'] if c[1])}/{len(m['checks'])} 통과 중")
     title = f"자동 모의 {m['day']}/{m['days']}일째 · ${m['equity']:.2f} ({m['ret']:+.1f}%)"
     return title, "\n".join(lines), traded
+
+
+def keep_report(store, st: dict, title: str, text: str, at: str):
+    """앱 '자동 모의'에서 볼 수 있게 일일 리포트를 30일치 보관."""
+    reps = [r for r in (st.get("reports") or []) if r.get("date") != at[:10]]
+    st["reports"] = ([{"date": at[:10], "at": at, "title": title, "text": text}] + reps)[:30]
+    save(store, st)

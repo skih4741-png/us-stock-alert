@@ -84,8 +84,8 @@ class Client:
 
     def _wait(self):  # 모의투자는 초당 호출 수가 적어요
         d = time.time() - self._last
-        if d < 0.6:
-            time.sleep(0.6 - d)
+        if d < 1.1:   # 모의투자는 초당 1건
+            time.sleep(1.1 - d)
         self._last = time.time()
 
     def _get(self, path, tr, params):

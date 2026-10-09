@@ -583,6 +583,7 @@ def run_sim(store, app: dict, now):
             # 일일 리포트: 슬랙 매일 + 앱 알림, 사고판 날만 푸시
             title, text, traded = simtrade.daily_text(st, sig)
             at = now.isoformat(timespec="minutes")
+            simtrade.keep_report(store, st, title, text, at)
             notify.send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
                                       {"type": "section", "text": {"type": "mrkdwn", "text": "```" + text[:2800] + "```"}}])
             appdata.add_alert(store, "sim", title, " / ".join(x for x in (st.get("today") or ["거래 없음"])[:3]), at, "info")
