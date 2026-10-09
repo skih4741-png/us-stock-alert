@@ -420,6 +420,24 @@
   const findPick = t => allPicks().find(p => p.t === t);
   const findHold = t => (S.data.holdings || []).find(h => h.t === t);
 
+  // 오늘 아침 리포트가 늦으면 알려줘요 (화~토 한국 9시 이후인데 예전 것이면)
+  function freshBanner() {
+    const d = S.data; if (!d || !d.run_at) return "";
+    const now = new Date(), kst = new Date(now.getTime() + (now.getTimezoneOffset() + 540) * 60000);
+    const today = kst.toISOString().slice(0, 10), dow = kst.getUTCDay(), hr = kst.getUTCHours();
+    if (String(d.run_at).slice(0, 10) >= today || dow === 0 || dow === 1 || hr < 9) return "";
+    return '<div class="msg note">오늘 아침 리포트가 아직 안 왔어요. 지금 화면은 ' + esc(whenText(d.run_at)) + " 기준이에요. 깃허브 예약 실행이 몇 시간 밀리는 날이 있어요.</div>";
+  }
+  // 토스처럼 내 자산을 먼저: 보유 종목 평가금액·손익
+  function assetCard() {
+    const hs = (S.data.holdings || []).filter(h => h.qty && h.avg && h.price);
+    if (!hs.length) return "";
+    const val = hs.reduce((a, h) => a + h.qty * h.price, 0), cost = hs.reduce((a, h) => a + h.qty * h.avg, 0), pl = val - cost;
+    const up = hs.filter(h => h.price >= h.avg).length;
+    return '<a class="card" href="#/holdings" style="display:block;color:var(--ink)"><div class="sub">내 미국주식 (' + hs.length + "종목 · 종가 기준)</div>" +
+      '<div class="row between"><span class="big num">$' + fmt(val) + '</span><b class="num ' + (pl >= 0 ? "good-t" : "bad-t") + '">' + usd(pl) + " (" + pct(cost ? pl / cost * 100 : 0) + ")</b></div>" +
+      '<div class="small">수익 ' + up + "종목 · 손실 " + (hs.length - up) + "종목 · 보유 탭에서 자세히 →</div></a>";
+  }
   function homeSimCard() {
     const m = S.perf && S.perf.sim;
     if (!m) return "";
@@ -455,7 +473,7 @@
       '<div class="quick"><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
         (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
-      briefCard() + homeSimCard() + homePaperCard() +
+      freshBanner() + assetCard() + briefCard() + homeSimCard() + homePaperCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -481,10 +499,14 @@
     const d = S.data;
     const limits = { all: Infinity, "10": 10, "30": 30, "50": 50, "100": 100 };
     const lim = limits[S.filter] || Infinity;
+    const q = (S.q || "").trim().toUpperCase();
+    const hit = p => !q || p.t.toUpperCase().indexOf(q) >= 0 || String(p.name || "").toUpperCase().indexOf(q) >= 0;
     const bands = (d.bands || []).filter(b => {
       const lo = parseFloat(b.name); return isNaN(lo) || lo < lim;
-    }).filter(b => b.picks.length || (b.etf_picks || []).length || (b.dropped || []).length);
-    appShell("picks", '<div class="head"><h1>매수 후보</h1></div>' + statusLine() +
+    }).map(b => q ? Object.assign({}, b, { picks: b.picks.filter(hit), etf_picks: (b.etf_picks || []).filter(hit), dropped: [] }) : b)
+      .filter(b => b.picks.length || (b.etf_picks || []).length || (b.dropped || []).length);
+    appShell("picks", '<div class="head"><div><h1>매수 후보</h1><div class="small">미국 ' + esc(d.date) + ' 종가 기준 · 실제 체결가는 다를 수 있어요</div></div></div>' + statusLine() +
+      '<input type="text" id="pq" class="search" placeholder="종목 코드·이름 찾기 (예: MO)" value="' + esc(S.q || "") + '" autocomplete="off">' +
       '<div class="chips">' + [["all", "전체"], ["10", "10달러 이하"], ["30", "30달러 이하"], ["50", "50달러 이하"], ["100", "100달러 이하"]]
         .map(c => '<button class="chip' + (S.filter === c[0] ? " on" : "") + '" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
       (d.market.rest_day ? '<div class="msg note">오늘은 매수 쉬는 날이에요. 아래 목록은 참고용이에요.</div>' : "") +
@@ -496,6 +518,8 @@
       ).join("") : '<div class="empty">이 가격대에는 오늘 후보가 없어요</div>') +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => { S.filter = b.dataset.f; store.set("filter", S.filter); viewPicks(); }));
+    const qi = document.getElementById("pq");
+    qi.addEventListener("input", () => { clearTimeout(viewPicks._t); viewPicks._t = setTimeout(() => { S.q = qi.value; viewPicks(); const n = document.getElementById("pq"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); });
   }
 
   function scoreBars(cats) {
@@ -735,7 +759,8 @@
       '<div class="pl"><div><div class="small">번 돈 (' + m.wins + '건)</div><div class="big num good-t">' + usd(m.gain) + "</div></div>" +
       '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
       '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
-      '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd></dl></div>" +
+      '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd>" +
+      (m.fees != null ? "<dt>수수료·환전 비용(추정, 포함됨)</dt><dd>$" + fmt(m.fees) + "</dd>" : "") + "</dl></div>" +
       reportsHtml(m.reports) +
       "<h2>지난 거래일에 한 일</h2>" + '<div class="card small">' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" +
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
@@ -822,7 +847,7 @@
       body = w && w.lines ? '<div class="card"><div class="small">' + esc(whenText(w.at)) + '</div><pre class="weekly">' + esc(w.lines.join("\n")) + "</pre></div>"
         : '<div class="empty">주간 리포트는 일요일에 만들어져요</div>';
     }
-    appShell("score", '<div class="head"><div><h1>성적 · 모의투자</h1><div class="small">가상 1,000달러 · 실제 주문 없음</div></div></div>' + statusLine() +
+    appShell("score", '<div class="head"><div><h1>성적 · 모의투자</h1><div class="small">모두 가상 돈 · 실제 주문 없음</div></div></div>' + statusLine() +
       '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
       body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
@@ -1005,6 +1030,18 @@
     });
   }
 
+  function systemStatusHtml() {
+    const d = S.data || {}, k = S.kis, a = S.ai || {}, sim = S.perf && S.perf.sim;
+    const row = (name, ok, text) => '<div class="srow"><span class="sname">' + name + '</span><span class="badge wrap ' + (ok === true ? "good" : ok === false ? "bad" : "warn") + '">' + esc(text) + "</span></div>";
+    const perm = typeof Notification !== "undefined" ? Notification.permission : "";
+    return '<h2>시스템 상태</h2><div class="card">' +
+      row("아침 리포트", !!d.run_at, d.run_at ? whenText(d.run_at) : "아직 없음") +
+      row("자동 모의매매", !!sim, sim ? sim.day + "/" + sim.days + "일째" : "꺼짐") +
+      row("GPT", a.off ? false : (a.at ? true : null), a.off ? "꺼짐 · " + a.off : a.at ? "켜짐" : "다음 리포트부터") +
+      row("증권사 모의계좌", k ? (k.on && !k.err) : null, !k ? "연결 전" : !k.on ? "꺼짐" : k.err ? "오류 · " + String(k.err).slice(0, 40) : "연결됨") +
+      row("이 기기 푸시", perm === "granted" ? true : perm === "denied" ? false : null, perm === "granted" ? "켜짐" : perm === "denied" ? "차단됨" : "꺼짐") +
+      "</div>";
+  }
   function aiSettingsHtml() {
     const u = S.aiUsage || {}, st = (S.ai && S.ai.status) || {};
     const w = u.cap ? Math.min(100, (u.total || 0) / u.cap * 100) : 0;
@@ -1023,7 +1060,7 @@
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
       '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
-      aiSettingsHtml() +
+      systemStatusHtml() + aiSettingsHtml() +
       '<h2>계정</h2><a class="btn ghost" href="#/password">비밀번호 바꾸기</a>' +
       '<button class="btn ghost" id="hist">최근 로그인 기록</button><div id="histOut"></div>' +
       '<button class="btn ghost" id="out">로그아웃</button><button class="btn danger" id="outAll">모든 기기 로그아웃</button>' +

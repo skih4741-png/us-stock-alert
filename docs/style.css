@@ -205,3 +205,9 @@ ol.plain { padding-left: 20px; margin: 6px 0; }
   width: calc(100% + 32px); margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px;
   background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 #app > .chips { padding-top: 6px; padding-bottom: 6px; margin-top: 0; }
+/* 레플리카 개선: 검색창 */
+input.search { margin: 8px 0 4px; }
+.srow { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.srow:last-child { border-bottom: 0; }
+.srow .sname { white-space: nowrap; color: var(--sub); font-size: 14px; }
+.badge.wrap { white-space: normal; text-align: right; overflow-wrap: anywhere; }

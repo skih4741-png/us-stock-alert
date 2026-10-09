@@ -254,7 +254,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "start": st["start"], "end": st["end"], "day": max(1, (today - d0).days + 1), "days": DAYS, "budget": budget,
         "equity": round(last, 2), "cash": round(st["cash"], 2), "ret": round(ret, 2), "spy_ret": None if spy_ret is None else round(spy_ret, 2),
         "mdd": round(mdd, 2), "gain": round(sum(c["pnl"] for c in wins), 2), "loss": round(sum(c["pnl"] for c in losses), 2),
-        "wins": len(wins), "losses": len(losses), "positions": st["positions"], "pending": st["pending"],
+        "wins": len(wins), "losses": len(losses), "fees": round(sum(c["qty"] * (c["entry"] + c["exit"]) * FEE for c in closed) + sum(p["qty"] * p["entry"] * FEE for p in st["positions"]), 2), "positions": st["positions"], "pending": st["pending"],
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
         "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
     }
@@ -293,7 +293,8 @@ def daily_text(st: dict, sig: dict | None = None) -> tuple[str, str, bool]:
     today = st.get("today") or []
     traded = any((" 매수 " in x or " 매도 " in x) for x in today)
     lines = [f"평가 ${m['equity']:.2f} ({m['ret']:+.1f}%) · 같은 기간 SPY " + (f"{m['spy_ret']:+.1f}%" if m["spy_ret"] is not None else "—"),
-             f"번 돈 +${m['gain']:.2f} ({m['wins']}건) · 잃은 돈 -${abs(m['loss']):.2f} ({m['losses']}건) · 현금 ${m['cash']:.2f}", ""]
+             f"번 돈 +${m['gain']:.2f} ({m['wins']}건) · 잃은 돈 " + (f"-${abs(m['loss']):.2f}" if m['loss'] < 0 else "$0.00") + f" ({m['losses']}건) · 현금 ${m['cash']:.2f}",
+             f"수수료·환전 비용(추정) ${m['fees']:.2f} 포함", ""]
     lines.append("■ 지난 거래일에 한 일")
     lines += [f"• {x}" for x in today] or ["• 체결·매도 없음"]
     lines.append("■ 가진 종목")
