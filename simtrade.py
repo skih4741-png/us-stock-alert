@@ -19,7 +19,7 @@ import prices
 
 log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
-REF_KEY = "sim_ref"  # 참고용 100달러 (실전 첫 금액 비교용, 판단에 안 씀)
+REF_KEY = "sim_ref"  # 참고용 1,000달러 · 최대 2종목 집중형 (판단용 5종목 분산과 비교, 판단에 안 씀)
 FEE = 0.0025 + 0.0010      # 한쪽 거래 비용 추정 (수수료 + 환전)
 DAYS = 90                  # 시험 기간 (달력 기준)
 DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
@@ -251,7 +251,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         ["수수료·환전 비용을 빼고도 플러스", last > budget, f"${last - budget:+.2f}"],
     ]
     return {
-        "start": st["start"], "end": st["end"], "day": max(1, (today - d0).days + 1), "days": DAYS, "budget": budget,
+        "start": st["start"], "end": st["end"], "day": max(1, (today - d0).days + 1), "days": DAYS, "budget": budget, "max_pos": cfg["max_pos"],
         "equity": round(last, 2), "cash": round(st["cash"], 2), "ret": round(ret, 2), "spy_ret": None if spy_ret is None else round(spy_ret, 2),
         "mdd": round(mdd, 2), "gain": round(sum(c["pnl"] for c in wins), 2), "loss": round(sum(c["pnl"] for c in losses), 2),
         "wins": len(wins), "losses": len(losses), "fees": round(sum(c["qty"] * (c["entry"] + c["exit"]) * FEE for c in closed) + sum(p["qty"] * p["entry"] * FEE for p in st["positions"]), 2), "positions": st["positions"], "pending": st["pending"],

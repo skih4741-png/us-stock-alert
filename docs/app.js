@@ -751,10 +751,10 @@
   }
   function refSimHtml(r) {
     if (!r) return "";
-    return '<h2>참고용 $' + fmt(r.budget, 0) + ' 모의 <span class="small">(같은 규칙, 판단에는 안 써요)</span></h2><div class="card"><dl class="kv num">' +
+    return '<h2>참고용 $' + fmt(r.budget, 0) + ' 모의' + (r.max_pos ? " · 최대 " + r.max_pos + "종목" : "") + ' <span class="small">(같은 규칙, 판단에는 안 써요)</span></h2><div class="card"><dl class="kv num">' +
       "<dt>평가금액</dt><dd>$" + fmt(r.equity) + " (" + pct(r.ret) + ")</dd><dt>번 돈 · 잃은 돈</dt><dd>" + usd(r.gain) + " · " + usd(r.loss) + "</dd>" +
       "<dt>거래</dt><dd>" + (r.wins + r.losses) + "번 · 보유 " + (r.positions || []).length + "종목</dd><dt>최대 낙폭</dt><dd>" + fmt(r.mdd, 1) + "%</dd></dl>" +
-      '<div class="small">금액에 따라 결과가 얼마나 달라지는지 비교하는 용도예요</div></div>';
+      '<div class="small">종목 수를 적게(집중) 가져가면 결과가 어떻게 달라지는지 비교하는 용도예요</div></div>';
   }
   function autoSimHtml(m) {
     if (!m) return '<div class="empty">자동 모의매매는 다음 아침 리포트부터 시작돼요</div>';
