@@ -366,6 +366,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 print("[앱 데이터] 시트 '앱 데이터' 탭에 저장했어요")
                 run_sim(store, app, now)
                 run_ai(store, app, cfg, now, send=False)
+                run_news(store, app, cfg, now, send=False)
                 save_perf(store, now)
             sent = {"mail": False, "slack": False}
         else:
@@ -385,6 +386,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 log.warning("푸시 실패: %s", e)
             run_sim(store, app, now)
             run_ai(store, app, cfg, now)
+            run_news(store, app, cfg, now)
             save_perf(store, now)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
@@ -563,6 +565,21 @@ def run_ai(store, app: dict, cfg: dict, now, send: bool = True):
                           top[0].get("무슨 일", "")[:150], "#/home", "daily", tag="brief")
     except Exception as e:
         log.warning("GPT 기능 실패: %s", e)
+
+
+def run_news(store, app: dict, cfg: dict, now, send: bool = True):
+    """경제뉴스 → 미국주식 트렌드 리포트 (초등학생도 5초에). 실패해도 리포트는 그대로."""
+    try:
+        import news
+        out = news.build(store, cfg, [h["t"] for h in app.get("holdings", [])])
+        rep = out.get("report") or {}
+        if send and rep:
+            notify.send_slack("오늘의 경제뉴스 5초 요약", [{"type": "header", "text": {"type": "plain_text", "text": "오늘의 경제뉴스 5초 요약"}},
+                                                    {"type": "section", "text": {"type": "mrkdwn", "text": news.slack_text(out)[:2900]}}])
+            appdata.add_alert(store, "news", "오늘의 경제뉴스", " / ".join(rep.get("5초 요약") or [])[:200], now.isoformat(timespec="minutes"), "info")
+        ai.flush()
+    except Exception as e:
+        log.warning("경제뉴스 리포트 실패: %s", e)
 
 
 def run_sim(store, app: dict, now):

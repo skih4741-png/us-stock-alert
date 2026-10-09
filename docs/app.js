@@ -472,7 +472,7 @@
     appShell("home",
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button></div>" +
-      statusLine() + homeSimCard() +
+      statusLine() + homeSimCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -993,6 +993,132 @@
     });
   }
 
+
+  /* ---------- 경제뉴스 → 미국주식 트렌드 (초등학생도 5초에) ---------- */
+  const DOT = { "초록": "🟢", "노랑": "🟡", "빨강": "🔴" };
+  const WEATHER = { "맑음": "☀️", "구름 조금": "🌤️", "흐림": "☁️", "비": "🌧️", "폭풍": "⛈️" };
+  const KIND = { "호재": "good", "악재": "bad", "소음": "" };
+  // GPT가 없어도 보이는 기본 상식 (숫자 없음 · 투자 권유 아님)
+  const TOPIC_BASICS = {
+    "헬스케어": {
+      what: "병원·약·의료기기·건강보험 회사들이에요.",
+      ex: "감기에 걸리면 경기가 나빠도 약은 사요. 그래서 경기가 나쁠 때 덜 흔들리는 편이에요.",
+      good: ["사람은 늙고 아프면 꼭 돈을 써요 (수요가 꾸준)", "신약이 성공하면 몇 년 동안 크게 벌어요", "배당을 주는 큰 제약사가 많아요"],
+      care: ["약값 규제·정부 정책 뉴스 하나에 업종 전체가 흔들려요", "신약 실패나 특허 만료(복제약 등장)면 매출이 뚝 떨어져요",
+        "작은 바이오 회사는 아직 돈을 못 버는 곳이 많아요 (돈이 떨어지면 새 주식 발행)", "보험사는 병원비가 예상보다 많이 나가면 이익이 줄어요"],
+      check: ["매출이 몇 분기째 늘고 있나 (기업명 + 매출 + 최근 4개 분기)", "주요 약의 특허가 언제 끝나나", "PER이 같은 업종 평균보다 너무 높지 않나", "현금이 1년 이상 버틸 만큼 있나 (바이오)"],
+    },
+    "모기지 리츠": {
+      what: "집 담보대출(모기지) 채권을 빌린 돈으로 사서, 이자 차이로 버는 회사예요. NLY 같은 곳이에요.",
+      ex: "은행에서 3% 이자로 빌려 5% 이자를 주는 채권을 사면 2%가 남아요. 그런데 빌린 이자가 5%로 오르면 남는 게 없어요.",
+      good: ["배당이 큰 편이에요 (번 돈 대부분을 나눠 줘야 하는 구조)", "금리가 내려가고 안정되면 채권 값이 올라 좋아져요"],
+      care: ["금리가 갑자기 오르면 빌린 이자는 오르고 채권 값은 떨어져 이중으로 손해예요",
+        "빚(레버리지)을 많이 써서 작은 변화도 크게 커져요", "배당이 크다고 안전한 게 아니에요. 이익이 줄면 배당을 깎고, 그날 주가도 크게 떨어져요",
+        "주가가 장부가치(회사가 가진 채권 값)보다 비싸면 비싸게 사는 거예요", "금리가 많이 내려가면 사람들이 대출을 갈아타서(조기상환) 높은 이자 채권이 사라져요"],
+      check: ["주당 장부가치(BV)가 최근 4개 분기 동안 늘었나 줄었나", "주가 ÷ 장부가치(PBR)가 1보다 높나 낮나", "배당을 최근에 깎은 적이 있나", "10년 국채 금리가 한 달 사이 크게 움직였나"],
+      sell: ["배당 삭감 발표", "주당 장부가치가 2분기 연속 감소", "규칙의 손절선 아래로 내려감"],
+    },
+  };
+  function homeNewsCard() {
+    const n = S.ai && S.ai.news, r = n && n.report;
+    if (!n) return '<a class="card newscard" href="#/news"><b>📰 오늘의 경제뉴스</b><div class="small">아침 리포트 때부터 매일 와요 · 관심 주제: 헬스케어, 모기지 리츠 · 미리 보기 →</div></a>';
+    if (!r) return '<a class="card newscard" href="#/news"><b>📰 오늘의 경제뉴스</b><div class="small">' + esc(n.why || "") + " · 시장 숫자 보기 →</div></a>";
+    const w = r["시장 날씨"] || {};
+    return '<a class="card newscard" href="#/news"><div class="row between"><b>📰 오늘의 경제뉴스</b><span class="small">' + esc(whenText(n.at)) + "</span></div>" +
+      '<div class="newsw">' + (WEATHER[w["날씨"]] || "🌤️") + " <b>시장 날씨: " + esc(w["날씨"] || "") + "</b> " + esc(w["한 줄"] || "") + "</div>" +
+      '<ul class="plain five">' + (r["5초 요약"] || []).slice(0, 3).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" +
+      '<div class="chips" style="margin:6px 0 0">' + (r["관심 주제"] || []).map(t => '<span class="chip">' + (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"]) + "</span>").join("") + "</div>" +
+      '<div class="small">예시·시나리오·토론까지 보기 →</div></a>';
+  }
+  function srcLinks(arr) {
+    arr = (arr || []).filter(x => x && x["링크"]);
+    return arr.length ? '<div class="small">' + arr.slice(0, 3).map(x => '<a class="link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">' + esc((x["제목"] || "출처").slice(0, 40)) + "</a>").join(" · ") + "</div>" : "";
+  }
+  function topicCard(t, basics) {
+    const b = basics || {};
+    const list = (title, arr, cls) => (arr && arr.length ? '<div class="sub" style="margin-top:8px">' + title + '</div><ul class="plain ' + (cls || "") + '">' + arr.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "");
+    const sc = t["시나리오"] || {}, d = t["토론"] || {};
+    return '<div class="card topic"><div class="row between"><b style="font-size:1.1em">' + (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"]) + '</b><span class="badge ' +
+      (t["신호등"] === "초록" ? "good" : t["신호등"] === "빨강" ? "bad" : "warn") + '">' + esc(t["신호등"] || "기본 상식") + "</span></div>" +
+      (t["5초 답"] ? '<div class="five-a">' + esc(t["5초 답"]) + "</div>" : "") +
+      (b.what ? '<div class="small">' + esc(b.what) + "</div>" : "") +
+      ((t["예시"] || b.ex) ? '<div class="ex">💡 예시: ' + esc(t["예시"] || b.ex) + "</div>" : "") +
+      list("👍 좋은 점", t["좋은 점"] || b.good) + list("⚠️ 조심할 점", t["조심할 점"] || b.care) +
+      (sc["낙관"] ? '<div class="sub" style="margin-top:8px">🔮 시나리오 3가지</div><dl class="kv"><dt>😀 낙관</dt><dd>' + esc(sc["낙관"]) + "</dd><dt>😐 기준</dt><dd>" + esc(sc["기준"]) + "</dd><dt>😟 비관</dt><dd>" + esc(sc["비관"]) + "</dd></dl>" : "") +
+      (d["강세"] ? '<details class="sig"><summary><b>🗣️ AI 토론 (강세 vs 약세 → 위험관리 3명)</b></summary><dl class="kv"><dt>🐂 강세</dt><dd>' + esc(d["강세"]) + "</dd><dt>🐻 약세</dt><dd>" + esc(d["약세"]) +
+        "</dd><dt>🔥 공격형</dt><dd>" + esc(d["공격형"]) + "</dd><dt>⚖️ 중립형</dt><dd>" + esc(d["중립형"]) + "</dd><dt>🛡️ 보수형</dt><dd>" + esc(d["보수형"]) + "</dd><dt>📌 정리</dt><dd>" + esc(d["정리"]) + "</dd></dl></details>" : "") +
+      list("✅ 사기 전에 확인할 것", t["확인할 것"] || b.check) + list("🚪 팔아야 하는 신호", t["팔아야 하는 신호"] || b.sell) +
+      (t["내 보유와 닿는 곳"] ? '<div class="msg note">내 보유: ' + esc(t["내 보유와 닿는 곳"]) + "</div>" : "") + srcLinks(t["출처"]) + "</div>";
+  }
+  function viewNews() {
+    const n = (S.ai && S.ai.news) || null, r = (n && n.report) || null;
+    let h = '<button class="back" onclick="history.back()">← 뒤로</button><h1>오늘의 경제뉴스</h1>' + statusLine();
+    if (n) h += '<div class="small">' + esc(whenText(n.at)) + " 기준 · 뉴스를 쉬운 말로 바꾼 참고 자료예요 (투자 권유 아님)</div>";
+    if (r) {
+      const w = r["시장 날씨"] || {};
+      h += '<div class="card"><div class="big">' + (WEATHER[w["날씨"]] || "🌤️") + " 시장 날씨: " + esc(w["날씨"] || "") + "</div><div>" + esc(w["한 줄"] || "") + "</div>" +
+        (w["예시"] ? '<div class="ex">💡 ' + esc(w["예시"]) + "</div>" : "") + "</div>" +
+        '<h2>⏱️ 5초 요약</h2><div class="card"><ul class="plain five">' + (r["5초 요약"] || []).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>";
+      if ((r["숫자 3개"] || []).length) h += '<h2>🔢 오늘 꼭 볼 숫자 3개</h2><div class="nums3">' + r["숫자 3개"].map(x => '<div class="card"><div class="small">' + esc(x["이름"]) +
+        '</div><div class="big num">' + esc(x["값"]) + '</div><div class="small">' + esc(x["쉬운 뜻"]) + "</div></div>").join("") + "</div>";
+      if ((r["트렌드"] || []).length) h += "<h2>📈 지금 미국 주식 트렌드</h2>" + r["트렌드"].map((x, i) => '<div class="card"><div class="row between"><b>' + (i + 1) + ". " + esc(x["제목"]) +
+        '</b><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div><div>" + esc(x["한 줄"]) + "</div>" +
+        (x["예시"] ? '<div class="ex">💡 예시: ' + esc(x["예시"]) + "</div>" : "") +
+        '<div class="small">왜 중요? ' + esc(x["왜 중요"] || "") + (x["관련 업종"] ? " · 관련: " + esc(x["관련 업종"]) : "") + "</div>" + srcLinks(x["출처"]) + "</div>").join("");
+      if ((r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 내 보유와 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
+        encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
+    } else {
+      h += '<div class="msg note">' + esc(n ? (n.why || "오늘 GPT 리포트가 없어요") : "첫 리포트는 다음 아침 리포트 때 만들어져요.") + " 아래 기본 상식은 지금도 볼 수 있어요.</div>";
+    }
+    // 관심 주제
+    const topics = r && (r["관심 주제"] || []).length ? r["관심 주제"] : Object.keys(TOPIC_BASICS).map(k => ({ "이름": k }));
+    h += '<h2>🔍 관심 주제 <span class="small">(투자해도 될까? 대신 신호와 확인할 것)</span></h2>' + topics.map(t => topicCard(t, TOPIC_BASICS[t["이름"]])).join("");
+    // 업종 날씨
+    const sec = (n && n.sectors) || [];
+    if (sec.length) h += '<h2>🗺️ 업종 날씨 (1주)</h2><div class="card"><div class="secs">' + sec.map(x => '<div class="sec ' + ((x["1주"] || 0) >= 0 ? "up" : "dn") + '"><b>' + esc(x["이름"]) +
+      '</b><span class="num">' + pct(x["1주"]) + "</span></div>").join("") + "</div>" +
+      ((r && r["업종 날씨"] || []).length ? '<ul class="plain small">' + r["업종 날씨"].map(x => "<li><b>" + esc(x["업종"]) + "</b> " + esc(x["1주"] || "") + " · " + esc(x["한 줄"]) + "</li>").join("") + "</ul>" : "") + "</div>";
+    const mk = (n && n.market) || {};
+    if (Object.keys(mk).length) h += '<h2>📊 시장 숫자</h2><div class="card"><dl class="kv num">' + Object.values(mk).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + (x["단위"] || "") +
+      ' <span class="small">1일 ' + (x["변화 단위"] ? fmt(x["1일"]) + "%p" : pct(x["1일"])) + " · 1주 " + (x["변화 단위"] ? fmt(x["1주"]) + "%p" : pct(x["1주"])) + "</span></dd>").join("") + "</dl></div>";
+    if (r && (r["오늘의 단어"] || []).length) h += "<h2>📚 오늘의 단어</h2>" + r["오늘의 단어"].map(x => '<div class="card"><b>' + esc(x["말"]) + "</b> = " + esc(x["쉬운 뜻"]) + (x["예시"] ? '<div class="ex">💡 ' + esc(x["예시"]) + "</div>" : "") + "</div>").join("");
+    if (r && (r["더 물어보기"] || []).length) h += '<h2>💬 더 물어보기 <span class="small">(누르면 AI에게 바로)</span></h2><div class="chips wrap">' +
+      r["더 물어보기"].map(q => '<button class="chip" data-q="' + esc(q) + '">' + esc(q) + "</button>").join("") + "</div>";
+    if (n && (n.headlines || []).length) h += '<details class="sig"><summary><b>원문 헤드라인 ' + n.headlines.length + "개</b></summary>" + '<ul class="plain small">' +
+      n.headlines.map(x => "<li>" + (x["링크"] ? '<a class="link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">' + esc(x["제목"]) + "</a>" : esc(x["제목"])) + ' <span class="small">' + esc(x["출처"] || "") + "</span></li>").join("") + "</ul></details>";
+    const hist = (S.ai && S.ai.news_hist) || [];
+    if (hist.length > 1) h += '<details class="sig"><summary><b>지난 경제뉴스 ' + (hist.length - 1) + "일</b></summary>" + hist.slice(1).map(x => '<div class="card"><b>' + esc(x.date) + "</b>" +
+      '<ul class="plain small">' + (x.summary || []).map(y => "<li>" + esc(y) + "</li>").join("") + "</ul>" + '<div class="small">' + (x.topics || []).map(t => (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"])).join(" · ") + "</div></div>").join("") + "</details>";
+    h += '<p class="foot">관심 주제는 구글 시트 \'설정\' 탭 \'뉴스 관심 주제\'에서 바꿀 수 있어요 (헬스케어, 모기지 리츠, 기술, 에너지, 금융, 부동산 리츠, 배당 BDC). ' + esc(DISCLAIMER) + "</p>";
+    appShell("home", h);
+    $app.querySelectorAll("[data-q]").forEach(b => b.addEventListener("click", () => { S.ask = { mode: "quick", hist: [], draft: b.dataset.q }; go("#/ask"); }));
+  }
+
+  // 질문 템플릿 (공유해 준 카드: 경제정리노트 15가지 + 클로드 금융 6가지 · 핵심은 기업명 + 지표 + 기간)
+  const ASK_TPL = [
+    ["사업 이해", "{T}가 어떤 사업으로 돈을 버는지 사업별 매출 비중과 핵심 수익원을 설명해줘."],
+    ["최근 실적", "{T}의 최근 4개 분기 매출·영업이익·순이익과 전년 대비 좋아진 점, 아쉬운 점을 정리해줘."],
+    ["재무 위험", "{T}의 재무제표에서 부채·현금흐름·이익의 위험 신호를 체크리스트로 정리해줘."],
+    ["경쟁사 비교", "{T}와 같은 업종 경쟁사를 성장률·수익성·밸류에이션 기준으로 비교해줘."],
+    ["주가 수준", "{T}의 PER·PBR을 과거 평균·경쟁사와 비교해서 지금 주가 수준을 분석해줘."],
+    ["성장 이유", "{T}의 향후 3~5년 성장동력과 그게 실제 실적으로 이어질 조건을 알려줘."],
+    ["투자 리스크", "{T}에 투자하지 말아야 할 이유를 실적·경쟁·규제·밸류에이션 관점에서 최대한 강하게 말해줘."],
+    ["시나리오", "{T}의 향후 실적을 낙관·기준·비관 3가지 시나리오와 각 조건으로 나눠줘."],
+    ["투자 비중", "내 투자금이 [ ]만원이고 {T}에 [ ]만원 넣으려 해. 한 종목 집중 시 위험과 손실 영향을 계산해줘."],
+    ["분할매수", "{T}에 총 [ ]만원을 넣는다면 가격·기간 기준 분할매수 계획을 몇 가지로 보여줘."],
+    ["실적 발표", "{T}의 최신 실적 발표에서 매출·이익·가이던스가 시장 기대와 달랐던 점을 정리해줘."],
+    ["뉴스 영향", "최근 {T} 뉴스가 매출·이익·기업가치에 주는 실제 영향과 단순 소음을 구분해줘."],
+    ["투자 논리", "내가 {T}를 산 이유는 [ ]야. 최근 실적과 사업 변화로 그 논리가 유지·강화·훼손됐는지 점검해줘."],
+    ["매도 기준", "{T}를 보유 중이야. 투자 논리가 깨졌다고 볼 매도 조건을 실적·사업·재무 기준으로 정리해줘."],
+    ["투자 복기", "{T}를 [ ]달러에 사서 [ ]달러에 팔았어. 잘한 점·아쉬운 점·다음 원칙 3가지를 정리해줘."],
+    ["분기 흐름", "{T}의 분기별 매출·영업이익률·현금흐름 변화를 최근 8개 분기로 분석해줘."],
+    ["업종 비교", "{T}와 같은 업종 회사 5곳의 최근 8개 분기 매출과 EBITDA 마진을 비교해줘."],
+    ["적정 가치", "{T}의 DCF 가치평가에 필요한 자료와 가정을 정리해줘."],
+    ["성장률 비교", "{T}와 가장 큰 경쟁사의 최근 8개 분기 성장률을 비교해줘."],
+    ["종목 찾기", "후보 중에서 PER 15배 미만·잉여현금흐름 플러스·매출 성장률 5% 넘는 종목을 찾아줘."],
+    ["모기지 리츠", "{T}의 최근 4개 분기 주당 장부가치·배당·PBR 변화와 금리 영향을 정리해줘."],
+  ];
+
   function viewAsk() {
     S.ask = S.ask || { mode: "quick", hist: [] };
     const A = S.ask, u = S.aiUsage || {};
@@ -1021,13 +1147,21 @@
       '<div class="chips">' + modes.map(m => '<button class="chip' + (A.mode === m[0] ? " on" : "") + '" data-m="' + m[0] + '">' + m[1] + "</button>").join("") + "</div>" +
       '<div class="small" style="margin:6px 0">' + (A.mode === "quick" ? "사소한 질문 없이 바로 답하고, 가정은 맨 위에 적어요." : A.mode === "big" ? "답을 바꾸는 질문만 하나씩, 최대 5개 묻고 답해요." : "리포트·커뮤니티 글을 붙이면 주장마다 맞음·틀림·기준이 다름·확인 못 함으로 가려요.") + "</div>" +
       (A.hist || []).map(h => h.role === "me" ? '<div class="bubble me">' + esc(h.text) + "</div>" : ansHtml(h.a)).join("") +
+      (A.mode !== "fact" ? '<details class="sig" id="tpl"><summary><b>📋 질문 템플릿 ' + ASK_TPL.length + '개</b> <span class="small">기업명 + 지표 + 기간을 구체적으로</span></summary>' +
+        '<label>종목</label><select id="tplt">' + [...new Set((S.data && S.data.holdings || []).map(h => h.t).concat(allPicks().slice(0, 15).map(p => p.t)))].map(t => "<option>" + esc(t) + "</option>").join("") + "</select>" +
+        '<div class="chips wrap" style="margin-top:6px">' + ASK_TPL.map((t, i) => '<button type="button" class="chip" data-tpl="' + i + '">' + esc(t[0]) + "</button>").join("") + "</div></details>" : "") +
       '<form id="af">' + (A.mode === "fact" ? '<label>붙인 글</label><textarea id="ap" rows="6" maxlength="12000" placeholder="여기에 글을 붙여 넣어요"></textarea>' : "") +
-      '<label>' + (A.mode === "fact" ? "더 물을 것 (선택)" : "질문") + '</label><textarea id="aq" rows="3" maxlength="4000" placeholder="예: MO 지금 배당은 안전한가?"></textarea>' +
+      '<label>' + (A.mode === "fact" ? "더 물을 것 (선택)" : "질문") + '</label><textarea id="aq" rows="3" maxlength="4000" placeholder="예: MO 지금 배당은 안전한가?">' + esc(A.draft || "") + '</textarea>' +
       '<button class="btn" type="submit">묻기</button><div class="out"></div></form>' +
       ((A.hist || []).length ? '<button class="btn ghost" id="aclear">새로 묻기</button>' : "") +
       '<p class="foot">AI 답은 참고용이에요. 숫자는 검사관이 한 번 더 확인해요. ' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => { A.mode = b.dataset.m; A.hist = []; viewAsk(); }));
     const cl = document.getElementById("aclear"); if (cl) cl.onclick = () => { A.hist = []; viewAsk(); };
+    A.draft = "";
+    $app.querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
+      const t = (document.getElementById("tplt") || {}).value || "[기업명]", q = document.getElementById("aq");
+      q.value = ASK_TPL[+b.dataset.tpl][1].replace(/\{T\}/g, t); q.focus(); document.getElementById("tpl").open = false;
+    }));
     bindForm("af", async (f, msg) => {
       const q = f.querySelector("#aq").value.trim(), pasted = (f.querySelector("#ap") || {}).value || "";
       if (!q && !pasted) { msg.innerHTML = '<div class="msg err">질문을 적어 주세요.</div>'; return; }
@@ -1148,6 +1282,7 @@
       case "score": return viewScore();
       case "gap": return viewGap();
       case "ask": return viewAsk();
+      case "news": return viewNews();
       case "profile": return viewProfile();
       case "settings": return viewSettings();
       case "password": return viewPassword();

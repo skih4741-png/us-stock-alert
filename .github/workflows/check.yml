@@ -1,10 +1,15 @@
-name: 연결 점검 (GPT · 한국투자증권 모의)
+name: 연결 점검 (GPT · 한국투자증권 모의 · 경제뉴스)
 on:
   workflow_dispatch:
+    inputs:
+      news:
+        description: "경제뉴스 리포트도 지금 만들기"
+        type: boolean
+        default: false
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       SHEET_ID: ${{ secrets.SHEET_ID }}
@@ -28,3 +33,6 @@ jobs:
         run: python ai.py
       - name: 한국투자증권 모의투자 점검 (주문은 안 내요)
         run: python kis.py
+      - name: 경제뉴스 리포트 만들기 (선택)
+        if: ${{ inputs.news }}
+        run: python news.py --send
