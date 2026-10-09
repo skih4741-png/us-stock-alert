@@ -441,7 +441,7 @@
   // 홈 맨 위: 지금 모의투자가 돌아가고 있다는 걸 한눈에
   function homeSimCard() {
     const m = S.perf && S.perf.sim;
-    if (!m) return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live off"></span>모의투자 준비 중</b><span class="badge info">가상 $100</span></div>' +
+    if (!m) return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live off"></span>모의투자 준비 중</b><span class="badge info">가상 $1,000</span></div>' +
       '<div class="small">다음 아침 리포트부터 3개월 자동 모의투자가 시작돼요</div></a>';
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const pos = m.positions || [], pend = m.pending || [], today = (m.today || []).slice(0, 3);

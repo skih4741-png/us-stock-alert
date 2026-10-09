@@ -18,8 +18,8 @@ import numpy as np
 import prices
 
 log = logging.getLogger(__name__)
-KEY = "sim"          # 판단용 (실전과 같은 100달러)
-REF_KEY = "sim_ref"  # 참고용 1,000달러 (판단에 안 씀)
+KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
+REF_KEY = "sim_ref"  # 참고용 100달러 (실전 첫 금액 비교용, 판단에 안 씀)
 FEE = 0.0025 + 0.0010      # 한쪽 거래 비용 추정 (수수료 + 환전)
 DAYS = 90                  # 시험 기간 (달력 기준)
 DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
