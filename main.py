@@ -573,7 +573,7 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
         import news
         out = news.build(store, cfg, [h["t"] for h in app.get("holdings", [])])
         rep = out.get("report") or {}
-        if send and rep:
+        if send and (rep or (out.get("all") or {}).get("업종")):
             notify.send_slack("오늘의 경제뉴스 5초 요약", [{"type": "header", "text": {"type": "plain_text", "text": "오늘의 경제뉴스 5초 요약"}},
                                                     {"type": "section", "text": {"type": "mrkdwn", "text": news.slack_text(out)[:2900]}}])
             appdata.add_alert(store, "news", "오늘의 경제뉴스", " / ".join(rep.get("5초 요약") or [])[:200], now.isoformat(timespec="minutes"), "info")

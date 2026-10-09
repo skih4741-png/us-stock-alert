@@ -168,7 +168,7 @@ def _post(path: str, body: dict, where: str, timeout: int = 90) -> dict | None:
     return None
 
 
-def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500) -> dict | None:
+def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90) -> dict | None:
     """task: 목표·출력·경계를 적은 지시. data: '자료'(dict/list/str). 반환: JSON dict 또는 None."""
     ok, why = enabled()
     if not ok:
@@ -181,7 +181,7 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
                          {"role": "user", "content": task + "\n\n— 여기부터 자료 —\n" + src[:60000] + "\n— 자료 끝 —\nJSON으로만 답해."}]}
     if model.startswith("gpt-5"):
         body["reasoning_effort"] = "low"
-    j = _post("/chat/completions", body, where)
+    j = _post("/chat/completions", body, where, timeout)
     if not j:
         return None
     u = j.get("usage") or {}
@@ -212,9 +212,9 @@ def inspect(where: str, answer: dict, data) -> dict | None:
     return {"issues": res["issues"][:10], "ok": not res["issues"]}
 
 
-def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500) -> dict | None:
+def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90) -> dict | None:
     """답 + 검사관. 검사가 실패하면 답을 버려요."""
-    ans = chat_json(where, task, data, kind, max_tokens)
+    ans = chat_json(where, task, data, kind, max_tokens, timeout)
     if ans is None:
         return None
     ins = inspect(where, ans, data)

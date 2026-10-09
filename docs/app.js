@@ -999,61 +999,104 @@
   const WEATHER = { "맑음": "☀️", "구름 조금": "🌤️", "흐림": "☁️", "비": "🌧️", "폭풍": "⛈️" };
   const KIND = { "호재": "good", "악재": "bad", "소음": "" };
   // GPT가 없어도 보이는 기본 상식 (숫자 없음 · 투자 권유 아님)
-  const TOPIC_BASICS = {
-    "헬스케어": {
-      what: "병원·약·의료기기·건강보험 회사들이에요.",
-      ex: "감기에 걸리면 경기가 나빠도 약은 사요. 그래서 경기가 나쁠 때 덜 흔들리는 편이에요.",
-      good: ["사람은 늙고 아프면 꼭 돈을 써요 (수요가 꾸준)", "신약이 성공하면 몇 년 동안 크게 벌어요", "배당을 주는 큰 제약사가 많아요"],
-      care: ["약값 규제·정부 정책 뉴스 하나에 업종 전체가 흔들려요", "신약 실패나 특허 만료(복제약 등장)면 매출이 뚝 떨어져요",
-        "작은 바이오 회사는 아직 돈을 못 버는 곳이 많아요 (돈이 떨어지면 새 주식 발행)", "보험사는 병원비가 예상보다 많이 나가면 이익이 줄어요"],
-      check: ["매출이 몇 분기째 늘고 있나 (기업명 + 매출 + 최근 4개 분기)", "주요 약의 특허가 언제 끝나나", "PER이 같은 업종 평균보다 너무 높지 않나", "현금이 1년 이상 버틸 만큼 있나 (바이오)"],
-    },
-    "모기지 리츠": {
-      what: "집 담보대출(모기지) 채권을 빌린 돈으로 사서, 이자 차이로 버는 회사예요. NLY 같은 곳이에요.",
-      ex: "은행에서 3% 이자로 빌려 5% 이자를 주는 채권을 사면 2%가 남아요. 그런데 빌린 이자가 5%로 오르면 남는 게 없어요.",
+  const SECTOR_BASICS = {
+    "기술": { what: "반도체·소프트웨어·컴퓨터 회사예요 (엔비디아·마이크로소프트·애플).", ex: "학교가 컴퓨터실을 새로 지으면 컴퓨터 가게가 바빠져요. AI 붐이 그 컴퓨터실이에요.", sens: "금리·AI 투자 소식",
+      good: ["새 기술이 나오면 매출이 빠르게 커져요", "돈을 잘 버는 큰 회사가 많아요"], care: ["기대가 커서 주가가 비싼 편이에요", "금리가 오르면 크게 흔들려요", "수출 규제(중국) 뉴스에 약해요"],
+      check: ["매출이 최근 4개 분기 동안 계속 늘었나", "PER이 과거 평균보다 너무 높지 않나"], sell: ["매출 성장이 2분기 연속 꺾임", "큰 고객(빅테크)이 투자를 줄인다고 발표"] },
+    "헬스케어": { what: "병원·약·의료기기·건강보험 회사예요.", ex: "감기에 걸리면 경기가 나빠도 약은 사요. 그래서 경기가 나쁠 때 덜 흔들려요.", sens: "약값 정책·신약 결과",
+      good: ["사람은 늙고 아프면 꼭 돈을 써요 (수요가 꾸준)", "신약이 성공하면 몇 년 동안 크게 벌어요"], care: ["약값 규제·정부 정책 뉴스 하나에 업종 전체가 흔들려요", "특허가 끝나면 복제약이 나와 매출이 뚝 떨어져요", "작은 바이오 회사는 아직 돈을 못 버는 곳이 많아요"],
+      check: ["주요 약의 특허가 언제 끝나나", "현금이 1년 이상 버틸 만큼 있나 (바이오)"], sell: ["핵심 신약 임상 실패", "보험사 의료비가 예상보다 계속 많이 나감"] },
+    "금융": { what: "은행·보험·카드·증권 회사예요.", ex: "은행은 2%에 돈을 맡아 5%에 빌려줘요. 그 차이가 은행의 용돈이에요.", sens: "금리 모양·대출 연체",
+      good: ["금리가 적당히 높으면 이자로 잘 벌어요", "배당과 자사주 매입을 많이 해요"], care: ["경기가 나빠지면 빌린 돈을 못 갚는 사람이 늘어요", "금리가 갑자기 움직이면 손해가 날 수 있어요"],
+      check: ["대출 연체율이 오르고 있나", "PBR(주가 ÷ 회사가 가진 돈)이 1 근처인가"], sell: ["연체·부실 대출이 빠르게 증가", "배당 삭감"] },
+    "에너지": { what: "석유·가스를 캐고, 나르고, 정제하는 회사예요.", ex: "기름값이 오르면 주유소 사장님이 웃어요. 에너지 회사가 그 사장님이에요.", sens: "유가",
+      good: ["유가가 오르면 이익이 크게 늘어요", "배당을 많이 주는 회사가 많아요"], care: ["유가가 떨어지면 이익도 같이 떨어져요", "친환경 정책이 길게 보면 부담이에요"],
+      check: ["국제 유가(WTI)가 한 달 사이 어디로 움직였나", "빚이 줄고 있나"], sell: ["유가가 회사 손익분기점 아래로 오래 머묾", "배당 삭감"] },
+    "전기·가스(유틸리티)": { what: "전기·가스·수도를 공급하는 회사예요.", ex: "경기가 나빠도 불은 켜고 살아요. 그래서 불안할 때 사람들이 찾는 업종이에요.", sens: "금리·전기 수요(데이터센터)",
+      good: ["수요가 꾸준하고 배당이 안정적이에요", "AI 데이터센터로 전기 수요가 늘고 있어요"], care: ["빚이 많아서 금리가 오르면 불리해요", "요금은 정부 허락을 받아야 올릴 수 있어요"],
+      check: ["10년 국채 금리가 오르고 있나", "배당을 몇 년째 늘려 왔나"], sell: ["금리 급등이 계속됨", "요금 인상 거절·큰 재해 비용"] },
+    "쓰고 싶은 소비(자동차·쇼핑)": { what: "자동차·쇼핑·여행·외식처럼 '안 써도 되는' 데 쓰는 회사예요 (아마존·테슬라).", ex: "용돈이 넉넉하면 장난감을 사고, 모자라면 안 사요. 경기에 따라 크게 움직여요.", sens: "경기·소비 심리·금리",
+      good: ["경기가 좋으면 매출이 빠르게 늘어요"], care: ["경기가 나빠지면 가장 먼저 지갑을 닫는 곳이에요", "관세·물가에 약해요"],
+      check: ["같은 매장 매출이 늘고 있나", "재고가 너무 쌓이지 않았나"], sell: ["매출이 2분기 연속 감소", "재고 급증·할인 판매 확대"] },
+    "꼭 쓰는 소비(식품·생필품)": { what: "음식·음료·치약·휴지처럼 꼭 사는 물건 회사예요 (코카콜라·P&G).", ex: "용돈이 줄어도 밥은 먹어요. 그래서 불안할 때 피난처가 돼요.", sens: "원가(재료값)·경기 불안",
+      good: ["경기가 나빠도 덜 흔들려요", "배당을 오래 늘려 온 회사가 많아요"], care: ["성장이 느려요", "재료값이 오르면 이익이 줄어요"],
+      check: ["가격을 올려도 판매량이 유지되나", "영업이익률이 지켜지고 있나"], sell: ["판매량이 계속 줄어듦", "배당 성장 중단"] },
+    "산업재": { what: "비행기·기계·철도·건설·방산 회사예요.", ex: "동네에 새 학교를 지으면 굴착기 회사가 바빠져요. 나라가 투자하면 좋아지는 업종이에요.", sens: "경기·정부 투자",
+      good: ["정부 인프라·방산 투자가 늘면 주문이 쌓여요"], care: ["경기가 꺾이면 주문이 줄어요", "원자재·인건비가 오르면 이익이 줄어요"],
+      check: ["수주 잔고(쌓인 주문)가 늘고 있나", "영업이익률 추이"], sell: ["수주 잔고 감소", "큰 사고·리콜"] },
+    "부동산 리츠": { what: "빌딩·창고·데이터센터·아파트를 갖고 임대료를 받는 회사예요.", ex: "건물을 사서 월세를 받는 집주인이에요. 월세 대부분을 배당으로 나눠 줘요.", sens: "금리",
+      good: ["임대료가 꾸준해 배당이 커요"], care: ["금리가 오르면 빌린 돈 이자가 늘고 건물 값이 떨어져요", "빈 사무실이 늘면 임대료가 줄어요"],
+      check: ["입주율(공실률)", "FFO(리츠의 실제 현금 이익)가 늘고 있나"], sell: ["입주율 급락", "배당 삭감"] },
+    "통신·미디어": { what: "통신사·인터넷·게임·영상 회사예요 (구글·메타·넷플릭스).", ex: "모두가 보는 게시판에 광고를 붙이면 돈이 돼요. 광고 회사가 많은 업종이에요.", sens: "광고 경기·규제",
+      good: ["사용자가 많아 광고로 크게 벌어요"], care: ["경기가 나쁘면 광고비를 먼저 줄여요", "독점·개인정보 규제 뉴스에 약해요"],
+      check: ["광고 매출 성장률", "사용자 수가 늘고 있나"], sell: ["사용자 감소", "큰 규제 판결"] },
+    "소재": { what: "화학·철강·금속·광산·포장재 회사예요.", ex: "집을 많이 지으면 시멘트와 철이 많이 팔려요. 원재료 가격에 따라 웃고 울어요.", sens: "원자재 가격·중국 경기",
+      good: ["원자재 값이 오르면 이익이 커져요"], care: ["경기에 따라 크게 출렁여요", "중국 수요 뉴스에 약해요"],
+      check: ["주요 원자재(구리·철 등) 가격 흐름", "빚 수준"], sell: ["원자재 가격 급락이 이어짐", "배당 삭감"] },
+    "모기지 리츠": { what: "집 담보대출(모기지) 채권을 빌린 돈으로 사서, 이자 차이로 버는 회사예요. NLY 같은 곳이에요.", ex: "은행에서 3% 이자로 빌려 5% 이자를 주는 채권을 사면 2%가 남아요. 빌린 이자가 5%로 오르면 남는 게 없어요.", sens: "금리·이자 차이",
       good: ["배당이 큰 편이에요 (번 돈 대부분을 나눠 줘야 하는 구조)", "금리가 내려가고 안정되면 채권 값이 올라 좋아져요"],
-      care: ["금리가 갑자기 오르면 빌린 이자는 오르고 채권 값은 떨어져 이중으로 손해예요",
-        "빚(레버리지)을 많이 써서 작은 변화도 크게 커져요", "배당이 크다고 안전한 게 아니에요. 이익이 줄면 배당을 깎고, 그날 주가도 크게 떨어져요",
-        "주가가 장부가치(회사가 가진 채권 값)보다 비싸면 비싸게 사는 거예요", "금리가 많이 내려가면 사람들이 대출을 갈아타서(조기상환) 높은 이자 채권이 사라져요"],
-      check: ["주당 장부가치(BV)가 최근 4개 분기 동안 늘었나 줄었나", "주가 ÷ 장부가치(PBR)가 1보다 높나 낮나", "배당을 최근에 깎은 적이 있나", "10년 국채 금리가 한 달 사이 크게 움직였나"],
-      sell: ["배당 삭감 발표", "주당 장부가치가 2분기 연속 감소", "규칙의 손절선 아래로 내려감"],
-    },
+      care: ["금리가 갑자기 오르면 빌린 이자는 오르고 채권 값은 떨어져 이중으로 손해예요", "빚(레버리지)을 많이 써서 작은 변화도 크게 커져요", "배당이 커도 이익이 줄면 깎아요. 그날 주가도 크게 떨어져요", "금리가 많이 내려가면 대출을 갈아타서(조기상환) 높은 이자 채권이 사라져요"],
+      check: ["주당 장부가치(BV)가 최근 4개 분기 동안 늘었나 줄었나", "주가 ÷ 장부가치(PBR)가 1보다 높나 낮나"], sell: ["배당 삭감 발표", "주당 장부가치가 2분기 연속 감소"] },
+    "배당 BDC": { what: "중소기업에 돈을 빌려주고 이자를 받는 회사예요 (ARCC·FSK).", ex: "동네 가게들에 돈을 빌려주고 이자를 받는 저금통이에요. 이자 대부분을 배당으로 줘요.", sens: "금리·중소기업 부도",
+      good: ["대출 이자가 변동금리라 금리가 높으면 이자를 많이 받아요", "배당이 커요"], care: ["경기가 나빠져 빌린 회사가 못 갚으면 손실이 나요", "금리가 내려가면 이자 수입이 줄어요"],
+      check: ["못 받는 대출 비율(비발생 대출)", "주당 순자산(NAV) 대비 주가"], sell: ["비발생 대출 급증", "배당 삭감·NAV 계속 감소"] },
   };
+  // GPT가 숫자 뒤에 붙인 "(자료: …, 날짜: …)" 같은 꼬리표는 화면에서 빼요 (검사는 이미 거쳤어요)
+  function cleanSrc(o) {
+    if (typeof o === "string") return o.replace(/\s*[(（](자료|출처|근거)\s*[:：][^)）]*[)）]/g, "").trim();
+    if (Array.isArray(o)) return o.map(cleanSrc);
+    if (o && typeof o === "object") { const r = {}; for (const k in o) r[k] = (k === "출처" || k === "링크") ? o[k] : cleanSrc(o[k]); return r; }
+    return o;
+  }
+  function newsData() {
+    const n = S.ai && S.ai.news;
+    if (!n) return null;
+    if (n._clean) return n;
+    const c = Object.assign({}, n, { report: n.report ? cleanSrc(n.report) : null, all: n.all ? cleanSrc(n.all) : null, _clean: true });
+    S.ai.news = c; return c;
+  }
   function homeNewsCard() {
-    const n = S.ai && S.ai.news, r = n && n.report;
-    if (!n) return '<a class="card newscard" href="#/news"><b>📰 오늘의 경제뉴스</b><div class="small">아침 리포트 때부터 매일 와요 · 관심 주제: 헬스케어, 모기지 리츠 · 미리 보기 →</div></a>';
-    if (!r) return '<a class="card newscard" href="#/news"><b>📰 오늘의 경제뉴스</b><div class="small">' + esc(n.why || "") + " · 시장 숫자 보기 →</div></a>";
-    const w = r["시장 날씨"] || {};
+    const n = newsData(), r = n && n.report, L = (n && n.all && n.all["업종"]) || [];
+    if (!n) return '<a class="card newscard" href="#/news"><b>📰 오늘의 경제뉴스</b><div class="small">아침 리포트 때부터 매일 와요 · 업종 13개 신호등 · 미리 보기 →</div></a>';
+    const w = (r && r["시장 날씨"]) || {};
+    const c = k => L.filter(x => x["신호등"] === k).map(x => x["업종"]);
     return '<a class="card newscard" href="#/news"><div class="row between"><b>📰 오늘의 경제뉴스</b><span class="small">' + esc(whenText(n.at)) + "</span></div>" +
-      '<div class="newsw">' + (WEATHER[w["날씨"]] || "🌤️") + " <b>시장 날씨: " + esc(w["날씨"] || "") + "</b> " + esc(w["한 줄"] || "") + "</div>" +
-      '<ul class="plain five">' + (r["5초 요약"] || []).slice(0, 3).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" +
-      '<div class="chips" style="margin:6px 0 0">' + (r["관심 주제"] || []).map(t => '<span class="chip">' + (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"]) + "</span>").join("") + "</div>" +
-      '<div class="small">예시·시나리오·토론까지 보기 →</div></a>';
+      (r ? '<div class="newsw">' + (WEATHER[w["날씨"]] || "🌤️") + " <b>시장 날씨: " + esc(w["날씨"] || "") + "</b> " + esc(w["한 줄"] || "") + "</div>" +
+        '<ul class="plain five">' + (r["5초 요약"] || []).slice(0, 3).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : '<div class="small">' + esc(n.why || "") + "</div>") +
+      (L.length ? '<div class="small" style="margin-top:4px"><b>업종 ' + L.length + "개</b> 🟢" + c("초록").length + " 🟡" + c("노랑").length + " 🔴" + c("빨강").length +
+        (c("초록").length ? "<br>🟢 좋은 쪽: " + esc(c("초록").slice(0, 3).join(", ")) : "") + (c("빨강").length ? "<br>🔴 조심: " + esc(c("빨강").slice(0, 3).join(", ")) : "") + "</div>" : "") +
+      '<div class="small">업종별·내 종목별 의견 보기 →</div></a>';
   }
   function srcLinks(arr) {
     arr = (arr || []).filter(x => x && x["링크"]);
     return arr.length ? '<div class="small">' + arr.slice(0, 3).map(x => '<a class="link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">' + esc((x["제목"] || "출처").slice(0, 40)) + "</a>").join(" · ") + "</div>" : "";
   }
-  function topicCard(t, basics) {
-    const b = basics || {};
-    const list = (title, arr, cls) => (arr && arr.length ? '<div class="sub" style="margin-top:8px">' + title + '</div><ul class="plain ' + (cls || "") + '">' + arr.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "");
+  function sectorCard(t, b, holds) {
+    b = b || {};
+    const list = (title, arr) => (arr && arr.length ? '<div class="sub" style="margin-top:8px">' + title + '</div><ul class="plain">' + arr.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "");
+    const arr = v => (Array.isArray(v) ? v : v ? [v] : null);
     const sc = t["시나리오"] || {}, d = t["토론"] || {};
-    return '<div class="card topic"><div class="row between"><b style="font-size:1.1em">' + (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"]) + '</b><span class="badge ' +
-      (t["신호등"] === "초록" ? "good" : t["신호등"] === "빨강" ? "bad" : "warn") + '">' + esc(t["신호등"] || "기본 상식") + "</span></div>" +
-      (t["5초 답"] ? '<div class="five-a">' + esc(t["5초 답"]) + "</div>" : "") +
-      (b.what ? '<div class="small">' + esc(b.what) + "</div>" : "") +
+    return '<div class="card topic">' + (t["5초 답"] ? '<div class="five-a">' + esc(t["5초 답"]) + "</div>" : "") +
+      (b.what ? '<div class="small">' + esc(b.what) + (b.sens ? " · 민감한 것: <b>" + esc(b.sens) + "</b>" : "") + "</div>" : "") +
       ((t["예시"] || b.ex) ? '<div class="ex">💡 예시: ' + esc(t["예시"] || b.ex) + "</div>" : "") +
-      list("👍 좋은 점", t["좋은 점"] || b.good) + list("⚠️ 조심할 점", t["조심할 점"] || b.care) +
-      (sc["낙관"] ? '<div class="sub" style="margin-top:8px">🔮 시나리오 3가지</div><dl class="kv"><dt>😀 낙관</dt><dd>' + esc(sc["낙관"]) + "</dd><dt>😐 기준</dt><dd>" + esc(sc["기준"]) + "</dd><dt>😟 비관</dt><dd>" + esc(sc["비관"]) + "</dd></dl>" : "") +
-      (d["강세"] ? '<details class="sig"><summary><b>🗣️ AI 토론 (강세 vs 약세 → 위험관리 3명)</b></summary><dl class="kv"><dt>🐂 강세</dt><dd>' + esc(d["강세"]) + "</dd><dt>🐻 약세</dt><dd>" + esc(d["약세"]) +
-        "</dd><dt>🔥 공격형</dt><dd>" + esc(d["공격형"]) + "</dd><dt>⚖️ 중립형</dt><dd>" + esc(d["중립형"]) + "</dd><dt>🛡️ 보수형</dt><dd>" + esc(d["보수형"]) + "</dd><dt>📌 정리</dt><dd>" + esc(d["정리"]) + "</dd></dl></details>" : "") +
-      list("✅ 사기 전에 확인할 것", t["확인할 것"] || b.check) + list("🚪 팔아야 하는 신호", t["팔아야 하는 신호"] || b.sell) +
-      (t["내 보유와 닿는 곳"] ? '<div class="msg note">내 보유: ' + esc(t["내 보유와 닿는 곳"]) + "</div>" : "") + srcLinks(t["출처"]) + "</div>";
+      list("👍 좋은 점", arr(t["좋은 점"]) || b.good) + list("⚠️ 조심할 점", arr(t["조심할 점"]) || b.care) +
+      (sc["낙관"] ? '<div class="sub" style="margin-top:8px">🔮 시나리오 3가지</div><dl class="kv"><dt>😀 낙관</dt><dd>' + esc(sc["낙관"]) + "</dd><dt>😐 기준</dt><dd>" + esc(sc["기준"] || "") + "</dd><dt>😟 비관</dt><dd>" + esc(sc["비관"] || "") + "</dd></dl>" : "") +
+      (d["강세"] ? '<div class="sub" style="margin-top:8px">🗣️ AI 토론 (강세 vs 약세 → 위험관리 3명)</div><dl class="kv"><dt>🐂 강세</dt><dd>' + esc(d["강세"]) + "</dd><dt>🐻 약세</dt><dd>" + esc(d["약세"] || "") +
+        "</dd><dt>🔥 공격형</dt><dd>" + esc(d["공격형"] || "") + "</dd><dt>⚖️ 중립형</dt><dd>" + esc(d["중립형"] || "") + "</dd><dt>🛡️ 보수형</dt><dd>" + esc(d["보수형"] || "") + "</dd><dt>📌 정리</dt><dd>" + esc(d["정리"] || "") + "</dd></dl>" : "") +
+      list("✅ 사기 전에 확인할 것", arr(t["확인할 것"]) || b.check) + list("🚪 팔아야 하는 신호", arr(t["팔아야 하는 신호"]) || b.sell) +
+      ((holds || []).length ? '<div class="msg note">💼 이 업종의 내 보유: ' + holds.map(h => '<a href="#/hold/' + encodeURIComponent(h) + '">' + esc(h) + "</a>").join(", ") + "</div>" : "") +
+      srcLinks(t["출처"]) + "</div>";
   }
   function viewNews() {
-    const n = (S.ai && S.ai.news) || null, r = (n && n.report) || null;
-    let h = '<button class="back" onclick="history.back()">← 뒤로</button><h1>오늘의 경제뉴스</h1>' + statusLine();
-    if (n) h += '<div class="small">' + esc(whenText(n.at)) + " 기준 · 뉴스를 쉬운 말로 바꾼 참고 자료예요 (투자 권유 아님)</div>";
+    const n = newsData(), r = (n && n.report) || null, al = (n && n.all) || {};
+    const seg = S.newsSeg || "sum";
+    const segBtn = (k, l) => '<button data-ns="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
+    let h = '<div class="head"><div><h1>경제뉴스</h1><div class="small">' + (n ? esc(whenText(n.at)) + " 기준 · " : "") + "쉬운 말 참고 자료 · 투자 권유 아님</div></div></div>" + statusLine() +
+      '<div class="segs">' + segBtn("sum", "5초 요약") + segBtn("sec", "업종 13개") + segBtn("mine", "내 종목") + segBtn("more", "숫자·단어") + "</div>";
+    if (!n || (!r && seg === "sum")) {
+      h += '<div class="msg note">' + esc(n ? (n.why || "오늘 GPT 요약이 없어요") : "첫 리포트는 다음 아침 리포트 때 만들어져요.") + " '업종 13개'의 기본 상식은 지금도 볼 수 있어요.</div>";
+    }
+    if (seg === "sum") {
     if (r) {
       const w = r["시장 날씨"] || {};
       h += '<div class="card"><div class="big">' + (WEATHER[w["날씨"]] || "🌤️") + " 시장 날씨: " + esc(w["날씨"] || "") + "</div><div>" + esc(w["한 줄"] || "") + "</div>" +
@@ -1067,30 +1110,53 @@
         '<div class="small">왜 중요? ' + esc(x["왜 중요"] || "") + (x["관련 업종"] ? " · 관련: " + esc(x["관련 업종"]) : "") + "</div>" + srcLinks(x["출처"]) + "</div>").join("");
       if ((r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 내 보유와 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
         encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
-    } else {
-      h += '<div class="msg note">' + esc(n ? (n.why || "오늘 GPT 리포트가 없어요") : "첫 리포트는 다음 아침 리포트 때 만들어져요.") + " 아래 기본 상식은 지금도 볼 수 있어요.</div>";
     }
-    // 관심 주제
-    const topics = r && (r["관심 주제"] || []).length ? r["관심 주제"] : Object.keys(TOPIC_BASICS).map(k => ({ "이름": k }));
-    h += '<h2>🔍 관심 주제 <span class="small">(투자해도 될까? 대신 신호와 확인할 것)</span></h2>' + topics.map(t => topicCard(t, TOPIC_BASICS[t["이름"]])).join("");
-    // 업종 날씨
-    const sec = (n && n.sectors) || [];
-    if (sec.length) h += '<h2>🗺️ 업종 날씨 (1주)</h2><div class="card"><div class="secs">' + sec.map(x => '<div class="sec ' + ((x["1주"] || 0) >= 0 ? "up" : "dn") + '"><b>' + esc(x["이름"]) +
-      '</b><span class="num">' + pct(x["1주"]) + "</span></div>").join("") + "</div>" +
-      ((r && r["업종 날씨"] || []).length ? '<ul class="plain small">' + r["업종 날씨"].map(x => "<li><b>" + esc(x["업종"]) + "</b> " + esc(x["1주"] || "") + " · " + esc(x["한 줄"]) + "</li>").join("") + "</ul>" : "") + "</div>";
-    const mk = (n && n.market) || {};
-    if (Object.keys(mk).length) h += '<h2>📊 시장 숫자</h2><div class="card"><dl class="kv num">' + Object.values(mk).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + (x["단위"] || "") +
-      ' <span class="small">1일 ' + (x["변화 단위"] ? fmt(x["1일"]) + "%p" : pct(x["1일"])) + " · 1주 " + (x["변화 단위"] ? fmt(x["1주"]) + "%p" : pct(x["1주"])) + "</span></dd>").join("") + "</dl></div>";
+    } else if (seg === "sec") {
+      const L = al["업종"] || [], by = {}; L.forEach(x => { by[x["업종"]] = x; });
+      const pin = (n && n.pinned) || [], holdsBy = (n && n.sector_holds) || {}, wk = {};
+      ((n && n.sectors) || []).forEach(x => { wk[x["이름"]] = x["1주"]; });
+      const order = { "초록": 0, "노랑": 1, "빨강": 2 };
+      const names = Object.keys(SECTOR_BASICS).sort((x, y) => {
+        const px = pin.indexOf(x), py = pin.indexOf(y);
+        if (px !== py) return (px < 0 ? 99 : px) - (py < 0 ? 99 : py);
+        return ((order[(by[x] || {})["신호등"]] ?? 3) - (order[(by[y] || {})["신호등"]] ?? 3)) || ((wk[y] ?? -99) - (wk[x] ?? -99));
+      });
+      const c = k => L.filter(x => x["신호등"] === k).length;
+      h += '<div class="card"><div class="row between"><b>미국 업종 ' + names.length + "개</b>" + (L.length ? "<span>🟢" + c("초록") + " 🟡" + c("노랑") + " 🔴" + c("빨강") + "</span>" : '<span class="small">기본 상식</span>') + "</div>" +
+        '<div class="small">🟢 뉴스·흐름이 대체로 좋음 · 🟡 섞임 · 🔴 조심할 신호가 더 많음 · 📌 맨 위 고정(내 보유·설정) · 누르면 자세히</div></div>' +
+        names.map(nm => { const x = by[nm] || {}, hs = holdsBy[nm] || x["내 보유"] || [];
+          return '<details class="sig sector"><summary><span style="font-size:1.25em">' + (DOT[x["신호등"]] || "⚪") + '</span><span class="grow"><b>' + (pin.includes(nm) ? "📌 " : "") + esc(nm) +
+            '</b> <span class="small num ' + ((wk[nm] || 0) >= 0 ? "good-t" : "bad-t") + '">' + (wk[nm] != null ? pct(wk[nm]) + " (1주)" : "") + '</span><br><span class="small">' +
+            esc(x["5초 답"] || (SECTOR_BASICS[nm] || {}).what || "") + "</span></span>" + (hs.length ? '<span class="badge info">보유 ' + hs.length + "</span>" : "") + "</summary>" +
+            sectorCard(x, SECTOR_BASICS[nm], hs) + "</details>"; }).join("");
+      const sec = (n && n.sectors) || [];
+      if (sec.length) h += '<h2>🗺️ 업종 날씨 (1주)</h2><div class="card"><div class="secs">' + sec.map(x => '<div class="sec ' + ((x["1주"] || 0) >= 0 ? "up" : "dn") + '"><b>' + esc(x["이름"]) +
+        '</b><span class="num">' + pct(x["1주"]) + "</span></div>").join("") + "</div></div>";
+    } else if (seg === "mine") {
+      const M = al["종목"] || [];
+      if (M.length) h += '<div class="small" style="margin:6px 0">내 보유 종목 ' + M.length + "개 하나하나 · 누르면 종목 화면</div>" + M.map(x => '<div class="card" onclick="location.hash=\'#/hold/' + encodeURIComponent(x["종목"]) +
+        '\'" style="cursor:pointer"><div class="row between"><b>' + (DOT[x["신호등"]] || "⚪") + " " + esc(x["종목"]) + '</b><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>" +
+        "<div>" + esc(x["한 줄"] || "") + "</div>" + (x["확인할 것"] ? '<div class="small">✅ ' + esc(x["확인할 것"]) + "</div>" : "") +
+        (x["출처"] && x["출처"]["링크"] ? '<a class="small link" href="' + esc(x["출처"]["링크"]) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc((x["출처"]["제목"] || "출처").slice(0, 50)) + "</a>" : "") + "</div>").join("");
+      else h += '<div class="empty">내 종목 의견은 다음 경제뉴스 리포트부터 나와요</div>';
+      if (r && (r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 오늘 특히 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
+        encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
+    } else {
+      const mk = (n && n.market) || {};
+      if (Object.keys(mk).length) h += '<h2>📊 시장 숫자</h2><div class="card"><dl class="kv num">' + Object.values(mk).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + (x["단위"] || "") +
+        ' <span class="small">1일 ' + (x["변화 단위"] ? fmt(x["1일"]) + "%p" : pct(x["1일"])) + " · 1주 " + (x["변화 단위"] ? fmt(x["1주"]) + "%p" : pct(x["1주"])) + "</span></dd>").join("") + "</dl></div>";
     if (r && (r["오늘의 단어"] || []).length) h += "<h2>📚 오늘의 단어</h2>" + r["오늘의 단어"].map(x => '<div class="card"><b>' + esc(x["말"]) + "</b> = " + esc(x["쉬운 뜻"]) + (x["예시"] ? '<div class="ex">💡 ' + esc(x["예시"]) + "</div>" : "") + "</div>").join("");
-    if (r && (r["더 물어보기"] || []).length) h += '<h2>💬 더 물어보기 <span class="small">(누르면 AI에게 바로)</span></h2><div class="chips wrap">' +
-      r["더 물어보기"].map(q => '<button class="chip" data-q="' + esc(q) + '">' + esc(q) + "</button>").join("") + "</div>";
-    if (n && (n.headlines || []).length) h += '<details class="sig"><summary><b>원문 헤드라인 ' + n.headlines.length + "개</b></summary>" + '<ul class="plain small">' +
-      n.headlines.map(x => "<li>" + (x["링크"] ? '<a class="link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">' + esc(x["제목"]) + "</a>" : esc(x["제목"])) + ' <span class="small">' + esc(x["출처"] || "") + "</span></li>").join("") + "</ul></details>";
+      if (r && (r["더 물어보기"] || []).length) h += '<h2>💬 더 물어보기 <span class="small">(누르면 AI에게 바로)</span></h2><div class="chips wrap">' +
+        r["더 물어보기"].map(q => '<button class="chip" data-q="' + esc(q) + '">' + esc(q) + "</button>").join("") + "</div>";
+      if (n && (n.headlines || []).length) h += '<details class="sig"><summary><b>원문 헤드라인 ' + n.headlines.length + "개</b></summary>" + '<ul class="plain small">' +
+        n.headlines.map(x => "<li>" + (x["링크"] ? '<a class="link" href="' + esc(x["링크"]) + '" target="_blank" rel="noopener">' + esc(x["제목"]) + "</a>" : esc(x["제목"])) + ' <span class="small">' + esc(x["출처"] || "") + "</span></li>").join("") + "</ul></details>";
     const hist = (S.ai && S.ai.news_hist) || [];
-    if (hist.length > 1) h += '<details class="sig"><summary><b>지난 경제뉴스 ' + (hist.length - 1) + "일</b></summary>" + hist.slice(1).map(x => '<div class="card"><b>' + esc(x.date) + "</b>" +
-      '<ul class="plain small">' + (x.summary || []).map(y => "<li>" + esc(y) + "</li>").join("") + "</ul>" + '<div class="small">' + (x.topics || []).map(t => (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"])).join(" · ") + "</div></div>").join("") + "</details>";
-    h += '<p class="foot">관심 주제는 구글 시트 \'설정\' 탭 \'뉴스 관심 주제\'에서 바꿀 수 있어요 (헬스케어, 모기지 리츠, 기술, 에너지, 금융, 부동산 리츠, 배당 BDC). ' + esc(DISCLAIMER) + "</p>";
-    appShell("home", h);
+      if (hist.length > 1) h += '<details class="sig"><summary><b>지난 경제뉴스 ' + (hist.length - 1) + "일</b></summary>" + hist.slice(1).map(x => '<div class="card"><b>' + esc(x.date) + "</b>" +
+        '<ul class="plain small">' + (x.summary || []).map(y => "<li>" + esc(y) + "</li>").join("") + "</ul>" + '<div class="small">' + (x.topics || []).map(t => (DOT[t["신호등"]] || "⚪") + " " + esc(t["이름"])).join(" · ") + "</div></div>").join("") + "</details>";
+    }
+    h += '<p class="foot">맨 위 고정 업종은 구글 시트 \'설정\' 탭 \'뉴스 관심 주제\'에 쉼표로 적으면 바뀌어요 (비우면 내 보유가 많은 업종부터). ' + esc(DISCLAIMER) + "</p>";
+    appShell("news", h);
+    $app.querySelectorAll("[data-ns]").forEach(b => b.addEventListener("click", () => { S.newsSeg = b.dataset.ns; viewNews(); }));
     $app.querySelectorAll("[data-q]").forEach(b => b.addEventListener("click", () => { S.ask = { mode: "quick", hist: [], draft: b.dataset.q }; go("#/ask"); }));
   }
 
