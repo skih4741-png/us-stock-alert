@@ -36,3 +36,5 @@ jobs:
       - name: 경제뉴스 리포트 만들기 (선택)
         if: ${{ inputs.news }}
         run: python news.py --send
+      - name: FRED·SEC 자료 연결 점검
+        run: python netcheck.py

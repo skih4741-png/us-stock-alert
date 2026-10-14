@@ -64,7 +64,19 @@
   }
 
   /* ---------- 도구 ---------- */
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  // GPT가 문장 대신 {자료, 날짜, 수치} 같은 묶음을 주면 "[object Object]" 대신 읽을 수 있는 글로 바꿔요
+  const tx = v => {
+    if (v == null) return "";
+    if (Array.isArray(v)) return v.map(tx).filter(Boolean).join(" · ");
+    if (typeof v === "object") {
+      const main = v["수치"] ?? v["내용"] ?? v["값"] ?? v["사실"] ?? v["text"] ?? v["설명"];
+      const src = [v["자료"] || v["출처"], v["날짜"]].filter(x => x && typeof x !== "object").join(", ");
+      const body = main != null ? tx(main) : Object.entries(v).filter(([k, x]) => x !== "" && typeof x !== "boolean" && !/^_/.test(k)).map(([k, x]) => k + ": " + tx(x)).join(" · ");
+      return body + (main != null && src ? " (" + src + ")" : "");
+    }
+    return String(v);
+  };
+  const esc = s => tx(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmt = (n, d) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-US", { minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d });
   const pct = n => n == null ? "—" : (n > 0 ? "+" : "") + fmt(n, 1) + "%";
   function toast(t) {
@@ -472,7 +484,7 @@
     appShell("home",
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button></div>" +
-      statusLine() + homeSimCard() + homeNewsCard() +
+      statusLine() + whatsNewCard() + homeSimCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -1375,7 +1387,7 @@
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
       '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
-      systemStatusHtml() + aiSettingsHtml() +
+      systemStatusHtml() + aiSettingsHtml() + changesHtml() +
       '<h2>계정</h2><a class="btn ghost" href="#/password">비밀번호 바꾸기</a>' +
       '<button class="btn ghost" id="hist">최근 로그인 기록</button><div id="histOut"></div>' +
       '<button class="btn ghost" id="out">로그아웃</button><button class="btn danger" id="outAll">모든 기기 로그아웃</button>' +
@@ -1459,10 +1471,46 @@
       default: return viewHome();
     }
   }
+
+  /* ---------- 업데이트 알림: 새 버전 감지 · 바뀐 것 보여주기 ---------- */
+  S.changes = [];
+  async function loadChanges() {
+    try {
+      const r = await fetch("changelog.json?x=" + Date.now(), { cache: "no-store" });
+      S.changes = await r.json();
+      const latest = (S.changes[0] || {}).v;
+      let tried = ""; try { tried = sessionStorage.getItem("reloadTried") || ""; } catch (e) {}
+      if (latest && latest !== CFG.VERSION && tried !== latest) {   // 서버에 새 버전 → 화면 틀을 새로 받아요 (한 번만 시도, 무한 새로고침 방지)
+        try { sessionStorage.setItem("reloadTried", latest); } catch (e) {}
+        try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (e) {}
+        try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) await reg.update(); } catch (e) {}
+        location.reload();
+        return;
+      }
+      render();
+    } catch (e) {}
+  }
+  function seenVersion() { try { return localStorage.getItem("seenVersion") || ""; } catch (e) { return ""; } }
+  function whatsNewCard() {
+    const c = (S.changes || [])[0];
+    if (!c || c.v !== CFG.VERSION || seenVersion() === c.v) return "";
+    return '<div class="card newcard"><div class="row between"><b>🆕 업데이트 ' + esc(c.v) + " · " + esc(c.title) + '</b><span class="small">' + esc(c.date) + "</span></div>" +
+      '<ul class="plain">' + c.items.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" +
+      '<button class="btn ghost" id="seenNew" type="button">확인했어요</button> <a class="small link" href="#/settings">지난 업데이트 보기</a></div>';
+  }
+  function changesHtml() {
+    if (!(S.changes || []).length) return "";
+    return '<h2>업데이트 내역</h2>' + S.changes.map(c => '<details class="sig"><summary><b>' + esc(c.v) + " · " + esc(c.title) + '</b><span class="small">' + esc(c.date) + "</span></summary>" +
+      '<ul class="plain small">' + c.items.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></details>").join("");
+  }
+  document.addEventListener("click", e => {
+    if (e.target && e.target.id === "seenNew") { try { localStorage.setItem("seenVersion", CFG.VERSION); } catch (x) {} render(); }
+  });
   window.addEventListener("hashchange", render);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(true); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(true); loadChanges(); } });
   window.addEventListener("online", () => refresh(true));
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  loadChanges();
   render();
   refresh(true);
 })();

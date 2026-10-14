@@ -233,3 +233,5 @@ ul.five li{padding:3px 0;font-size:1.02em}
 .sec.up{background:rgba(34,197,94,.13)}.sec.dn{background:rgba(239,68,68,.13)}
 .card.topic ul.plain li{margin:2px 0}
 .chips.wrap .chip{white-space:normal;text-align:left;max-width:100%;height:auto}
+
+.card.newcard{border:1.5px solid var(--accent);background:var(--soft,rgba(37,99,235,.06))}
