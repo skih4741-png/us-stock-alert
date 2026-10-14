@@ -31,7 +31,14 @@ log = logging.getLogger(__name__)
 KST = timezone(timedelta(hours=9))
 
 MARKET = {"SPY": "S&P500(미국 큰 회사 500개)", "QQQ": "나스닥100(기술주)", "DIA": "다우(전통 대기업)", "IWM": "러셀2000(작은 회사)",
-          "^VIX": "공포지수(VIX)", "^TNX": "미국 10년 국채 금리", "DX-Y.NYB": "달러 힘(달러 인덱스)", "CL=F": "국제 유가(WTI)", "GC=F": "금 가격"}
+          "^VIX": "공포지수(VIX)", "^TNX": "미국 10년 국채 금리", "DX-Y.NYB": "달러 힘(달러 인덱스)", "CL=F": "국제 유가(WTI)", "GC=F": "금 가격", "KRW=X": "원/달러 환율",
+          "^IRX": "3개월 국채 금리(기준금리 근처)", "^FVX": "미국 5년 국채 금리"}
+
+# 매크로 (미국 연준 경제자료 FRED · 키 없이 CSV) — 경제정리노트 '월가 애널리스트처럼' 06번
+FRED = [("CPIAUCSL", "소비자물가(CPI) 1년 상승률", "yoy"), ("CPILFESL", "근원 물가(식품·에너지 뺀) 1년 상승률", "yoy"),
+        ("UNRATE", "실업률", "level"), ("PAYEMS", "일자리 증가(전달 대비, 천 명)", "diff"),
+        ("DFEDTARU", "미국 기준금리(상단)", "level"), ("A191RL1Q225SBEA", "경제성장률(GDP, 연율)", "level"),
+        ("T10Y2Y", "장단기 금리차(10년-2년)", "level"), ("DEXKOUS", "원/달러 환율(FRED)", "level")]
 
 # 업종 13개: 이름 · 대표 ETF(첫째가 기준) · 영어 검색어 · 한국어 검색어 · 보유 종목을 고를 업종 단어
 SECTOR_DEF = [
@@ -62,6 +69,8 @@ TASK = """목표: 경제뉴스를 거의 안 보는 초보자에게 오늘 미�
 - 모든 트렌드에 생활 속 '예시'(가게·용돈·장보기·학교 같은 비유)를 하나씩 붙여.
 - 뉴스마다 호재(좋은 소식)·악재(나쁜 소식)·소음(주가에 오래 영향 없을 소식)으로 나눠 (뉴스 영향 분석).
 - '내 보유와 닿는 소식'은 자료의 보유 목록에 있는 종목만, 구분은 호재·악재·소음 중 하나.
+- '매크로'는 자료의 '매크로 지표(FRED)'와 시세 표로: 금리·Fed 정책, 물가·고용·성장, 달러·원달러, 국채금리, 유가, 지정학(미·중 등은 뉴스에 있을 때만)을 쉬운 말로 풀고,
+  앞으로 6개월 낙관·기준·비관 시나리오와 각 조건, 상대적으로 유리한 업종을 적어.
 - '더 물어보기'는 '기업명 + 지표 + 기간'이 구체적인 질문 3개 (예: "NLY의 최근 4개 분기 주당 장부가치와 배당 변화를 정리해줘").
 출력 JSON:
 {"기준일":"YYYY-MM-DD","5초 요약":["이모지+한 줄","",""],
@@ -70,6 +79,8 @@ TASK = """목표: 경제뉴스를 거의 안 보는 초보자에게 오늘 미�
  "트렌드":[{"제목":"","한 줄":"","예시":"","구분":"호재|악재|소음","왜 중요":"","관련 업종":"","출처":[{"제목":"","링크":""}]}],
  "내 보유와 닿는 소식":[{"종목":"","한 줄":"","구분":"호재|악재|소음"}],
  "오늘의 단어":[{"말":"","쉬운 뜻":"","예시":""}],
+ "매크로":{"한 줄":"","지표 풀이":[{"이름":"","값":"","쉬운 뜻":""}],"지정학":"",
+   "6개월 시나리오":{"낙관":{"조건":"","유리한 업종":""},"기준":{"조건":"","유리한 업종":""},"비관":{"조건":"","유리한 업종":""}}},
  "더 물어보기":["","",""]}
 - 트렌드 3~5개, 오늘의 단어 2~3개."""
 
@@ -127,10 +138,42 @@ def market_table() -> dict:
         last = float(c.iloc[-1])
         row = {"이름": MARKET.get(s) or names.get(s) or s, "날짜": str(c.index[-1])[:10], "값": round(last, 2),
                "1일": _pct(last, c.iloc[-2]), "1주": _pct(last, c.iloc[-6]), "1달": _pct(last, c.iloc[-22]) if len(c) > 22 else None}
-        if s == "^TNX":  # 금리는 % 자체가 값 → 변화는 %p
+        if s in ("^TNX", "^IRX", "^FVX"):  # 금리는 % 자체가 값 → 변화는 %p
             row.update({"단위": "%", "1일": round(last - float(c.iloc[-2]), 2), "1주": round(last - float(c.iloc[-6]), 2),
                         "1달": round(last - float(c.iloc[-22]), 2) if len(c) > 22 else None, "변화 단위": "%p"})
         out[s] = row
+    return out
+
+
+def macro_table() -> dict:
+    """FRED CSV로 물가·고용·성장·금리·환율. 실패한 지표는 빠져요."""
+    out, fails = {}, 0
+    for sid, name, how in FRED:
+        if fails >= 2:   # 연결이 막힌 환경이면 빨리 포기 (시세 표의 금리·환율은 야후로 따로 있어요)
+            break
+        try:
+            r = requests.get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}", timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            rows = [ln.split(",") for ln in r.text.strip().splitlines()[1:]]
+            rows = [(d, float(v)) for d, v in rows if v not in (".", "")]
+            if len(rows) < 2:
+                continue
+            d, v = rows[-1]
+            if how == "yoy":
+                base = next((x for dd, x in reversed(rows) if dd <= f"{int(d[:4]) - 1}{d[4:]}"), None)
+                val = round((v / base - 1) * 100, 2) if base else None
+                prev_d, pv = rows[-2]
+                pbase = next((x for dd, x in reversed(rows) if dd <= f"{int(prev_d[:4]) - 1}{prev_d[4:]}"), None)
+                prev = round((pv / pbase - 1) * 100, 2) if pbase else None
+                unit = "%"
+            elif how == "diff":
+                val, prev, unit = round(v - rows[-2][1], 1), round(rows[-2][1] - rows[-3][1], 1) if len(rows) > 2 else None, "천 명"
+            else:
+                val, prev, unit = round(v, 2), round(rows[-2][1], 2), ("원" if sid == "DEXKOUS" else "%")
+            out[sid] = {"이름": name, "기준일": d, "값": val, "직전": prev, "단위": unit, "출처": f"FRED {sid}"}
+        except Exception as e:
+            fails += 1
+            log.info("FRED 실패 %s: %s", sid, e)
     return out
 
 
@@ -234,6 +277,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
                 out.append(x)
         return out
 
+    macro = macro_table()
     headlines = uniq(yahoo_news("SPY", 10) + gnews("stock market Fed economy", n=10) + gnews("미국 증시", ko=True, n=8))
     cache = _industries(holdings[:20], cache)
     ab["news_ind"] = cache
@@ -246,7 +290,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
                           "내 보유 지표": [{"종목": h, **{k: v for k, v in cache.get(h, {}).items() if k != "at"}} for h in holds_by[name]]}
 
     out = {"at": now.isoformat(timespec="minutes"), "date": now.strftime("%Y-%m-%d"), "pinned": pinned,
-           "market": {k: v for k, v in mk.items() if k in MARKET},
+           "market": {k: v for k, v in mk.items() if k in MARKET}, "macro": macro,
            "sectors": sorted([{"t": x[1][0], **(mk.get(x[1][0]) or {}), "이름": x[0]} for x in SECTOR_DEF if mk.get(x[1][0])],
                              key=lambda x: -(x.get("1주") or -99)),
            "sector_holds": {k: v for k, v in holds_by.items() if v},
@@ -257,7 +301,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
     else:
         base = {"기준(한국 시각)": now.strftime("%Y-%m-%d %H:%M"), "시세 표(야후, 종가 기준, 1일·1주·1달 %)": {k: v for k, v in mk.items() if k in MARKET}}
         # 1) 시장 요약
-        d1 = dict(base, **{"업종 시세": {x[0]: mk.get(x[1][0]) for x in SECTOR_DEF}, "시장 뉴스": headlines[:24],
+        d1 = dict(base, **{"매크로 지표(FRED)": macro, "업종 시세": {x[0]: mk.get(x[1][0]) for x in SECTOR_DEF}, "시장 뉴스": headlines[:24],
                            "보유 목록": [{"종목": h, "업종": cache.get(h, {}).get("industry", "")} for h in holdings[:20]]})
         rep = ai.checked("경제뉴스 리포트", TASK, d1, "big", 5000, 150)
         if rep:

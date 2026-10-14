@@ -550,7 +550,7 @@
       '<div class="big num" style="margin-top:6px">$' + fmt(p.price) + "</div>" +
       '<div class="small">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) +
-      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
+      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
@@ -566,6 +566,7 @@
       pro: '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
         (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
         '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>",
+      chart: chartHtml(p.t),
       v4: b4Html(p.t),
       rep: repHtml(p.t),
     };
@@ -581,7 +582,7 @@
     const hs = S.data.holdings || [];
     const flagged = hs.filter(h => h.tone !== "good").length;
     appShell("holdings", '<div class="head"><h1>내 보유 · ' + hs.length + '종목</h1><span class="small">' + esc(whenText(S.data.run_at)) + "</span></div>" + statusLine() +
-      (flagged ? '<div class="band bad">매도 규칙을 확인할 종목 ' + flagged + "개</div>" : '<div class="band">모든 종목이 원칙대로예요</div>') +
+      (flagged ? '<div class="band bad">매도 규칙을 확인할 종목 ' + flagged + "개</div>" : '<div class="band">모든 종목이 원칙대로예요</div>') + portHtml() + "<h2>종목</h2>" +
       '<div class="list" style="margin-top:8px">' + (hs.length ? hs.map(h =>
         '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><div class="grow"><div class="row between"><span class="tk">' + esc(h.t) +
         '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
@@ -599,6 +600,8 @@
       '<div class="sub">' + esc(h.name || "") + "</div>" +
       (h.action ? '<div class="msg ' + (h.tone === "bad" ? "err" : "note") + '">규칙상 할 일: <b>' + esc(h.action) + "</b></div>" : "") +
       '<h2>재무 5초</h2>' + finHtml(finFor(h.t)) + earnHtml(h.t) +
+      '<details class="sig"><summary><b>차트 분석 (추세·지지·저항·RSI·MACD)</b></summary>' + chartHtml(h.t) + "</details>" +
+      '<details class="sig"><summary><b>분기 공시 비교 (직전 분기 대비)</b></summary>' + secqHtml(h.t) + "</details>" +
       '<details class="sig"><summary><b>버핏 4관점</b></summary>' + b4Html(h.t) + "</details>" +
       '<details class="sig"><summary><b>쉬운 리포트</b></summary>' + repHtml(h.t) + "</details>" +
       '<h2>지금 상태</h2><div class="card"><dl class="kv num">' +
@@ -915,8 +918,9 @@
   }
 
   /* ---------- 4단계: GPT 화면 · 장 전 갭 · 성향 인터뷰 · AI에게 묻기 ---------- */
-  const checkNote = c => !c ? "" : (c.ok || !(c.issues || []).length) ? '<div class="small">검사관: 숫자 수정 없음</div>'
-    : '<div class="small warn-t">검사관: ' + c.issues.length + "건 확인 필요 — " + esc(c.issues.map(i => (i["원래"] || "") + " → " + (i["고친 값"] || "")).join(" · ")) + "</div>";
+  const checkNote = c => !c ? "" : (c.ok || !(c.issues || []).length) ? '<div class="small">🔍 검사관: 확인된 수정 사항 없음</div>'
+    : '<details class="sig"><summary><span class="small warn-t">🔍 ' + esc(c.note || ("검사관이 " + c.issues.length + "곳을 확인했어요")) + ' ▾</span></summary><ul class="plain small">' +
+      c.issues.map(i => "<li>[" + esc(i["종류"] || "숫자") + "] " + esc(i["원래"] || "") + " → <b>" + esc(i["고친 값"] || "삭제(확인 못 함)") + "</b>" + (i["근거"] ? " · " + esc(i["근거"]) : "") + "</li>").join("") + "</ul></details>";
   const tone3 = v => /통과|좋음|상회/.test(v || "") ? "good" : /탈락|나쁨|하회/.test(v || "") ? "bad" : "warn";
   function aiOff() {
     const a = S.ai;
@@ -948,8 +952,8 @@
     const v = x["판정"] || {};
     return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2><div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
       '<span class="badge ' + tone3(v["실적"]) + '">실적 ' + esc(v["실적"] || "") + '</span> <span class="badge ' + tone3(v["가이던스"]) + '">가이던스 ' + esc(v["가이던스"] || "") + "</span></span></div>" +
-      '<table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
-        "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
+      '<table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>직전 분기</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
+        "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["직전 분기"] || "—") + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
       '<dl class="kv"><dt>가이던스</dt><dd>' + esc(x["가이던스"]) + "</dd><dt>마진</dt><dd>" + esc(x["마진이 변한 이유"]) + "</dd><dt>현금흐름</dt><dd>" + esc(x["현금흐름"]) + "</dd></dl>" +
       (x["한 줄"] ? '<div class="sub">' + esc(x["한 줄"]) + "</div>" : "") + checkNote(x["_검사"]) + "</div>";
   }
@@ -962,7 +966,58 @@
         '</span><div class="small">먼저 보일 신호: ' + esc(c["가장 먼저 보일 신호"]) + " · 지금 " + esc(c["지금 값"]) + " · 다음 확인 " + esc(c["다음 확인일"]) + "</div></div>").join("") +
       '<dl class="kv" style="margin-top:8px"><dt>이미 반영된 기대</dt><dd>' + esc(x["이미 반영된 기대"]) + "</dd><dt>큰 하락 이력</dt><dd>" + esc(x["큰 하락 이력"]) + "</dd></dl>" +
       '<b>맞으려면 필요한 조건</b><ul class="plain">' + (x["맞으려면 필요한 조건"] || []).map(c => "<li>" + esc(c) + "</li>").join("") + "</ul>" +
+      ((x["가설이 틀렸다고 볼 조건"] || []).length ? '<b>내 투자 가설이 틀렸다고 볼 조건</b><ul class="plain">' + x["가설이 틀렸다고 볼 조건"].map(c => "<li>" + esc(c) + "</li>").join("") + "</ul>" : "") +
       '<div class="msg ' + (v["있음"] ? "err" : "note") + '">AI 거부권(기록만): ' + (v["있음"] ? "막을 이유 있음 — " + esc(v["이유"]) : "막을 이유 없음") + "</div>" + checkNote(x["_검사"]) + "</div>";
+  }
+  // 차트 분석 (파이썬 계산 · GPT 없음)
+  function chartHtml(t) {
+    const c = S.ai && S.ai.chart && S.ai.chart[t];
+    if (!c) return '<div class="empty">차트 분석은 보유·후보 상위 종목만, 다음 아침 리포트부터 나와요</div>';
+    const m = c.macd || {}, ma = c.ma || {};
+    const tr = c.trend === "상승 추세" ? "good" : c.trend === "하락 추세" ? "bad" : "warn";
+    return '<div class="card"><div class="row between"><b>차트 한눈에</b><span class="badge ' + tr + '">' + esc(c.trend) + "</span></div>" +
+      '<ul class="plain">' + (c.lines || []).map(l => "<li>" + esc(l) + "</li>").join("") + "</ul>" +
+      '<dl class="kv num"><dt>지지선 (아래 받쳐 주는 값)</dt><dd>' + ((c.support || []).map(v => "$" + fmt(v)).join(" · ") || "—") + "</dd>" +
+      "<dt>저항선 (위에서 막는 값)</dt><dd>" + ((c.resist || []).map(v => "$" + fmt(v)).join(" · ") || "—") + "</dd>" +
+      "<dt>이동평균 20·60·120일</dt><dd>$" + fmt(ma["20"]) + " · $" + fmt(ma["60"]) + " · $" + fmt(ma["120"]) + "</dd>" +
+      "<dt>RSI(14)</dt><dd>" + (c.rsi == null ? "—" : fmt(c.rsi, 0)) + "</dd><dt>MACD · 신호선</dt><dd>" + fmt(m.macd, 2) + " · " + fmt(m.signal, 2) + "</dd>" +
+      "<dt>거래량 (5일 ÷ 60일)</dt><dd>" + (c.vol_ratio == null ? "—" : fmt(c.vol_ratio, 1) + "배") + "</dd></dl>" +
+      '<div class="sub" style="margin-top:6px">📈 오르는 경우: ' + esc(c.up) + '</div><div class="sub">📉 내리는 경우: ' + esc(c.down) + "</div>" +
+      '<div class="small">' + esc(c.at) + " 종가 기준 · 1년 일봉으로 직접 계산 (GPT 아님) · 차트는 과거 흐름이라 앞날을 보장하지 않아요</div></div>";
+  }
+  // 분기 공시 비교 (SEC XBRL 숫자 · 파이썬 계산)
+  function secqHtml(t) {
+    const q = S.ai && S.ai.secq && S.ai.secq[t];
+    if (!q) return '<div class="empty">' + esc((S.ai && S.ai.secq_off) || "이 종목은 SEC 분기 숫자가 없어요 (ETF·외국 회사 등)") + "</div>";
+    const big = v => v == null ? "—" : Math.abs(v) >= 1e9 ? fmt(v / 1e9, 2) + "B" : Math.abs(v) >= 1e6 ? fmt(v / 1e6, 1) + "M" : fmt(v, 2);
+    return '<div class="card"><div class="small">' + esc(q.quarter) + " · " + esc(q.form || "") + " · 신고일 " + esc(q.filed || "") + "</div>" +
+      ((q.changes || []).length ? '<b>직전 분기와 달라진 점</b><ol class="plain" style="padding-left:18px;list-style:decimal">' + q.changes.map(x => "<li>" + esc(x) + "</li>").join("") + "</ol>" : "") +
+      '<table class="tbl num"><tr><th></th><th>이번</th><th>직전</th><th>작년</th></tr>' + (q.rows || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + big(r["이번 분기"]) + "</td><td>" + big(r["직전 분기"]) +
+        "</td><td>" + big(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
+      '<div class="small">SEC EDGAR XBRL 숫자를 직접 비교 (GPT 아님) · 고객·공급망·소송 같은 문장 내용은 포함 안 됨 · <a class="link" href="' + esc(q.src) + '" target="_blank" rel="noopener">원문 공시</a></div></div>';
+  }
+  // 포트폴리오 진단 (숫자는 파이썬, 풀이만 GPT)
+  function portHtml() {
+    const p = S.ai && S.ai.port;
+    if (!p) return "";
+    const a = p.ai || {}, pt = p.port || {};
+    const secs = Object.entries(p.sectors || {});
+    return '<h2>🧺 내 포트폴리오 진단</h2><div class="card">' + (a["한 줄"] ? "<b>" + esc(a["한 줄"]) + "</b>" : "") +
+      '<div class="nums3" style="margin-top:6px"><div class="card"><div class="small">출렁임(연 변동성)</div><div class="big num">' + (pt.vol == null ? "—" : fmt(pt.vol, 1) + "%") + '</div><div class="small">SPY ' + (pt.spy_vol == null ? "—" : fmt(pt.spy_vol, 1) + "%") + "</div></div>" +
+      '<div class="card"><div class="small">시장 대비 움직임(베타)</div><div class="big num">' + (pt.beta == null ? "—" : fmt(pt.beta, 2)) + '</div><div class="small">1이면 시장만큼</div></div>' +
+      '<div class="card"><div class="small">최근 6개월 최대 낙폭</div><div class="big num">' + (pt.mdd_6m == null ? "—" : fmt(pt.mdd_6m, 1) + "%") + "</div></div></div>" +
+      '<div class="sub" style="margin-top:8px">업종 비중</div><div class="plbar" style="height:14px">' + secs.map(([k, v], i) => '<span title="' + esc(k) + '" style="width:' + v + '%;background:var(--seg' + (i % 3 + 1) + ')"></span>').join("") + "</div>" +
+      '<div class="small">' + secs.map(([k, v]) => esc(k) + " " + fmt(v, 0) + "%").join(" · ") + "</div>" +
+      '<div class="sub" style="margin-top:8px">종목 비중</div><div class="small">' + (p.items || []).map(i => esc(i.t) + " " + fmt(i.weight, 0) + "%").join(" · ") + "</div>" +
+      '<div class="sub" style="margin-top:8px">⚠️ 눈여겨볼 점</div><ul class="plain">' + (p.flags || []).map(f => "<li>" + esc(f) + "</li>").join("") + "</ul>" +
+      ((p.pairs || []).length ? '<div class="small">가장 같이 움직이는 쌍: ' + p.pairs.slice(0, 3).map(x => esc(x.a + "·" + x.b) + " " + fmt(x.corr, 2)).join(" · ") +
+        " / 가장 따로 움직이는 쌍: " + (p.low_pairs || []).slice(0, 2).map(x => esc(x.a + "·" + x.b) + " " + fmt(x.corr, 2)).join(" · ") + " (상관 1=똑같이, 0=따로)</div>" : "") +
+      ((a["주요 리스크"] || []).length ? '<details class="sig"><summary><b>AI 풀이 · 주요 리스크 3가지 · 검토 포인트</b></summary>' +
+        (a["예시"] ? '<div class="ex">💡 ' + esc(a["예시"]) + "</div>" : "") +
+        '<ul class="plain">' + a["주요 리스크"].map(r => "<li><b>" + esc(r["이름"]) + "</b> — " + esc(r["설명"]) + (r["숫자"] ? ' <span class="small">(' + esc(r["숫자"]) + ")</span>" : "") + "</li>").join("") + "</ul>" +
+        ((a["좋은 점"] || []).length ? '<div class="sub">👍 좋은 점</div><ul class="plain">' + a["좋은 점"].map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "") +
+        '<div class="sub">🔎 검토 포인트 (권유 아님)</div><ul class="plain">' + (a["검토 포인트"] || []).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" + checkNote(a["_검사"]) + "</details>" : "") +
+      '<div class="small">' + esc(p.date || "") + " · 숫자는 1년 일봉으로 직접 계산 · 풀이는 GPT(주 1회)</div></div>";
   }
   function briefCard() {
     const b = S.ai && S.ai.brief;
@@ -1116,7 +1171,7 @@
     const seg = S.newsSeg || "sum";
     const segBtn = (k, l) => '<button data-ns="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
     let h = '<div class="head"><div><h1>경제뉴스</h1><div class="small">' + (n ? esc(whenText(n.at)) + " 기준 · " : "") + "쉬운 말 참고 자료 · 투자 권유 아님</div></div></div>" + statusLine() +
-      '<div class="segs">' + segBtn("sum", "5초 요약") + segBtn("sec", "업종 13개") + segBtn("mine", "내 종목") + segBtn("more", "숫자·단어") + "</div>";
+      '<div class="segs">' + segBtn("sum", "5초 요약") + segBtn("sec", "업종 13개") + segBtn("mine", "내 종목") + segBtn("more", "매크로·숫자") + "</div>";
     if (!n || (!r && seg === "sum")) {
       h += '<div class="msg note">' + esc(n ? (n.why || "오늘 GPT 요약이 없어요") : "첫 리포트는 다음 아침 리포트 때 만들어져요.") + " '업종 13개'의 기본 상식은 지금도 볼 수 있어요.</div>";
     }
@@ -1166,6 +1221,18 @@
       if (r && (r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 오늘 특히 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
         encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
     } else {
+      const mc = (r && r["매크로"]) || {}, mt = (n && n.macro) || {};
+      if (mc["한 줄"] || Object.keys(mt).length) {
+        h += '<h2>🌍 매크로 (금리·물가·고용·환율)</h2><div class="card">' + (mc["한 줄"] ? "<b>" + esc(mc["한 줄"]) + "</b>" : "") +
+          (Object.keys(mt).length ? '<dl class="kv num" style="margin-top:6px">' + Object.values(mt).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + esc(x["단위"] === "원" ? "원" : x["단위"] === "천 명" ? "천 명" : "%") +
+            ' <span class="small">직전 ' + (x["직전"] == null ? "—" : fmt(x["직전"])) + " · " + esc(x["기준일"]) + "</span></dd>").join("") + "</dl>" : "") +
+          ((mc["지표 풀이"] || []).length ? '<ul class="plain small">' + mc["지표 풀이"].map(x => "<li><b>" + esc(x["이름"]) + "</b> " + esc(x["값"] || "") + " — " + esc(x["쉬운 뜻"] || "") + "</li>").join("") + "</ul>" : "") +
+          (mc["지정학"] ? '<div class="small">🌐 지정학: ' + esc(mc["지정학"]) + "</div>" : "") + "</div>";
+        const sc = mc["6개월 시나리오"] || {};
+        if (sc["기준"]) h += '<h2>🔮 앞으로 6개월 시나리오</h2>' + [["😀 낙관", "낙관"], ["😐 기준", "기준"], ["😟 비관", "비관"]].map(([l, k]) => { const x = sc[k] || {};
+          return '<div class="card"><b>' + l + "</b><div>" + esc(x["조건"] || "") + '</div><div class="small">유리한 업종: ' + esc(x["유리한 업종"] || "—") + "</div></div>"; }).join("");
+        h += '<div class="small">지표: 미국 연준 경제자료(FRED) · 풀이와 시나리오: GPT (참고용, 권유 아님)' + (Object.keys(mt).length ? "" : " · 오늘은 물가·고용 지표를 못 받아서 시세 표(금리·환율·유가)로만 풀었어요") + "</div>";
+      }
       const mk = (n && n.market) || {};
       if (Object.keys(mk).length) h += '<h2>📊 시장 숫자</h2><div class="card"><dl class="kv num">' + Object.values(mk).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + (x["단위"] || "") +
         ' <span class="small">1일 ' + (x["변화 단위"] ? fmt(x["1일"]) + "%p" : pct(x["1일"])) + " · 1주 " + (x["변화 단위"] ? fmt(x["1주"]) + "%p" : pct(x["1주"])) + "</span></dd>").join("") + "</dl></div>";
@@ -1207,6 +1274,12 @@
     ["성장률 비교", "{T}와 가장 큰 경쟁사의 최근 8개 분기 성장률을 비교해줘."],
     ["종목 찾기", "후보 중에서 PER 15배 미만·잉여현금흐름 플러스·매출 성장률 5% 넘는 종목을 찾아줘."],
     ["모기지 리츠", "{T}의 최근 4개 분기 주당 장부가치·배당·PBR 변화와 금리 영향을 정리해줘."],
+    ["차트 분석", "{T}의 최근 주가 추세, 주요 지지선과 저항선, 이동평균선(20·60·120일), 거래량, RSI, MACD를 바탕으로 상승·하락 시나리오와 주요 가격대를 정리해줘."],
+    ["재무 건전성", "{T}의 최근 3~5년 매출·영업이익·순이익 성장률, ROE, ROIC, 부채비율, 유동비율, 영업현금흐름, 잉여현금흐름(FCF)으로 재무 건전성을 평가해줘."],
+    ["분기 공시 비교", "{T}의 최신 분기 공시(10-Q/10-K)를 직전 분기와 비교해서 매출 구성·부채·재고·매출채권 등 달라진 주요 사항 5가지를 정리해줘."],
+    ["포트폴리오", "내 보유 종목의 비중·업종 쏠림·같이 움직이는 정도·변동성을 분석하고 분산 관점에서 검토할 점을 알려줘."],
+    ["매크로", "지금 미국 기준금리·물가·고용·GDP·달러와 원달러 환율·국채금리·유가를 바탕으로 앞으로 6개월 낙관·기준·비관 시나리오와 유리한 업종을 정리해줘."],
+    ["아침 3분 브리핑", "내 보유 종목의 지난 24시간 주요 뉴스·공시를 매출·이익에 미칠 영향, 중요도(상·중·하), 출처 링크와 함께 정리해줘. 특이사항이 없으면 없다고 해줘."],
   ];
 
   function viewAsk() {
@@ -1229,6 +1302,7 @@
       if ((x["확인 못 함"] || []).length) h += '<div class="small">확인 못 함: ' + esc(x["확인 못 함"].join(" · ")) + "</div>";
       h += checkNote(a.check ? { issues: a.check, ok: !a.check.length } : null);
       if ((a.sources || []).length) h += '<div class="small">찾은 자료: ' + esc(a.sources.map(s => s["제목"] + " (" + s["날짜"] + ")").join(" · ")) + "</div>";
+      if (a.answer && !a.answer["질문"]) h += '<button class="chip" type="button" data-recheck="1" style="margin-top:6px">🔍 검사관 모드로 다시 보기</button>';
       return h + "</div>";
     };
     appShell("home", '<button class="back" onclick="history.back()">← 뒤로</button><h1>AI에게 묻기</h1>' +
@@ -1240,14 +1314,20 @@
       (A.mode !== "fact" ? '<details class="sig" id="tpl"><summary><b>📋 질문 템플릿 ' + ASK_TPL.length + '개</b> <span class="small">기업명 + 지표 + 기간을 구체적으로</span></summary>' +
         '<label>종목</label><select id="tplt">' + [...new Set((S.data && S.data.holdings || []).map(h => h.t).concat(allPicks().slice(0, 15).map(p => p.t)))].map(t => "<option>" + esc(t) + "</option>").join("") + "</select>" +
         '<div class="chips wrap" style="margin-top:6px">' + ASK_TPL.map((t, i) => '<button type="button" class="chip" data-tpl="' + i + '">' + esc(t[0]) + "</button>").join("") + "</div></details>" : "") +
-      '<form id="af">' + (A.mode === "fact" ? '<label>붙인 글</label><textarea id="ap" rows="6" maxlength="12000" placeholder="여기에 글을 붙여 넣어요"></textarea>' : "") +
+      '<form id="af">' + (A.mode === "fact" ? '<label>붙인 글</label><textarea id="ap" rows="6" maxlength="12000" placeholder="여기에 글을 붙여 넣어요">' + esc(A.pasted || "") + "</textarea>" : "") +
       '<label>' + (A.mode === "fact" ? "더 물을 것 (선택)" : "질문") + '</label><textarea id="aq" rows="3" maxlength="4000" placeholder="예: MO 지금 배당은 안전한가?">' + esc(A.draft || "") + '</textarea>' +
       '<button class="btn" type="submit">묻기</button><div class="out"></div></form>' +
       ((A.hist || []).length ? '<button class="btn ghost" id="aclear">새로 묻기</button>' : "") +
       '<p class="foot">AI 답은 참고용이에요. 숫자는 검사관이 한 번 더 확인해요. ' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => { A.mode = b.dataset.m; A.hist = []; viewAsk(); }));
     const cl = document.getElementById("aclear"); if (cl) cl.onclick = () => { A.hist = []; viewAsk(); };
-    A.draft = "";
+    A.draft = ""; A.pasted = "";
+    $app.querySelectorAll("[data-recheck]").forEach(b => b.addEventListener("click", () => {
+      const last = [...(A.hist || [])].reverse().find(h => h.role === "ai" && h.a && h.a.answer);
+      S.ask = { mode: "fact", hist: [], draft: "방금 분석을 비판적인 검토자 입장에서 재검토해줘. 숫자·인용·증감률 계산·단위·날짜·출처를 확인하고, 오류가 있으면 원래 답변·수정 내용·근거를 제시하고, 수정할 것이 없으면 '확인된 수정 사항 없음'이라고 답해줘.",
+        pasted: last ? JSON.stringify(last.a.answer, null, 1).slice(0, 11000) : "" };
+      viewAsk();
+    }));
     $app.querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
       const t = (document.getElementById("tplt") || {}).value || "[기업명]", q = document.getElementById("aq");
       q.value = ASK_TPL[+b.dataset.tpl][1].replace(/\{T\}/g, t); q.focus(); document.getElementById("tpl").open = false;

@@ -195,31 +195,59 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
         return None
 
 
-INSPECT = """너는 검사관이야. '답'에 나온 숫자를 '자료'와 하나씩 대조해.
-1. 자료에 근거 문장이 없는 숫자를 모두 찾아.
-2. 최신 분기·날짜 숫자인지, 한 분기 전 숫자는 아닌지 봐.
-3. 성장률·비율은 계산식을 보이고 다시 계산해.
-4. 단위(억·조, 달러·원)와 GAAP·조정 수치가 섞였는지 봐.
-5. 틀리거나 확인 못 한 것만 {"issues":[{"원래":"..","고친 값":"..","근거":".."}]} 로 내. 없으면 {"issues":[]}.
-JSON 하나로만 답해."""
+INSPECT = """너는 비판적인 검토자(검사관)야. '답'을 '자료'와 하나씩 대조해 재검토해.
+1. 숫자: 자료에 근거 문장이 없는 숫자를 모두 찾아. 최신 분기·날짜 숫자인지, 한 분기 전 숫자는 아닌지 봐.
+2. 계산: 성장률·비율·증감률은 계산식을 보이고 다시 계산해.
+3. 단위·기준: 억·조, 달러·원, %·%p, GAAP·Non-GAAP(조정) 수치가 섞였는지 봐.
+4. 출처·날짜·기간: 인용한 출처·발표일·기간이 자료와 맞는지 봐.
+5. 근거 없는 주장: 자료로 확인되지 않는 사실 주장은 삭제 대상으로 표시해.
+틀리거나 확인 못 한 것만 {"issues":[{"종류":"숫자|계산|단위|출처|날짜|근거 없음","원래":"답에 있던 그대로의 글자","고친 값":"바른 값, 지워야 하면 빈칸","근거":"자료의 어느 부분/계산식"}]} 로 내.
+고칠 것이 없으면 {"issues":[]}. JSON 하나로만 답해."""
 
 
 def inspect(where: str, answer: dict, data) -> dict | None:
-    """F-C15: 숫자가 들어간 답을 한 번 더 검사. 실패하면 None → 그 답은 앱에 올리지 않아요."""
-    res = chat_json(where + "·검사", INSPECT + "\n\n— 답 —\n" + json.dumps(answer, ensure_ascii=False), data, "small", 1500)
+    """F-C15 검사관 모드: 숫자·계산·단위·출처·날짜·근거를 재검토. 실패하면 None → 그 답은 앱에 올리지 않아요."""
+    res = chat_json(where + "·검사", INSPECT + "\n\n— 답 —\n" + json.dumps(answer, ensure_ascii=False), data, "small", 1800)
     if res is None or not isinstance(res.get("issues", None), list):
         return None
-    return {"issues": res["issues"][:10], "ok": not res["issues"]}
+    issues = [i for i in res["issues"][:12] if isinstance(i, dict) and str(i.get("원래") or "").strip()]
+    return {"issues": issues, "ok": not issues}
+
+
+def _apply_fixes(ans, issues: list[dict]):
+    """검사관이 찾은 '원래' 글자를 답 안에서 '고친 값'으로 바꿔요 (빈칸이면 「확인 못 함」). 바꾼 수를 돌려줘요."""
+    n = 0
+
+    def fix(v):
+        nonlocal n
+        if isinstance(v, str):
+            for i in issues:
+                old = str(i.get("원래") or "").strip()
+                if len(old) >= 2 and old in v:
+                    new = str(i.get("고친 값") or "").strip() or "「확인 못 함」"
+                    v = v.replace(old, new)
+                    n += 1
+            return v
+        if isinstance(v, list):
+            return [fix(x) for x in v]
+        if isinstance(v, dict):
+            return {k: (fix(x) if not str(k).startswith("_") else x) for k, x in v.items()}
+        return v
+    return fix(ans), n
 
 
 def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90) -> dict | None:
-    """답 + 검사관. 검사가 실패하면 답을 버려요."""
+    """답 + 검사관. 검사가 실패하면 답을 버려요. 검사관이 찾은 오류는 답에 바로 고쳐 넣고 기록해요."""
     ans = chat_json(where, task, data, kind, max_tokens, timeout)
     if ans is None:
         return None
     ins = inspect(where, ans, data)
     if ins is None:
         return None
+    if ins["issues"]:
+        ans, n = _apply_fixes(ans, ins["issues"])
+        ins["fixed"] = n
+    ins["note"] = "확인된 수정 사항 없음" if ins["ok"] else f"검사관이 {len(ins['issues'])}곳을 확인해 {ins.get('fixed', 0)}곳을 고쳤어요"
     ans["_검사"] = ins
     return ans
 

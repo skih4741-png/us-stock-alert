@@ -27,10 +27,11 @@ BRIEF = """목표: 내 보유 종목에 지난 하루 무슨 일이 있었는지
 - 자료에 없는 사건·링크는 쓰지 마."""
 
 EARN = """목표: 방금 나온 분기 실적을 표 하나로.
-출력: {"분기":"","발표일":"","표":[{"항목":"매출|영업이익|EPS","실제":"","예상(컨센서스)":"","작년 같은 분기":"","출처":""}],
+출력: {"분기":"","발표일":"","표":[{"항목":"매출|영업이익|EPS","실제":"","예상(컨센서스)":"","직전 분기":"","작년 같은 분기":"","출처":""}],
 "가이던스":"자료에 없으면 「확인 못 함」","마진이 변한 이유":"자료로 알 수 있는 만큼, 없으면 「확인 못 함」",
 "현금흐름":"영업현금흐름이 순이익만큼 늘었나, 없으면 「확인 못 함」","판정":{"실적":"상회|부합|하회|확인 못 함","가이던스":"상회|부합|하회|확인 못 함"},"한 줄":""}
-- 예상치는 자료의 출처(야후 컨센서스)를 그대로 적어. 자료에 없는 칸은 「확인 못 함」."""
+- 예상치는 자료의 출처(야후 컨센서스)를 그대로 적어. 자료에 없는 칸은 「확인 못 함」.
+- 증감률은 직접 계산하지 말고 자료의 '계산(파이썬)' 값을 그대로 써 (재무제표 숫자 검산)."""
 
 B4 = """목표: 워런 버핏식 4관점 점검(사업 이해·경쟁 우위·경영진·가격).
 출력: {"관점":[{"이름":"사업 이해|경쟁 우위|경영진|가격","판정":"통과|조건부|탈락","근거":["자료 숫자·사실 1~3개"]}],"종합":"통과|조건부|탈락","한 줄":""}
@@ -44,8 +45,9 @@ REP = """목표: 초보자가 5초에 이해하는 기업 리포트.
 PM = """목표: 사기 전에 실패부터 가정하는 사전 부검. 이 종목이 6개월 뒤 30% 떨어졌다고 가정해.
 출력: {"원인":[{"시나리오":"","가능성":"상|중|하","가장 먼저 보일 신호":"","지금 값":"자료 숫자 또는 「확인 못 함」","다음 확인일":""}],
 "이미 반영된 기대":"PER 등 자료 숫자와 계산식","큰 하락 이력":"자료의 하락 구간을 날짜와 함께","맞으려면 필요한 조건":["3개"],
+"가설이 틀렸다고 볼 조건":["3개, 숫자·날짜로 확인할 수 있게"],
 "막을 이유":{"있음":true|false,"이유":"유상증자·소송·감사 의견·실적 경고 같은 위험이 자료에 있으면 한 줄, 없으면 빈칸","출처":"자료 링크"}}
-- 원인은 3개, 가능성 순. 매수·매도 결론은 내지 마."""
+- 원인은 3개, 가능성 순. 원인마다 가장 먼저 보일 조기 경고 신호를 꼭 적어. 매수·매도 결론은 내지 마."""
 
 
 def _iso(x) -> str:
@@ -101,6 +103,23 @@ def gather(t: str, deep: bool = False) -> dict:
             q = tk.quarterly_income_stmt
             rows = [r for r in ("Total Revenue", "Operating Income", "Net Income", "Diluted EPS") if r in q.index]
             out["분기 손익(야후)"] = {str(c)[:10]: {r: (None if pd.isna(q.loc[r, c]) else float(q.loc[r, c])) for r in rows} for c in q.columns[:5]}
+            # 재무제표 숫자 검산: 증감률은 GPT 대신 파이썬이 계산해서 넘겨요
+            qs = list(out["분기 손익(야후)"].items())
+            calc = {}
+            if len(qs) >= 2:
+                (d0, a), (d1, b) = qs[0], qs[1]
+                y = qs[4] if len(qs) >= 5 else None
+                for r in rows:
+                    cur, prv = a.get(r), b.get(r)
+                    item = {"이번": cur, "기준일": d0}
+                    if cur is not None and prv:
+                        item["직전 분기 대비 %"] = round((cur / prv - 1) * 100 * (1 if prv > 0 else -1), 1)
+                    if y and cur is not None and y[1].get(r):
+                        item["작년 같은 분기 대비 %"] = round((cur / y[1][r] - 1) * 100 * (1 if y[1][r] > 0 else -1), 1)
+                    calc[r] = item
+                if a.get("Total Revenue") and a.get("Operating Income") is not None:
+                    calc["영업이익률 %"] = round(a["Operating Income"] / a["Total Revenue"] * 100, 1)
+            out["계산(파이썬)"] = calc
         except Exception:
             pass
         try:
@@ -145,12 +164,53 @@ def _load(store) -> dict:
         return {}
 
 
+def numeric_cards(blob: dict, app: dict, cfg: dict, sim_state: dict | None, gpt_ok: bool):
+    """차트 분석 · 포트폴리오 진단 · 분기 공시 비교. 숫자는 모두 파이썬 계산이라 GPT가 꺼져도 돌아요 (GPT는 포트폴리오 풀이만)."""
+    today = app.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
+    week_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+    holds = [h["t"] for h in app.get("holdings", [])]
+    picks = sorted([p for b in app.get("bands", []) for p in b["picks"]], key=lambda p: -(p.get("total") or 0))
+    pick_t = [p["t"] for p in picks if p["t"] not in holds]
+    try:
+        import chart
+        pend_t = [o["t"] for o in (sim_state or {}).get("pending", [])]
+        blob["chart"] = chart.build(list(dict.fromkeys(holds + pick_t[:15] + pend_t)))
+    except Exception as e:
+        log.warning("차트 분석 실패: %s", e)
+    try:
+        import news
+        import portfolio
+        cache = news._industries(holds[:20], blob.get("news_ind") or {})
+        blob["news_ind"] = cache
+        pf = portfolio.build(app.get("holdings", []), lambda t: news.sector_of(t, cache))
+        if pf:
+            prev = blob.get("port") or {}
+            if gpt_ok and (prev.get("ai_date", "") < week_ago or not prev.get("ai")):
+                pf["ai"], pf["ai_date"] = ai.checked("포트폴리오 진단", portfolio.TASK, {k: v for k, v in pf.items() if k != "ai"}, "small", 2000), today
+            else:
+                pf["ai"], pf["ai_date"] = prev.get("ai"), prev.get("ai_date")
+            blob["port"] = dict(pf, date=today)
+    except Exception as e:
+        log.warning("포트폴리오 진단 실패: %s", e)
+    try:
+        import secq
+        email = str(cfg.get("SEC 연락 이메일") or "").strip()
+        if email:
+            blob["secq"] = secq.run([t for t in holds if not t.startswith("^")][:15], email, blob.get("secq"))
+            blob.pop("secq_off", None)
+        else:
+            blob["secq_off"] = "구글 시트 '설정' 탭 'SEC 연락 이메일'을 채우면 켜져요 (SEC가 요청자 연락처를 요구해요)"
+    except Exception as e:
+        log.warning("분기 공시 비교 실패: %s", e)
+
+
 def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | None:
     ok, why = ai.enabled()
     blob = _load(store)
     blob["status"] = ai.status()
     if not ok:
         blob["off"] = why
+        numeric_cards(blob, app, cfg, sim_state, False)
         store.put_blob(KEY, json.dumps(blob, ensure_ascii=False, default=str))
         log.info("GPT 기능 건너뜀: %s", why)
         return blob
@@ -240,6 +300,8 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             veto_log.append({"date": today, "t": t, "veto": bool(v.get("있음")), "why": v.get("이유", ""), "src": v.get("출처", "")})
     blob["pm"] = {k: v for k, v in pm.items() if v.get("date", "") >= week_ago}
     blob["veto"] = veto_log[-200:]
+
+    numeric_cards(blob, app, cfg, sim_state, True)
 
     # ---- RAG 자료 쌓기 ----
     try:
