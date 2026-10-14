@@ -195,11 +195,8 @@ def numeric_cards(blob: dict, app: dict, cfg: dict, sim_state: dict | None, gpt_
     try:
         import secq
         email = str(cfg.get("SEC 연락 이메일") or "").strip()
-        if email:
-            blob["secq"] = secq.run([t for t in holds if not t.startswith("^")][:15], email, blob.get("secq"))
-            blob.pop("secq_off", None)
-        else:
-            blob["secq_off"] = "구글 시트 '설정' 탭 'SEC 연락 이메일'을 채우면 켜져요 (SEC가 요청자 연락처를 요구해요)"
+        blob["secq"] = secq.run([t for t in holds if not t.startswith("^")][:15], email, blob.get("secq"))
+        blob.pop("secq_off", None)
     except Exception as e:
         log.warning("분기 공시 비교 실패: %s", e)
 

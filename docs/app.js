@@ -1006,7 +1006,7 @@
       ((q.changes || []).length ? '<b>직전 분기와 달라진 점</b><ol class="plain" style="padding-left:18px;list-style:decimal">' + q.changes.map(x => "<li>" + esc(x) + "</li>").join("") + "</ol>" : "") +
       '<table class="tbl num"><tr><th></th><th>이번</th><th>직전</th><th>작년</th></tr>' + (q.rows || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + big(r["이번 분기"]) + "</td><td>" + big(r["직전 분기"]) +
         "</td><td>" + big(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
-      '<div class="small">SEC EDGAR XBRL 숫자를 직접 비교 (GPT 아님) · 고객·공급망·소송 같은 문장 내용은 포함 안 됨 · <a class="link" href="' + esc(q.src) + '" target="_blank" rel="noopener">원문 공시</a></div></div>';
+      '<div class="small">'+ (q.via === "yahoo" ? "야후가 10-Q에서 옮긴 분기 재무제표로 비교" : "SEC EDGAR XBRL 숫자를 직접 비교") + ' (GPT 아님) · 고객·공급망·소송 같은 문장 내용은 포함 안 됨 · <a class="link" href="' + esc(q.src) + '" target="_blank" rel="noopener">원문 공시</a></div></div>';
   }
   // 포트폴리오 진단 (숫자는 파이썬, 풀이만 GPT)
   function portHtml() {
@@ -1243,7 +1243,7 @@
         const sc = mc["6개월 시나리오"] || {};
         if (sc["기준"]) h += '<h2>🔮 앞으로 6개월 시나리오</h2>' + [["😀 낙관", "낙관"], ["😐 기준", "기준"], ["😟 비관", "비관"]].map(([l, k]) => { const x = sc[k] || {};
           return '<div class="card"><b>' + l + "</b><div>" + esc(x["조건"] || "") + '</div><div class="small">유리한 업종: ' + esc(x["유리한 업종"] || "—") + "</div></div>"; }).join("");
-        h += '<div class="small">지표: 미국 연준 경제자료(FRED) · 풀이와 시나리오: GPT (참고용, 권유 아님)' + (Object.keys(mt).length ? "" : " · 오늘은 물가·고용 지표를 못 받아서 시세 표(금리·환율·유가)로만 풀었어요") + "</div>";
+        h += '<div class="small">지표: 미국 연준 경제자료(FRED) 또는 노동통계국(BLS) · 풀이와 시나리오: GPT (참고용, 권유 아님)' + (Object.keys(mt).length ? "" : " · 오늘은 물가·고용 지표를 못 받아서 시세 표(금리·환율·유가)로만 풀었어요") + "</div>";
       }
       const mk = (n && n.market) || {};
       if (Object.keys(mk).length) h += '<h2>📊 시장 숫자</h2><div class="card"><dl class="kv num">' + Object.values(mk).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + (x["단위"] || "") +

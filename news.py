@@ -174,6 +174,42 @@ def macro_table() -> dict:
         except Exception as e:
             fails += 1
             log.info("FRED 실패 %s: %s", sid, e)
+    if len(out) < 3:
+        out.update({k: v for k, v in bls_table().items() if k not in out})
+    return out
+
+
+BLS = [("CUUR0000SA0", "소비자물가(CPI) 1년 상승률", "yoy"), ("CUUR0000SA0L1E", "근원 물가(식품·에너지 뺀) 1년 상승률", "yoy"),
+       ("LNS14000000", "실업률", "level"), ("CES0000000001", "일자리 증가(전달 대비, 천 명)", "diff")]
+
+
+def bls_table() -> dict:
+    """FRED에 못 닿을 때: 미국 노동통계국(BLS) 공개 API(키 없이 하루 25번)로 물가·고용."""
+    out = {}
+    try:
+        r = requests.post("https://api.bls.gov/publicAPI/v1/timeseries/data/", json={"seriesid": [x[0] for x in BLS]}, timeout=30)
+        series = {s["seriesID"]: s["data"] for s in (r.json().get("Results") or {}).get("series", [])}
+    except Exception as e:
+        log.info("BLS 실패: %s", e)
+        return out
+    for sid, name, how in BLS:
+        d = [x for x in series.get(sid) or [] if x.get("period", "").startswith("M") and x["period"] != "M13"]
+        if len(d) < 3:
+            continue
+        val = lambda x: float(x["value"])
+        cur, prv = d[0], d[1]
+        key = lambda x: (int(x["year"]), x["period"])
+        if how == "yoy":
+            def yoy(x):
+                b = next((y for y in d if key(y) == (int(x["year"]) - 1, x["period"])), None)
+                return round((val(x) / val(b) - 1) * 100, 2) if b else None
+            v, p = yoy(cur), yoy(prv)
+            unit = "%"
+        elif how == "diff":
+            v, p, unit = round(val(cur) - val(prv), 1), round(val(prv) - val(d[2]), 1), "천 명"
+        else:
+            v, p, unit = val(cur), val(prv), "%"
+        out[sid] = {"이름": name, "기준일": f"{cur['year']}-{cur['period'][1:]}", "값": v, "직전": p, "단위": unit, "출처": f"BLS {sid}"}
     return out
 
 
