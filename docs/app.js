@@ -92,6 +92,9 @@
     return (d.getMonth() + 1) + "월 " + d.getDate() + "일 " + p(d.getHours()) + ":" + p(d.getMinutes());
   }
   const tagTone = t => /손절|위험|보류|출렁임/.test(t) ? "bad" : /실적|급등|참고/.test(t) ? "warn" : /신규/.test(t) ? "info" : "";
+  // 엠프티 스테이트: 제목 + 설명 + 다음 행동 (IBM Carbon 기준 · 막다른 화면 금지)
+  const emp = (icon, title, body, href, label) => '<div class="empty"><div class="eicon">' + icon + '</div><b>' + esc(title) + "</b>" +
+    (body ? '<div class="small">' + esc(body) + "</div>" : "") + (href ? '<a class="chip" href="' + href + '">' + esc(label || "보러 가기") + " →</a>" : "") + "</div>";
   const tags = arr => (arr && arr.length) ? '<div class="tags">' + arr.map(t => '<span class="badge ' + tagTone(t) + '">' + esc(t) + "</span>").join("") + "</div>" : "";
   function pwRules(pw, id) {
     pw = pw || "";
@@ -135,9 +138,10 @@
     f.addEventListener("submit", async ev => {
       ev.preventDefault();
       const btn = f.querySelector("button[type=submit]"); const msg = f.querySelector(".out");
-      btn.disabled = true; msg.innerHTML = "";
+      const label = btn.innerHTML;
+      btn.disabled = true; btn.classList.add("loading"); btn.innerHTML = '<span class="spin"></span> 처리 중…'; msg.innerHTML = "";
       try { await handler(f, msg); } catch (e) { msg.innerHTML = '<div class="msg err">' + esc(e.message) + "</div>"; }
-      btn.disabled = false;
+      if (btn.isConnected) { btn.disabled = false; btn.classList.remove("loading"); btn.innerHTML = label; }
     });
   }
 
@@ -406,6 +410,7 @@
   /* ---------- 화면: 앱 ---------- */
   function appShell(tab, html) {
     $tabs.hidden = false;
+    tabBadges(tab);
     [...$tabs.querySelectorAll("a")].forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
     $app.innerHTML = html;
     stickOffsets();
@@ -425,7 +430,7 @@
   function needData(tab) {
     if (S.data) return false;
     appShell(tab, statusLine() + (S.loading || !S.error ? '<div class="skel"></div><div class="skel"></div><div class="skel"></div>'
-      : '<div class="empty">아직 받은 리포트가 없어요. 아침 리포트가 한 번 돌면 여기에 나와요.</div>'));
+      : emp("🌅", "아침 리포트를 기다리는 중이에요", "평일 아침 7시쯤 첫 리포트가 오면 여기에 채워져요. 그동안 경제뉴스를 볼 수 있어요.", "#/news", "경제뉴스 보기")));
     return true;
   }
   const allPicks = () => (S.data.bands || []).flatMap(b => b.picks.concat(b.etf_picks || []));
@@ -458,8 +463,7 @@
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const pos = m.positions || [], pend = m.pending || [], today = (m.today || []).slice(0, 3);
     return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live"></span>모의투자 진행 중</b>' +
-      '<span class="badge info">' + m.day + "/" + m.days + "일째</span></div>" +
-      '<div class="plbar" style="margin:8px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
+      '<span class="radial" style="--p:' + prog.toFixed(1) + '" title="' + m.day + "/" + m.days + '일째"><span>' + m.day + "<small>/" + m.days + "일</small></span></span></div>" +
       '<div class="row between"><span class="big num">$' + fmt(m.equity) + '</span><b class="num ' + (m.ret >= 0 ? "good-t" : "bad-t") + '">' + pct(m.ret) +
       ' <span class="small">(SPY ' + pct(m.spy_ret) + ")</span></b></div>" +
       '<div class="small num">가상 $' + fmt(m.budget, 0) + " 시작 · 현금 $" + fmt(m.cash) + " · 번 돈 " + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + "</div>" +
@@ -483,7 +487,8 @@
     const top = allPicks().filter(p => !p.etf).sort((a, b) => b.total - a.total).slice(0, 3);
     appShell("home",
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
-      '<button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button></div>" +
+      '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button>" +
+      '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
       statusLine() + whatsNewCard() + homeSimCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
@@ -498,7 +503,7 @@
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
-        : '<div class="empty">보유 종목이 없어요</div>') + "</div>" +
+        : emp("📭", "보유 종목을 연결해 시작해요", "구글 시트 '보유 종목' 탭(또는 배당 대시보드 '내 종목')을 읽어요.", "#/picks", "오늘 후보 보기")) + "</div>" +
       ((d.holdings || []).length > 4 ? '<a class="link" href="#/holdings">보유 전체 보기 →</a>' : "") +
       '<h2>매수 후보 상위 (개별 종목)</h2><div class="list">' +
       (top.length ? top.map(p => '<div class="item" onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'"><span class="tk">' + esc(p.t) +
@@ -536,7 +541,7 @@
         b.picks.map(pickCard).join("") +
         ((b.etf_picks || []).length ? '<div class="small" style="margin-top:10px">ETF·펀드 (따로 순위)</div>' + b.etf_picks.map(pickCard).join("") : "") +
         ((b.dropped || []).length ? '<div class="small">어제에서 빠짐: ' + esc(b.dropped.join(", ")) + "</div>" : "")
-      ).join("") : '<div class="empty">이 가격대에는 오늘 후보가 없어요</div>') +
+      ).join("") : emp("🔎", "이 가격대는 오늘 조건에 맞는 종목이 없어요", "다른 가격대나 '전체'를 눌러 보세요.", "", "")) +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => { S.filter = b.dataset.f; store.set("filter", S.filter); viewPicks(); }));
     const qi = document.getElementById("pq");
@@ -599,7 +604,7 @@
         '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><div class="grow"><div class="row between"><span class="tk">' + esc(h.t) +
         '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
         '<div class="small num">수익률 ' + pct(h.gain_pct) + " · 손절선까지 " + (h.to_stop_pct == null ? "—" : fmt(h.to_stop_pct, 1) + "%") + "</div></div></div>").join("")
-        : '<div class="empty">보유 종목이 없어요. 배당 대시보드 시트의 내 종목을 읽어요.</div>') + "</div>" +
+        : emp("📭", "보유 종목을 연결해 시작해요", "구글 시트 '보유 종목' 탭(또는 배당 대시보드 '내 종목')에 적으면 다음 리포트부터 보여요.", "#/picks", "오늘 후보 보기")) + "</div>" +
       '<p class="foot">보유 종목은 구글 시트에서 읽어요 · ' + esc(DISCLAIMER) + "</p>");
   }
 
@@ -635,7 +640,7 @@
       '<div class="small">푸시·슬랙으로 보낸 것과 같은 내용이에요 (최근 200개)</div><div class="list">' +
       (items.length ? items.map(a => '<div class="item" style="cursor:default"><span style="width:10px;height:10px;border-radius:5px;background:' + (tone[a.tone] || tone.info) +
         '"></span><div class="grow"><div class="row between"><b>' + esc(a.title) + '</b><span class="small">' + esc(whenText(a.at)) + '</span></div><div class="small">' + esc(a.body) + "</div></div></div>").join("")
-        : '<div class="empty">아직 알림이 없어요</div>') + "</div>");
+        : emp("🔔", "새 알림이 오면 여기에 모여요", "아침 리포트·장중 체결·업데이트 소식이 푸시와 함께 쌓여요.", "#/settings", "푸시 알림 설정")) + "</div>");
   }
 
   /* ---------- 3단계: 추세 합류 · 매도 규칙 7개 · 모의투자 · 성적 ---------- */
@@ -792,7 +797,7 @@
         (RES[x.result] || "") + '">' + esc(x.result) + "</span></div>").join("") + "</div>" : '<div class="small">첫 주문표 결과는 다음 거래일부터 쌓여요</div>') + "</div>";
   }
   function autoSimHtml(m) {
-    if (!m) return '<div class="empty">자동 모의매매는 다음 아침 리포트부터 시작돼요</div>';
+    if (!m) return emp("🧪", "자동 모의투자를 준비하고 있어요", "다음 아침 리포트부터 가상 1,000달러로 시작해요.", "#/picks", "오늘 후보 보기");
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
     const passN = (m.checks || []).filter(c => c[1]).length;
@@ -812,17 +817,17 @@
       ticketHtml(m) +
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +
-        "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + (p.fill_time ? " · 체결 " + esc(p.fill_time) : "") + "</div></div>").join("") + "</div>" : '<div class="empty">없음</div>') +
+        "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + (p.fill_time ? " · 체결 " + esc(p.fill_time) : "") + "</div></div>").join("") + "</div>" : emp("🫙", "지금 가진 종목은 없어요", "아래 '다음 거래일 주문 계획'이 체결되면 여기에 나와요.", "", "")) +
       "<h2>다음 거래일 주문 계획</h2>" + ((m.pending || []).length ? '<div class="list">' + m.pending.map(o =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
         " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + vetoTag(o.t) + "</div></div>").join("") + "</div>"
-        : '<div class="empty">없음 (조건에 맞는 후보가 없거나 자리가 찼어요)</div>') +
+        : emp("🗓️", "다음 거래일엔 주문을 쉬어요", "조건에 맞는 후보가 없거나 보유 자리가 찼어요. 쉬는 것도 규칙이에요.", "#/picks", "오늘 후보 보기")) +
       "<h2>실전 기준 " + passN + "/" + (m.checks || []).length + " <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
       '<div class="card"><ul class="checks">' + (m.checks || []).map(c => '<li class="' + (c[1] ? "ok" : "no") + '">' + (c[1] ? "✓ " : "– ") + esc(c[0]) +
         '<div class="small">' + esc(c[2]) + "</div></li>").join("") + "</ul></div>" +
       "<h2>판 거래</h2>" + ((m.closed || []).length ? '<div class="list">' + m.closed.map(c =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(c.t) + '</span><div class="grow small num">' + esc(c.date) + " → " + esc(c.exit_date) + " · " + esc(c.why) +
-        '</div><b class="num ' + (c.pnl >= 0 ? "good-t" : "bad-t") + '">' + usd(c.pnl) + "</b></div>").join("") + "</div>" : '<div class="empty">아직 없음</div>') +
+        '</div><b class="num ' + (c.pnl >= 0 ? "good-t" : "bad-t") + '">' + usd(c.pnl) + "</b></div>").join("") + "</div>" : emp("🧾", "아직 판 거래가 없어요", "손절·목표·제자리 규칙으로 팔면 손익과 함께 여기에 쌓여요.", "", "")) +
       "<h2>기록</h2>" + '<div class="card small">' + (m.log || []).map(esc).join("<br>") + "</div>";
   }
 
@@ -850,7 +855,7 @@
           " · 손절 " + fmt(x.stop) + " · 목표 " + fmt(x.target) + "</div>" +
           '<div class="num ' + (x.pnl >= 0 ? "good-t" : "bad-t") + '"><b>' + usd(x.pnl) + "</b> 평가손익</div>" +
           '<button class="btn ghost sm" data-sell="' + esc(x.id) + '">팔기</button><div id="sell' + esc(x.id) + '"></div></div>').join("")
-          : '<div class="empty">아직 담은 종목이 없어요. 매수 후보 → 종목 상세 → "모의투자에 담기"</div>') +
+          : emp("🧺", "직접 고른 종목으로 연습해 보세요", "후보 종목 화면의 '모의투자에 담기'를 누르면 가상 1,000달러 계좌에 담겨요.", "#/picks", "후보 보러 가기")) +
         "<h2>판 거래 · 회고</h2>" + (closed.length ? closed.map(x =>
           '<div class="card"><div class="row between"><b>' + esc(x.t) + '</b><span class="badge ' + signTone(x.ret) + '">' + pct(x.ret) + "</span></div>" +
           '<div class="small num">' + esc(x.date) + " → " + esc(x.sold_date) + " · $" + fmt(x.price) + " → $" + fmt(x.sold_price) + " · " + esc(x.why || "") +
@@ -858,7 +863,7 @@
           '<div class="num ' + (x.pnl >= 0 ? "good-t" : "bad-t") + '"><b>' + usd(x.pnl) + "</b> " + (x.pnl >= 0 ? "벌었어요" : "잃었어요") + "</div>" +
           '<div class="note-row"><input type="text" maxlength="200" data-note="' + esc(x.id) + '" placeholder="회고 한 줄 (왜 샀고, 무엇을 배웠나)" value="' + esc(x.note || "") + '">' +
           '<button class="chip" data-save="' + esc(x.id) + '">저장</button></div></div>').join("")
-          : '<div class="empty">판 거래가 생기면 여기에 회고를 남겨요</div>');
+          : emp("📝", "판 거래가 생기면 회고를 남겨요", "잘한 점·아쉬운 점을 적어 두면 다음 판단에 도움이 돼요.", "", ""));
     } else if (seg === "skill") {
       const f = pf.first20 || {}, l = pf.last20 || {}, n = pf.n || trades.length;
       body = '<div class="card"><b>실력일까, 운일까</b><p class="sub">한두 번 번 것은 운일 수 있어요. 거래가 20번 넘게 쌓였을 때 아래 숫자가 SPY보다 꾸준히 나으면 실력 쪽에 가까워요.</p>' +
@@ -888,11 +893,11 @@
           '<div class="item" style="cursor:default"><span class="tk">' + esc(r.t) + '</span><div class="grow small">' + esc(r.date) + " · " + esc(r.band || "") +
           "<br>5일 " + (r.r5 == null ? "—" : pct(r.r5)) + " · 20일 " + (r.r20 == null ? "—" : pct(r.r20)) + '</div><span class="badge ' +
           (r.result === "목표 먼저" ? "good" : r.result === "손절 먼저" ? "bad" : "") + '">' + esc(r.result || "진행 중") + "</span></div>").join("")
-          : '<div class="empty">아직 기록이 없어요</div>') + "</div>";
+          : emp("📊", "신호 기록이 쌓이는 중이에요", "아침 후보가 5일·20일 지나면 결과가 채워져요.", "", "")) + "</div>";
     } else {
       const w = S.weekly;
       body = w && w.lines ? '<div class="card"><div class="small">' + esc(whenText(w.at)) + '</div><pre class="weekly">' + esc(w.lines.join("\n")) + "</pre></div>"
-        : '<div class="empty">주간 리포트는 일요일에 만들어져요</div>';
+        : emp("📅", "주간 리포트는 일요일에 와요", "한 주의 모의투자·신호 성적을 정리해 드려요.", "#/news", "그동안 경제뉴스 보기");
     }
     appShell("score", '<div class="head"><div><h1>모의투자 · 성적</h1><div class="small">모두 가상 돈 · 실제 주문 없음</div></div></div>' + statusLine() +
       '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
@@ -984,7 +989,7 @@
   // 차트 분석 (파이썬 계산 · GPT 없음)
   function chartHtml(t) {
     const c = S.ai && S.ai.chart && S.ai.chart[t];
-    if (!c) return '<div class="empty">차트 분석은 보유·후보 상위 종목만, 다음 아침 리포트부터 나와요</div>';
+    if (!c) return emp("📈", "이 종목은 차트 분석 대상이 아니에요", "보유 종목과 후보 상위 15개만 매일 계산해요.", "", "");
     const m = c.macd || {}, ma = c.ma || {};
     const tr = c.trend === "상승 추세" ? "good" : c.trend === "하락 추세" ? "bad" : "warn";
     return '<div class="card"><div class="row between"><b>차트 한눈에</b><span class="badge ' + tr + '">' + esc(c.trend) + "</span></div>" +
@@ -1050,9 +1055,9 @@
         '<div class="list">' + ((g.items || []).length ? g.items.map(x => '<div class="item"' + (x.pick ? ' onclick="location.hash=\'#/pick/' + encodeURIComponent(x.t) + '\'"' : ' style="cursor:default"') + '>' +
           '<span class="tk">' + esc(x.t) + '</span><div class="grow small">' + (x.held ? "보유 · " : "") + (x.pick ? "후보 · " : "") + "장 전 $" + fmt(x.pre) + " (전일 $" + fmt(x.prev) + ")" +
           (x.vol ? " · 거래량 " + fmt(x.vol, 0) : "") + (x.news ? "<br>" + esc(x.news) : "") + '</div><span class="badge ' + (x.cond ? (x.gap > 0 ? "warn" : "bad") : "") + '">' + pct(x.gap) + "</span></div>").join("")
-          : '<div class="empty">오늘은 장 전 가격이 잡힌 종목이 없어요</div>') + "</div>" +
+          : emp("🌙", "오늘은 장 전 가격이 잡힌 종목이 없어요", "보유·후보·모의 주문 종목만 확인해요.", "#/holdings", "보유 보기")) + "</div>" +
         '<p class="foot">갭 5% 이상·주가 3달러 이상·장 전 거래량 5만 주 이상이면 색으로 표시해요. 추격 금지선 위에서 시작하면 모의매매는 사지 않아요.</p>'
-        : '<div class="empty">장 전 점검(미국 장 시작 1시간 전)이 한 번 돌면 여기에 나와요</div>'));
+        : emp("⏰", "장 전 점검을 기다리는 중이에요", "미국 장 시작 1시간 전(한국 밤 10시 반쯤)에 채워져요.", "#/news", "경제뉴스 보기")));
   }
 
   const PROFILE_Q = [
@@ -1229,7 +1234,7 @@
         '\'" style="cursor:pointer"><div class="row between"><b>' + (DOT[x["신호등"]] || "⚪") + " " + esc(x["종목"]) + '</b><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>" +
         "<div>" + esc(x["한 줄"] || "") + "</div>" + (x["확인할 것"] ? '<div class="small">✅ ' + esc(x["확인할 것"]) + "</div>" : "") +
         (x["출처"] && x["출처"]["링크"] ? '<a class="small link" href="' + esc(x["출처"]["링크"]) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc((x["출처"]["제목"] || "출처").slice(0, 50)) + "</a>" : "") + "</div>").join("");
-      else h += '<div class="empty">내 종목 의견은 다음 경제뉴스 리포트부터 나와요</div>';
+      else h += emp("📰", "내 종목 의견을 준비하고 있어요", "다음 아침 경제뉴스 리포트부터 종목마다 한 줄 의견이 붙어요.", "#/holdings", "보유 보기");
       if (r && (r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 오늘 특히 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
         encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
     } else {
@@ -1383,7 +1388,8 @@
   }
 
   function viewSettings() {
-    appShell("settings", '<div class="head"><h1>설정</h1></div>' +
+    appShell("settings", '<button class="back" onclick="history.back()">← 뒤로</button><h1>설정</h1>' +
+      themeHtml() + '<a class="btn ghost" href="#/glossary">🏷️ 화면 이름표 (앱 UI 용어 지도)</a>' +
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
       '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
@@ -1448,6 +1454,8 @@
       }
     } else if (S.scope === "reset" && route !== "reset") {
       return go("#/reset");
+    } else if (S.scope === "full" && open.indexOf(route) >= 0) {
+      return go("#/home");   // 이미 로그인돼 있으면 로그인 화면 대신 홈으로
     }
     window.scrollTo(0, 0);
     const sh = document.getElementById("sheet"); if (sh) sh.hidden = true;
@@ -1465,6 +1473,7 @@
       case "gap": return viewGap();
       case "ask": return viewAsk();
       case "news": return viewNews();
+      case "glossary": return viewGlossary();
       case "profile": return viewProfile();
       case "settings": return viewSettings();
       case "password": return viewPassword();
@@ -1506,6 +1515,91 @@
   document.addEventListener("click", e => {
     if (e.target && e.target.id === "seenNew") { try { localStorage.setItem("seenVersion", CFG.VERSION); } catch (x) {} render(); }
   });
+
+  /* ---------- UI 용어 정리본 반영: 테마·배지·당겨서 새로고침·뒤로 제스처·오프라인 배너·화면 이름표 ---------- */
+  function applyTheme() {
+    const t = store.get("theme") || "auto";
+    if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t);
+  }
+  applyTheme();
+  function themeHtml() {
+    const t = store.get("theme") || "auto";
+    return '<h2>화면 모드 (테마 컨트롤러)</h2><div class="chips" id="themeSel">' + [["auto", "자동(폰 설정)"], ["light", "☀️ 밝게"], ["dark", "🌙 어둡게"]].map(([k, l]) =>
+      '<button class="chip' + (t === k ? " on" : "") + '" data-theme-set="' + k + '">' + l + "</button>").join("") + "</div>";
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-theme-set]");
+    if (b) { store.set("theme", b.dataset.themeSet); applyTheme(); render(); }
+  });
+  // 탭 배지(인디케이터): 안 본 새 소식이 있으면 점
+  function tabBadges(tab) {
+    const newsAt = (S.ai && S.ai.news && S.ai.news.at) || "", sim = S.perf && S.perf.sim;
+    const simAt = String((sim && (sim.intra_at || sim.updated)) || "");
+    if (tab === "news" && newsAt) store.set("seenNews", newsAt);
+    if (tab === "score" && simAt) store.set("seenSim", simAt);
+    const mark = (k, on) => { const a = $tabs.querySelector('[data-tab="' + k + '"]'); if (a) a.classList.toggle("has-new", !!on); };
+    mark("news", newsAt && store.get("seenNews") !== newsAt);
+    mark("score", simAt && store.get("seenSim") !== simAt);
+  }
+  // 오프라인 배너
+  function netBanner() {
+    let b = document.getElementById("offline");
+    if (!b) { b = document.createElement("div"); b.id = "offline"; b.setAttribute("role", "status"); document.body.appendChild(b); }
+    b.textContent = "📡 인터넷이 끊겼어요 · 마지막으로 받은 내용을 보여드려요";
+    b.hidden = navigator.onLine;
+  }
+  window.addEventListener("offline", netBanner);
+  window.addEventListener("online", netBanner);
+  netBanner();
+  // 풀 투 리프레시 + 백 제스처 (홈 화면 앱에는 기본으로 없어서 직접)
+  (function gestures() {
+    let sx = 0, sy = 0, mode = "", ptr = null;
+    const ind = () => { if (!ptr) { ptr = document.createElement("div"); ptr.id = "ptr"; document.body.appendChild(ptr); } return ptr; };
+    window.addEventListener("touchstart", e => {
+      const t = e.touches[0]; sx = t.clientX; sy = t.clientY; mode = "";
+      if (sx < 22 && location.hash && !/^#\/(home)?$/.test(location.hash)) mode = "back";
+      else if (window.scrollY <= 0 && S.token) mode = "pull";
+    }, { passive: true });
+    window.addEventListener("touchmove", e => {
+      if (!mode) return;
+      const t = e.touches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (mode === "pull") {
+        if (dy < 0 || Math.abs(dx) > dy) { mode = ""; ind().className = ""; return; }
+        const p = ind(); p.className = "show" + (dy > 80 ? " ready" : ""); p.textContent = dy > 80 ? "↻ 놓으면 새로고침" : "↓ 당겨서 새로고침";
+        p.style.transform = "translate(-50%," + Math.min(dy, 110) * 0.5 + "px)";
+      } else if (mode === "back") {
+        if (Math.abs(dy) > 50) mode = "";
+        document.body.style.transform = dx > 0 ? "translateX(" + Math.min(dx, 120) * 0.35 + "px)" : "";
+      }
+    }, { passive: true });
+    window.addEventListener("touchend", e => {
+      const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      document.body.style.transform = "";
+      if (mode === "pull" && ptr) {
+        ptr.style.transform = "";
+        if (dy > 80) { ptr.className = "show ready"; ptr.textContent = "새로 불러오는 중…"; refresh(true).then(() => { ptr.className = ""; toast("새로 불러왔어요"); }); loadChanges(); }
+        else ptr.className = "";
+      }
+      if (mode === "back" && dx > 80 && Math.abs(dy) < 50) history.back();
+      mode = "";
+    }, { passive: true });
+  })();
+  // 화면 이름표: 우리 앱 화면을 UI 용어로 (수정 요청할 때 정확한 이름 쓰기)
+  const GLOSSARY = [
+    ["앱 전체", [["하단 탭바 (Tab Bar)", "홈 · 후보 · 보유 · 뉴스 · 모의투자 (5개)"], ["배지 · 인디케이터 (Badge)", "뉴스·모의투자 탭 위 빨간 점 = 안 본 새 소식"], ["세이프 에어리어 (Safe Area)", "탭바 아래 홈바 여백"], ["토스트 (Toast)", "잠깐 떴다 사라지는 검은 알림"], ["오프라인 배너", "인터넷 끊기면 맨 위 노란 줄"], ["풀 투 리프레시 (Refresher)", "맨 위에서 아래로 당기면 새로고침"], ["백 제스처 (Back Gesture)", "왼쪽 끝에서 오른쪽으로 밀면 뒤로"], ["테마 컨트롤러", "설정 → 화면 모드 (자동·밝게·어둡게)"]]],
+    ["홈", [["앱바 (App Bar)", "맨 위 '오늘 · 날짜' 줄과 🔔·⚙️ 아이콘 버튼"], ["업데이트 카드", "새 버전 바뀐 점 (확인했어요 버튼)"], ["카드 · 래디얼 프로그레스", "모의투자 진행 중 카드의 동그란 진행률(○/90일)"], ["스테이터스 (Status)", "초록 깜빡이는 점 = 진행 중"], ["카드", "오늘의 경제뉴스 · 내 자산 · 밤사이 브리핑"], ["칩 (Chip)", "AI에게 묻기 · 장 전 갭 · 성향 인터뷰"], ["리스트 · 아이템 (List · Item)", "내 보유 한 줄 결론, 매수 후보 상위"]]],
+    ["후보", [["세그먼트 (Segment)", "가격대 고르기 줄"], ["검색바 (Searchbar)", "종목 찾기 칸"], ["리스트 · 배지", "종목 줄과 점수·태그"], ["종목 상세 → 세그먼트", "재무 5초 · 찬반 근거 · 차트 · 4관점 · 쉬운 리포트"]]],
+    ["보유", [["카드 (Stat)", "🧺 내 포트폴리오 진단 숫자 3칸"], ["프로그레스 바", "업종 비중 막대"], ["컬랩스 (Collapse)", "AI 풀이 · 주요 리스크 접기/펴기"], ["종목 상세 → 컬랩스", "차트 분석 · 분기 공시 비교 · 버핏 4관점 · 쉬운 리포트"]]],
+    ["뉴스", [["세그먼트", "5초 요약 · 업종 13개 · 내 종목 · 매크로·숫자"], ["컬랩스 (아코디언)", "업종 13개 각 줄 (누르면 펼침)"], ["배지 (신호등)", "🟢🟡🔴 · 호재/악재/소음"], ["칩", "더 물어보기 질문"]]],
+    ["모의투자", [["세그먼트", "자동 모의 · 내 계좌 · 실력·운 · 신호 · 주간"], ["프로그레스 바", "3개월 진행 막대, 체결률 막대"], ["버튼 (Secondary)", "주문표 복사"], ["리스트 · 배지", "주문표 채점 (체결·미체결·안 냄)"]]],
+    ["입력·띄우는 것", [["텍스트에어리어 (Textarea)", "AI에게 묻기 질문 칸"], ["셀렉트 (Select)", "질문 템플릿 종목 고르기"], ["로딩 (loading)", "제출 버튼이 '처리 중…'으로 잠김"], ["인라인 에러 (Field Error)", "칸 아래 빨간 글씨"], ["엠프티 스테이트 (Empty State)", "내용 없을 때 아이콘 + 제목 + 다음 행동 칩"]]],
+  ];
+  function viewGlossary() {
+    appShell("settings", '<button class="back" onclick="history.back()">← 뒤로</button><h1>🏷️ 화면 이름표</h1>' +
+      '<div class="small">고칠 곳을 말할 때 이 이름을 쓰면 빨라요. 예: "뉴스 탭 <b>세그먼트</b>에서 내 종목을 맨 앞으로", "홈 <b>업데이트 카드</b> 글자를 줄여 줘"</div>' +
+      GLOSSARY.map(([sec, rows]) => "<h2>" + esc(sec) + '</h2><div class="card"><dl class="kv">' + rows.map(r => "<dt>" + esc(r[0]) + "</dt><dd>" + esc(r[1]) + "</dd>").join("") + "</dl></div>").join("") +
+      '<p class="foot">용어 출처: 바이브코딩 앱 UI 용어 정리본 · Apple HIG · Material · Ionic · daisyUI</p>');
+  }
   window.addEventListener("hashchange", render);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(true); loadChanges(); } });
   window.addEventListener("online", () => refresh(true));

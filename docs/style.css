@@ -7,13 +7,18 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0d1117; --bg2: #161b22; --line: #30363d; --ink: #e6edf3; --sub: #8d96a0;
     --accent: #4c8dff; --accent-bg: #15233f;
     --bad: #ff7b72; --bad-bg: #3a1618; --warn: #e3b341; --warn-bg: #33290f; --good: #56d364; --good-bg: #12301a;
     color-scheme: dark;
   }
 }
+/* 테마 컨트롤러: 설정에서 고른 모드가 폰 설정보다 우선 */
+:root[data-theme="dark"] { --bg: #0d1117; --bg2: #161b22; --line: #30363d; --ink: #e6edf3; --sub: #8d96a0;
+    --accent: #4c8dff; --accent-bg: #15233f;
+    --bad: #ff7b72; --bad-bg: #3a1618; --warn: #e3b341; --warn-bg: #33290f; --good: #56d364; --good-bg: #12301a;
+    color-scheme: dark; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
 body {
@@ -74,7 +79,7 @@ a { color: var(--accent); text-decoration: none; }
 .kv dt { color: var(--sub); }
 .kv dd { margin: 0; text-align: right; }
 .segs { display: flex; gap: 18px; border-bottom: 1px solid var(--line); margin: 16px 0 8px; }
-.segs button { border: 0; background: none; padding: 8px 0; color: var(--sub); font-size: 14px; border-bottom: 2px solid transparent; min-height: 40px; }
+.segs button { border: 0; background: none; padding: 8px 0; color: var(--sub); font-size: 14px; border-bottom: 2px solid transparent; min-height: 44px; }
 .segs button.on { color: var(--ink); font-weight: 600; border-color: var(--accent); }
 ul.plain { margin: 6px 0; padding-left: 18px; }
 
@@ -168,7 +173,7 @@ ul.checks li:last-child { border-bottom: 0; }
 ul.checks li.ok { color: var(--ink); }
 ul.checks li.no { color: var(--sub); }
 ul.checks li.hit { color: var(--bad); font-weight: 600; }
-.btn.sm { min-height: 40px; padding: 8px; font-size: 14px; margin-top: 10px; }
+.btn.sm { min-height: 44px; padding: 8px; font-size: 14px; margin-top: 10px; }
 .note-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .note-row input { flex: 1; margin: 0; }
 select { width: 100%; font-size: 16px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin: 4px 0 4px; }
@@ -235,3 +240,27 @@ ul.five li{padding:3px 0;font-size:1.02em}
 .chips.wrap .chip{white-space:normal;text-align:left;max-width:100%;height:auto}
 
 .card.newcard{border:1.5px solid var(--accent);background:var(--soft,rgba(37,99,235,.06))}
+
+/* ---- UI 용어 정리본 반영 ---- */
+.chip { min-height: 36px; }
+.chips .chip, a.chip, button.chip { min-height: 44px; display: inline-flex; align-items: center; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 12px; }
+.empty .eicon { font-size: 30px; line-height: 1; }
+.empty b { color: var(--ink); font-size: 15px; }
+.empty .chip { margin-top: 4px; }
+.btn.loading, button.loading { opacity: .85; }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#tabs a { position: relative; min-height: 44px; }
+#tabs a.has-new::after { content: ""; position: absolute; top: 7px; left: calc(50% + 9px); width: 8px; height: 8px; border-radius: 50%; background: var(--bad); }
+#offline { position: fixed; left: 0; right: 0; top: 0; z-index: 60; padding: calc(6px + var(--safe-t)) 12px 6px; text-align: center; font-size: 13px; background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid var(--line); }
+#offline[hidden] { display: none; }
+#ptr { position: fixed; top: calc(8px + var(--safe-t)); left: 50%; transform: translate(-50%, 0); z-index: 55; padding: 6px 14px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); font-size: 13px; color: var(--sub); opacity: 0; pointer-events: none; transition: opacity .15s; }
+#ptr.show { opacity: 1; }
+#ptr.ready { color: var(--accent); border-color: var(--accent); }
+body { transition: transform .12s ease-out; }
+.radial { --p: 0; width: 52px; height: 52px; border-radius: 50%; display: inline-grid; place-items: center; flex: none;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--line) 0); }
+.radial > span { width: 42px; height: 42px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1; }
+.radial small { display: block; font-size: 9px; font-weight: 500; color: var(--sub); }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } body { transition: none; } }
