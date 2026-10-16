@@ -123,6 +123,34 @@ def dumps(obj) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
+RUN_LABEL = {"daily": "아침 리포트", "premarket": "장 시작 전 점검", "intraday": "장중 감시", "weekly": "주간 요약"}
+
+
+def add_run(store, kind: str, at: str, ok, took: int, changed: list, checks: list, err: str = "", keep: int = 60):
+    """실행 기록(앱 '알림 → 실행 기록')에 한 줄 추가 — symphony-kanban의 'proof of work' 방식.
+
+    프로그램이 '잘 됐다'고 말하는 대신, 실행마다 (1) 무엇이 바뀌었는지 (2) 자동 점검을 통과했는지를 남겨요.
+    점검: [{"n": 이름, "ok": True/False/None(점검 안 함), "d": 자세히}]. ok: True 성공 · False 실패 · "skip" 건너뜀.
+    perf 덩어리 안에 같이 저장해요 (로그인 서버가 이미 앱으로 보내 주는 자료라 서버를 고칠 필요가 없어요).
+    """
+    try:
+        raw = store.get_blob("perf")
+        perf = json.loads(raw) if raw else {}
+    except Exception:
+        perf = {}
+    runs = perf.get("runs") or []
+    bad = [c for c in checks if c.get("ok") is False]
+    if ok is True and bad:
+        ok = "warn"   # 끝까지 돌았지만 점검 하나 이상 실패
+    runs.insert(0, {"kind": kind, "label": RUN_LABEL.get(kind, kind), "at": at, "ok": ok, "took": took,
+                    "changed": [str(x)[:160] for x in changed][:8], "checks": checks[:12], "err": str(err)[-600:]})
+    perf["runs"] = runs[:keep]
+    try:
+        store.put_blob("perf", dumps(_clean(perf)))
+    except Exception:
+        pass
+
+
 def add_alert(store, kind: str, title: str, body: str, at: str, tone: str = "info", max_items: int = 200):
     """알림 기록(앱 '알림' 화면)에 한 줄 추가. 실패해도 리포트는 그대로 가요."""
     try:

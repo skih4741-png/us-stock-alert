@@ -482,14 +482,14 @@
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
     const newest = (S.alerts[0] || {}).at || "";
-    const hasNew = newest && newest !== S.lastSeenAlert;
+    const hasNew = newest && newest !== S.lastSeenAlert, needN = needsYou().length;
     const hold = (d.holdings || []).slice(0, 4);
     const top = allPicks().filter(p => !p.etf).sort((a, b) => b.total - a.total).slice(0, 3);
     appShell("home",
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
-      '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (hasNew ? '<span class="dot"></span>' : "") + "</button>" +
+      '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (needN ? '<span class="cnt">' + needN + "</span>" : hasNew ? '<span class="dot"></span>' : "") + "</button>" +
       '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
-      statusLine() + whatsNewCard() + homeSimCard() + homeNewsCard() +
+      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeSimCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -576,6 +576,7 @@
       "<dt>이 위로 시작하면 추격 금지</dt><dd>" + fmt(pl.skip_if_open_above) + "</dd>" +
       "<dt>유효 기한</dt><dd>" + esc(pl.valid_until || "") + "</dd></dl></div>" +
       paperAddHtml(p) +
+      '<details class="sig"><summary><b>📓 이 종목 일지 (알림·모의 거래)</b></summary>' + tickerLogHtml(p.t) + "</details>" +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     bindPaperAdd(p);
     const segs = {
@@ -621,6 +622,7 @@
       '<details class="sig"><summary><b>분기 공시 비교 (직전 분기 대비)</b></summary>' + secqHtml(h.t) + "</details>" +
       '<details class="sig"><summary><b>버핏 4관점</b></summary>' + b4Html(h.t) + "</details>" +
       '<details class="sig"><summary><b>쉬운 리포트</b></summary>' + repHtml(h.t) + "</details>" +
+      '<details class="sig"><summary><b>📓 이 종목 일지 (알림·모의 거래)</b></summary>' + tickerLogHtml(h.t) + "</details>" +
       '<h2>지금 상태</h2><div class="card"><dl class="kv num">' +
       "<dt>현재가</dt><dd>$" + fmt(h.price) + "</dd><dt>평단</dt><dd>$" + fmt(h.avg) + "</dd><dt>수량</dt><dd>" + fmt(h.qty, 0) + "</dd>" +
       "<dt>수익률</dt><dd>" + pct(h.gain_pct) + "</dd><dt>손절선</dt><dd>$" + fmt(h.stop) + " (" + (h.to_stop_pct == null ? "—" : fmt(h.to_stop_pct, 1) + "% 위") + ")</dd>" +
@@ -632,16 +634,142 @@
       '<p class="foot">손절선을 바꾸려면 구글 시트 \'보유 종목\' 탭에 적어 주세요 · ' + esc(DISCLAIMER) + "</p>");
   }
 
+  /* ---------- symphony-kanban에서 가져온 것 ----------
+     ① 실행 증거(proof of work): 실행마다 '무엇이 바뀌었나 + 자동 점검 통과?'를 남기고 보여 줘요. 점검 안 한 건 '통과'로 꾸미지 않아요.
+     ② 활동 피드: 전체 · 내가 볼 것 · 진행 중 · 실행 기록 4칸. 🔔에는 '내가 볼 것' 개수.
+     ③ 오래된 자료: 와야 할 아침 실행이 안 왔으면 숫자를 '오늘 것'처럼 보여 주지 않고 먼저 알려요.
+     ④ 종목 일지: 알림·모의 체결·주문표를 종목마다 모아 쌓아요. */
+  const runsOf = () => (S.perf && S.perf.runs) || [];
+  // 아침 실행은 매주 화~토 07:00(한국) — 2시간 여유를 두고 그 시각보다 오래된 기록이면 '오래됨'
+  function expectedDaily(now) {
+    for (let d = 0; d < 9; d++) {
+      const k = new Date(now + 9 * 36e5 - d * 864e5), dow = k.getUTCDay();
+      const t = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate(), 7) - 9 * 36e5;
+      if (dow >= 2 && dow <= 6 && t + 2 * 36e5 <= now) return t;
+    }
+    return 0;
+  }
+  function staleInfo() {
+    const r = runsOf().find(x => x.kind === "daily");
+    const at = (r && r.at) || (S.data && S.data.run_at);
+    if (!at) return null;
+    const last = Date.parse(at), exp = expectedDaily(Date.now());
+    if (!last || !exp || last >= exp - 30 * 6e4) return null;
+    return { at: at, hours: Math.round((Date.now() - last) / 36e5) };
+  }
+  const RUN_TONE = { true: ["good", "성공"], warn: ["warn", "점검 실패 있음"], false: ["bad", "실패"], skip: ["info", "건너뜀"] };
+  function runTone(r) { return RUN_TONE[String(r.ok)] || ["info", String(r.ok)]; }
+  function checkLine(c) {
+    const mk = c.ok === true ? ["ok", "✓"] : c.ok === false ? ["no bad-t", "✕"] : ["no", "–"];
+    return '<li class="' + mk[0] + '">' + mk[1] + " " + esc(c.n) + (c.ok == null ? ' <span class="small">(점검 안 함)</span>' : "") +
+      (c.d ? '<div class="small">' + esc(c.d) + "</div>" : "") + "</li>";
+  }
+  function runCard(r, open) {
+    const t = runTone(r), cs = r.checks || [];
+    const pass = cs.filter(c => c.ok === true).length, fail = cs.filter(c => c.ok === false).length, none = cs.length - pass - fail;
+    const one = (r.changed || []).slice(0, 2).join(" · ");
+    return '<details class="sig run"' + (open ? " open" : "") + '><summary><div class="row between"><b>' + esc(r.label || r.kind) + '</b><span class="badge ' + t[0] + '">' + t[1] + "</span></div>" +
+      '<div class="small">' + esc(whenText(r.at)) + (r.took != null ? " · " + r.took + "초" : "") + (cs.length ? " · 점검 " + pass + "통과" + (fail ? " " + fail + "실패" : "") + (none ? " " + none + "안 함" : "") : "") + "</div>" +
+      (one ? '<div class="small">' + esc(one) + "</div>" : "") + "</summary>" +
+      ((r.changed || []).length ? '<b class="small">바뀐 것</b><ul class="plain small">' + r.changed.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "") +
+      (cs.length ? '<b class="small">자동 점검</b><ul class="checks">' + cs.map(checkLine).join("") + "</ul>" : '<div class="small">이 실행은 점검 항목이 없어요</div>') +
+      (r.err ? '<b class="small">멈춘 곳 (마지막 줄)</b><pre class="errtail">' + esc(String(r.err).trim().split("\n").slice(-6).join("\n")) + "</pre>" : "") + "</details>";
+  }
+  // 홈 한 줄: 마지막 실행의 증거 — "아침 리포트 성공 · 점검 8/8"
+  function homeRunLine() {
+    const r = runsOf()[0];
+    if (!r) return "";
+    const t = runTone(r), cs = r.checks || [], fail = cs.filter(c => c.ok === false).length;
+    return '<a class="runline" href="#/alerts/runs"><span class="badge ' + t[0] + '">' + esc(r.label) + " " + t[1] + "</span>" +
+      '<span class="small">' + esc(whenText(r.at)) + (cs.length ? " · 점검 " + (cs.length - fail) + "/" + cs.length + (fail ? " (실패 " + fail + ")" : "") : "") + " ›</span></a>";
+  }
+  function needsYou() {
+    const out = [], st = staleInfo();
+    if (st) out.push({ i: "⏳", tone: "warn", t: "자료가 오래됐어요 — 마지막 아침 실행 " + st.hours + "시간 전",
+      b: "와야 할 아침 리포트가 아직 안 왔어요. 화면의 숫자는 " + whenText(st.at) + " 기준이에요. GitHub Actions 실행 기록을 확인해 주세요.", h: "#/alerts", seg: "runs" });
+    const seen = {};
+    runsOf().forEach(r => {
+      if (seen[r.kind]) return; seen[r.kind] = 1;
+      if ((Date.now() - Date.parse(r.at)) > 3 * 864e5) return;
+      if (r.ok === false) out.push({ i: "🛑", tone: "bad", t: r.label + " 실패", b: (r.changed || [])[0] || "멈춘 곳을 실행 기록에서 확인해 주세요", h: "#/alerts", seg: "runs" });
+      else if (r.ok === "warn") {
+        const f = (r.checks || []).filter(c => c.ok === false);
+        out.push({ i: "⚠️", tone: "warn", t: r.label + " · 점검 " + f.length + "개 실패", b: f.map(c => c.n + (c.d ? " — " + c.d : "")).join(" / "), h: "#/alerts", seg: "runs" });
+      }
+    });
+    ((S.data && S.data.holdings) || []).filter(h => h.action).forEach(h =>
+      out.push({ i: h.tone === "bad" ? "🔴" : "🟠", tone: h.tone === "bad" ? "bad" : "warn", t: h.t + " · " + h.conclusion, b: "규칙상 할 일: " + h.action, h: "#/hold/" + encodeURIComponent(h.t) }));
+    ((S.perf && S.perf.paper && S.perf.paper.trades) || []).filter(x => x.below_stop).forEach(x =>
+      out.push({ i: "🧪", tone: "warn", t: "모의 계좌 " + x.t + " 손절선 아래", b: "직접 담은 모의 종목이에요. 성적 탭에서 팔지 정해 주세요.", h: "#/score" }));
+    const u = S.aiUsage || {};
+    if (u.cap && u.total / u.cap >= 0.8) out.push({ i: "💸", tone: "warn", t: "GPT 사용량 " + Math.round(u.total / u.cap * 100) + "%", b: "$" + fmt(u.total) + " / $" + fmt(u.cap, 0) + " — 한도에 닿으면 규칙만으로 돌아가요", h: "#/settings" });
+    return out;
+  }
+  function needItem(x) {
+    return '<a class="item need ' + x.tone + '" href="' + x.h + (x.seg ? "/" + x.seg : "") + '"><span class="ic">' + x.i + '</span><div class="grow"><b>' + esc(x.t) + '</b><div class="small">' + esc(x.b) + "</div></div><span class=\"small\">›</span></a>";
+  }
+  function homeNeedsCard() {
+    const n = needsYou();
+    if (!n.length) return "";
+    return '<div class="card needcard"><div class="row between"><b>👀 내가 볼 것 ' + n.length + "</b>" + '<a class="small link" href="#/alerts/need">모두 보기 ›</a></div>' +
+      '<div class="list">' + n.slice(0, 3).map(needItem).join("") + "</div></div>";
+  }
+  function runningHtml() {
+    const m = S.perf && S.perf.sim, rows = [];
+    if (m) {
+      (m.positions || []).forEach(p => rows.push(["🟢", "모의 보유 " + p.t + " " + p.qty + "주", "손절 $" + fmt(p.stop) + " · 목표 $" + fmt(p.target) + (p.half ? " · 절반 익절함" : ""), "#/score"]));
+      (m.pending || []).forEach(o => rows.push(["⏱️", "다음 거래일 주문 " + o.t + " " + o.qty + "주", "지정가 $" + fmt(o.limit) + " 이하 · $" + fmt(o.skip_above) + " 위로 시작하면 안 삼", "#/score"]));
+    }
+    const now = Date.now();
+    let nextDaily = 0;
+    for (let d = 0; d < 8 && !nextDaily; d++) { const x = new Date(now + 9 * 36e5 + d * 864e5); const t = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate(), 7) - 9 * 36e5; if (x.getUTCDay() >= 2 && x.getUTCDay() <= 6 && t > now) nextDaily = t; }
+    const sched = [["🌅", "다음 아침 리포트", nextDaily ? new Date(nextDaily).toLocaleString("ko-KR", { weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"],
+      ["⏰", "장중 감시", "미국 장이 열린 동안 매시간 · 5분봉 모의 체결 + 손절선 경고"],
+      ["📅", "주간 요약", "매주 일요일"]];
+    const u = S.aiUsage || {}, w = u.cap ? Math.min(100, (u.total || 0) / u.cap * 100) : 0;
+    return (rows.length ? '<div class="list">' + rows.map(r => '<a class="item" href="' + r[3] + '"><span class="ic">' + r[0] + '</span><div class="grow"><b>' + esc(r[1]) + '</b><div class="small">' + esc(r[2]) + "</div></div></a>").join("") + "</div>"
+        : emp("🫙", "지금 돌아가는 모의 주문·보유가 없어요", "아침 리포트 뒤에 조건에 맞는 후보가 있으면 다음 거래일 주문이 생겨요.", "#/score", "자동 모의 보기")) +
+      "<h2>예정된 실행</h2><div class=\"list\">" + sched.map(x => '<div class="item" style="cursor:default"><span class="ic">' + x[0] + '</span><div class="grow"><b>' + esc(x[1]) + '</b><div class="small">' + esc(x[2]) + "</div></div></div>").join("") + "</div>" +
+      '<h2>남은 여유</h2><div class="card"><div class="row"><span class="radial" style="--p:' + (100 - w).toFixed(1) + '"><span>' + Math.round(100 - w) + '<small>%</small></span></span>' +
+      '<div class="grow" style="margin-left:12px"><b>GPT 이번 달 남은 한도</b><div class="small num">$' + fmt(u.total) + " 씀 / $" + fmt(u.cap || 5, 0) + " · 아침 분석 $" + fmt(u.program) + " · 앱 질문 $" + fmt(u.app) + "</div></div></div></div>";
+  }
   function viewAlerts() {
     const items = S.alerts || [];
     if (items[0]) { S.lastSeenAlert = items[0].at; store.set("seenAlert", S.lastSeenAlert); }
+    const seg = S.actSeg || "all", need = needsYou(), runs = runsOf();
     const tone = { bad: "var(--bad)", warn: "var(--warn)", info: "var(--accent)" };
-    appShell("home", '<button class="back" onclick="history.back()">← 홈</button><h1>알림</h1>' + statusLine() +
-      '<div class="small">푸시·슬랙으로 보낸 것과 같은 내용이에요 (최근 200개)</div><div class="list">' +
+    const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
+    let body = "";
+    if (seg === "need") body = need.length ? '<div class="list">' + need.map(needItem).join("") + "</div>"
+      : emp("✅", "지금 손댈 것이 없어요", "규칙에 걸린 보유 종목·실패한 실행·오래된 자료가 생기면 여기에 모여요.", "#/home", "홈으로");
+    else if (seg === "run") body = runningHtml();
+    else if (seg === "runs") body = '<div class="small" style="margin:4px 0 8px">실행마다 바뀐 것과 자동 점검 결과를 남겨요. 프로그램의 "잘 됐어요"가 아니라 점검 결과가 증거예요 · 최근 ' + runs.length + "번</div>" +
+      (runs.length ? runs.map((r, i) => runCard(r, i === 0)).join("") : emp("🧾", "실행 기록이 아직 없어요", "다음 아침 리포트(평일 아침 7시쯤)부터 쌓여요.", "#/home", "홈으로"));
+    else body = '<div class="small">푸시·슬랙으로 보낸 것과 같은 내용이에요 (최근 200개)</div><div class="list">' +
       (items.length ? items.map(a => '<div class="item" style="cursor:default"><span style="width:10px;height:10px;border-radius:5px;background:' + (tone[a.tone] || tone.info) +
         '"></span><div class="grow"><div class="row between"><b>' + esc(a.title) + '</b><span class="small">' + esc(whenText(a.at)) + '</span></div><div class="small">' + esc(a.body) + "</div></div></div>").join("")
-        : emp("🔔", "새 알림이 오면 여기에 모여요", "아침 리포트·장중 체결·업데이트 소식이 푸시와 함께 쌓여요.", "#/settings", "푸시 알림 설정")) + "</div>");
+        : emp("🔔", "새 알림이 오면 여기에 모여요", "아침 리포트·장중 체결·업데이트 소식이 푸시와 함께 쌓여요.", "#/settings", "푸시 알림 설정")) + "</div>";
+    appShell("home", '<button class="back" onclick="history.back()">← 홈</button><h1>활동</h1>' + statusLine() +
+      '<div class="segs act">' + segBtn("all", "전체") + segBtn("need", "내가 볼 것" + (need.length ? " " + need.length : "")) + segBtn("run", "진행 중") + segBtn("runs", "실행 기록") + "</div>" + body);
+    $app.querySelectorAll(".segs.act button").forEach(b => b.addEventListener("click", () => { S.actSeg = b.dataset.s; history.replaceState(null, "", "#/alerts/" + b.dataset.s); viewAlerts(); window.scrollTo(0, 0); }));
   }
+  // ④ 종목 일지: 이 종목에 대해 앱이 한 일을 시간순으로
+  function tickerLogHtml(t) {
+    const re = new RegExp("(^|[^A-Z])" + String(t).replace(/[.\-]/g, "[.\\-]") + "([^A-Z]|$)");
+    const rows = [];
+    (S.alerts || []).forEach(a => { if (re.test((a.title || "") + " " + (a.body || ""))) rows.push([a.at, "🔔", a.title + " — " + a.body]); });
+    const m = S.perf && S.perf.sim;
+    if (m) {
+      (m.closed || []).filter(c => c.t === t).forEach(c => rows.push([c.exit_date, "🧾", "모의 매도 " + c.date + " → " + c.exit_date + " · " + c.why + " · " + usd(c.pnl)]));
+      (m.positions || []).filter(p => p.t === t).forEach(p => rows.push([p.date, "🟢", "모의 매수 " + p.qty + "주 @$" + fmt(p.entry) + " · 지금 보유 중"]));
+      (m.tickets || []).filter(x => x.t === t).forEach(x => rows.push([x.date || x.at || "", "🎯", "주문표 " + (x.side || "") + " · " + (x.result || x.status || "") + (x.price ? " @$" + fmt(x.price) : "")]));
+    }
+    (S.paper || []).filter(x => x.t === t).forEach(x => rows.push([x.date || "", "🧪", "직접 담은 모의 " + x.qty + "주 @$" + fmt(x.price) + (x.sold_date ? " → " + x.sold_date + " 판매 @$" + fmt(x.sold_price) : "")]));
+    rows.sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+    return rows.length ? '<ul class="plain small tlog">' + rows.slice(0, 30).map(r => "<li><span class=\"num\">" + esc(String(r[0]).slice(0, 16).replace("T", " ")) + "</span> " + r[1] + " " + esc(r[2]) + "</li>").join("") + "</ul>"
+      : '<div class="small">아직 이 종목에 대한 알림·모의 거래가 없어요. 생기면 여기에 쌓여요.</div>';
+  }
+
 
   /* ---------- 3단계: 추세 합류 · 매도 규칙 7개 · 모의투자 · 성적 ---------- */
   const PAPER_START = 1000;
@@ -1468,7 +1596,7 @@
       case "pick": return viewPick(decodeURIComponent(arg || ""));
       case "holdings": return viewHoldings();
       case "hold": return viewHold(decodeURIComponent(arg || ""));
-      case "alerts": return viewAlerts();
+      case "alerts": if (arg) S.actSeg = arg; return viewAlerts();
       case "score": return viewScore();
       case "gap": return viewGap();
       case "ask": return viewAsk();

@@ -44,6 +44,23 @@ from terms import REASON_LABEL, REGIME, SELL_ACTION, VERDICT
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("main")
+
+# ---- 실행 증거 (symphony-kanban 'proof of work') ----
+# 하위 단계(AI·뉴스·모의·성적)는 실패해도 리포트를 막지 않으려고 예외를 삼켜요. 그 대신 여기에 정직하게 남겨서
+# 앱 '실행 기록'에 "끝까지 돌았지만 경제뉴스는 실패" 처럼 보이게 해요.
+CHECKS: list[dict] = []
+
+
+def chk(name: str, ok, detail: str = ""):
+    """ok: True 통과 · False 실패 · None 점검 안 함(설정 안 됨 등) — 통과로 꾸미지 않아요."""
+    CHECKS.append({"n": name, "ok": ok, "d": str(detail)[:200]})
+
+
+def record_run(store, kind: str, t0: float, ok, changed: list, err: str = ""):
+    try:
+        appdata.add_run(store, kind, config.now_kst().isoformat(timespec="minutes"), ok, int(time.time() - t0), changed, list(CHECKS), err)
+    except Exception as e:
+        log.warning("실행 기록 실패: %s", e)
 STATE = Path(__file__).parent / "data" / "state.json"
 import re as _re
 FUND_NAME = _re.compile(r"\bETF\b|\bFund\b|Term Trust|Income Trust|Premium Income|Municipal|\bETN\b|Closed[- ]End|Opportunities Trust|Strategies Trust|Equity Trust|Technology Trust|Sciences Trust|Growth Trust", _re.I)
@@ -73,6 +90,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
     """app_only: 보내거나 기록하지 않고 앱 데이터만 시트에 저장 (앱 첫 설치·시험용)."""
     dry = dry or app_only
     t0 = time.time()
+    CHECKS.clear()
     now = config.now_kst()
     stage = "시작"
     store = Store()
@@ -92,6 +110,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             log.info("새 거래일 자료가 없어요(미국 휴장) → 종료")
             store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                       "성공/실패": "건너뜀", "메모": "미국 휴장"}])
+            record_run(store, "daily", t0, "skip", [f"새 거래일 자료 없음 (마지막 {bar_date}) — 미국 휴장이라 쉬었어요"])
             return {"skipped": True}
         mk = market.judge(spy, vix, cfg)
         prev_regime = state.get("regime")
@@ -373,21 +392,38 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             sent = notify.send_report(report)
             try:
                 store.put_blob("daily", appdata.dumps(app))
+                chk("앱 데이터 저장", True, f"{len(appdata.dumps(app)):,}자")
                 s = app["summary"]
                 appdata.add_alert(store, "daily", "아침 리포트 도착", f"매도 {s['sell']} · 신규 매수 {s['new']} · 매수 후보 {s['buy']}",
                                   now.isoformat(timespec="minutes"), "info")
             except Exception as e:
                 log.warning("앱 데이터 저장 실패: %s", e)
+                chk("앱 데이터 저장", False, e)
             try:
                 n = push.send(store, "아침 리포트 · " + REGIME[mk["regime"]],
                               f"매도 {s['sell']} · 신규 매수 {s['new']} · 매수 후보 {s['buy']}", "#/home", "daily")
                 log.info("푸시 %d개 보냄", n)
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
-            run_sim(store, app, now)
+            st_sim = run_sim(store, app, now)
             run_ai(store, app, cfg, now)
             run_news(store, app, cfg, now)
             save_perf(store, now)
+            # ---- 자동 점검 + 바뀐 것 → 실행 기록 ----
+            from datetime import date as _d
+            lag = (now.date() - _d.fromisoformat(bar_date)).days
+            chk("가격 기준일", lag <= 4, f"{bar_date} ({lag}일 전 종가)")
+            chk("분석한 종목 수", len(base) >= 50, f"{len(base):,}개")
+            miss = [h["t"] for h in app.get("holdings", []) if h.get("price") is None]
+            chk("보유 종목 가격", (not miss) if app.get("holdings") else None,
+                (f"{len(app['holdings'])}개 모두 받음" if not miss else "못 받음: " + ", ".join(miss[:6])) if app.get("holdings") else "보유 종목이 없어요")
+            chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")), f"메일 {'O' if sent.get('mail') else 'X'} · 슬랙 {'O' if sent.get('slack') else 'X'}")
+            s = app["summary"]
+            changed = [f"매수 후보 {s['buy']}개 (신규 {s['new']})", f"매도 신호 {s['sell']}개", f"시장 국면 {REGIME[mk['regime']]}"
+                       + (f" (어제 {REGIME[prev_regime]})" if prev_regime and prev_regime != mk["regime"] else "")]
+            if st_sim and st_sim.get("today"):
+                changed.append("모의: " + " / ".join(st_sim["today"][:2]))
+            record_run(store, "daily", t0, True, changed)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                   "성공/실패": "성공", "분석한 종목 수": len(base), "걸린 시간(초)": took,
@@ -406,6 +442,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         except Exception:
             pass
         if not dry:
+            record_run(store, "daily", t0, False, [f"'{stage}' 단계에서 멈춤"], traceback.format_exc())
             notify_fail(msg)
         raise
 
@@ -453,7 +490,7 @@ def run_gap(store, holdings: list[dict], dry: bool):
             "note": "보유·어제 후보·모의 주문 종목만 봐요(무료 자료 한계). 장 전 거래량은 자료가 없으면 비어 있어요."}
     if dry:
         print(json.dumps(blob, ensure_ascii=False)[:1500])
-        return
+        return blob
     store.put_blob("gap", appdata.dumps(blob))
     big = [x for x in items if x["cond"]]
     if big:
@@ -461,18 +498,24 @@ def run_gap(store, holdings: list[dict], dry: bool):
         appdata.add_alert(store, "gap", "장 전 갭 5% 이상", body, blob["at"], "warn")
         if any(x["held"] or x["t"] in [o["t"] for o in sim.get("pending", [])] for x in big):
             push.send(store, "장 전 갭 · 보유/모의 주문 종목", body, "#/gap", "watch", tag="gap")
+    return blob
 
 
 def run_sim_intraday(store):
     """장중 매시간: 자동 모의매매 주문을 5분봉으로 증권사처럼 체결. 체결이 있으면 앱 알림·푸시 (판단용만)."""
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
+    out = []
     for key in (simtrade.KEY, simtrade.REF_KEY):
         try:
             ev = simtrade.intraday(store, now, key)
+            chk("장중 모의 체결" + ("" if key == simtrade.KEY else " (참고용)"), True, f"체결 {len(ev or [])}건 (5분봉 기준)")
         except Exception as e:
             log.warning("장중 모의 체결 실패(%s): %s", key, e)
+            chk("장중 모의 체결" + ("" if key == simtrade.KEY else " (참고용)"), False, e)
             continue
+        if ev:
+            out.append(("모의 " if key == simtrade.KEY else "참고 모의 ") + " / ".join(ev)[:150])
         if ev and key == simtrade.KEY:
             at = config.now_kst().isoformat(timespec="minutes")
             body = " / ".join(ev)[:200]
@@ -482,39 +525,66 @@ def run_sim_intraday(store):
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
             save_perf(store, config.now_kst(), notify_stops=False)
+    return out
 
 
 def run_watch(kind: str, dry: bool):
+    """장 시간이 아니면 기록 없이 끝내고, 실제로 돈 시간만 실행 기록(무엇이 바뀌었나·점검)을 남겨요."""
+    t0 = time.time()
+    CHECKS.clear()
+    changed: list = []
+    store = None
+    try:
+        store = _run_watch(kind, dry, changed)
+    except Exception as e:
+        log.error(traceback.format_exc())
+        if not dry:
+            record_run(store or Store(), kind, t0, False, changed + [f"멈춤: {str(e)[:100]}"], traceback.format_exc())
+        raise
+    if store is not None and not dry:
+        record_run(store, kind, t0, True, changed or ["새로 알릴 것 없음"])
+
+
+def _run_watch(kind: str, dry: bool, changed: list):
     from datetime import datetime, timezone
 
     open_now, pre = _us_market_open(datetime.now(timezone.utc))
     if kind == "intraday" and not open_now and not dry:
         log.info("지금은 미국 장중이 아니에요 → 종료")
-        return
+        return None
     if kind == "premarket" and not pre and not dry:
         log.info("장 시작 전 시간이 아니에요 → 종료")
-        return
+        return None
     store = Store()
     cfg, _ = config.merge_settings(store.settings())
     holdings = store.holdings()
     if kind == "premarket":
         try:
-            run_gap(store, holdings, dry)
+            g = run_gap(store, holdings, dry)
+            chk("장 전 갭", True, f"장 전 가격 {len((g or {}).get('items') or [])}종목 확인 · 5% 이상 {sum(1 for x in (g or {}).get('items') or [] if x.get('cond'))}개")
         except Exception as e:
             log.warning("장 전 갭 실패: %s", e)
+            chk("장 전 갭", False, e)
     if kind == "intraday" and not dry:
         try:
             import kisbridge
-            kisbridge.run(store)
+            kst = kisbridge.run(store) or {}
+            dis = kst.get("disabled") or {}
+            chk("증권사(KIS) 모의", None if (dis or not kst.get("on")) else (not kst.get("err")),
+                ("꺼둠: " + str(dis.get("why") or "")) if dis else (kst.get("why") or kst.get("err") or "연결됨"))
         except Exception as e:
             log.warning("한국투자증권 모의 연동 실패: %s", e)
-        run_sim_intraday(store)
+            chk("증권사(KIS) 모의", False, e)
+        changed += run_sim_intraday(store)
     if not holdings:
-        return
+        chk("실시간 시세", None, "보유 종목이 없어요")
+        return store
     state = load_state()
     today = config.now_kst().strftime("%Y-%m-%d")
     sent_today = set(state.get("alerts", {}).get(today, []))
     live = prices.last_price_intraday([h["ticker"].replace(".", "-") for h in holdings])
+    got = sum(1 for h in holdings if live.get(h["ticker"].replace(".", "-")))
+    chk("실시간 시세", got == len(holdings), f"보유 {len(holdings)}개 중 {got}개 받음 (무료 시세는 15분쯤 늦어요)")
     lines = []
     app_items = []
     for h in holdings:
@@ -542,12 +612,13 @@ def run_watch(kind: str, dry: bool):
                 app_items.append((f"{h['ticker']} {reason}", f"현재 {price:.2f}", "bad" if "손절" in reason else "warn"))
                 sent_today.add(key)
     if not lines:
-        return
+        return store
+    changed.append(("장 전 손절선 근접 " if kind == "premarket" else "새 장중 경고 ") + f"{len(app_items)}건: " + ", ".join(t for t, _, _ in app_items[:4]))
     title = ":hourglass: 장 시작 전 점검 · 손절선에 가까운 보유 종목" if kind == "premarket" else ":rotating_light: 장중 경고 · 내 보유 종목"
     text = title + "\n" + "\n".join(lines) + "\n_무료 시세는 15분가량 늦을 수 있어요. 정확한 손절은 증권사 예약 주문으로._"
     if dry:
         print(text)
-        return
+        return store
     notify.send_slack(text)
     at = config.now_kst().isoformat(timespec="minutes")
     for title_, body_, tone_ in app_items:
@@ -564,6 +635,7 @@ def run_watch(kind: str, dry: bool):
     state.setdefault("alerts", {})[today] = sorted(sent_today)
     state["alerts"] = {k: v for k, v in state["alerts"].items() if k >= today}  # 오늘 것만 보관
     save_state(state)
+    return store
 
 
 # ======================================================================
@@ -574,6 +646,11 @@ def run_ai(store, app: dict, cfg: dict, now, send: bool = True):
     """4단계 GPT 기능 (밤사이 브리핑·실적 카드·4관점·쉬운 리포트·사전 부검). GPT가 꺼져 있으면 건너뛰어요."""
     try:
         blob = research.run_daily(store, app, cfg, simtrade.load(store))
+        st_ = (blob or {}).get("status") or ai.status()
+        if not st_.get("on"):
+            chk("AI 카드", None, "GPT 꺼짐 — " + str(st_.get("why") or "") + " · 숫자 카드(차트·포트폴리오·분기)는 계산")
+        else:
+            chk("AI 카드", True, f"이번 달 ${float(st_.get('spent') or 0):.2f} / ${float(st_.get('cap') or 0):.0f}")
         text = research.brief_text(blob or {})
         items = ((blob or {}).get("brief") or {}).get("items") or []
         if send and text and items:
@@ -587,6 +664,7 @@ def run_ai(store, app: dict, cfg: dict, now, send: bool = True):
                           top[0].get("무슨 일", "")[:150], "#/home", "daily", tag="brief")
     except Exception as e:
         log.warning("GPT 기능 실패: %s", e)
+        chk("AI 카드", False, e)
 
 
 def run_news(store, app: dict, cfg: dict, now, send: bool = True):
@@ -595,6 +673,11 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
         import news
         out = news.build(store, cfg, [h["t"] for h in app.get("holdings", [])])
         rep = out.get("report") or {}
+        mac = out.get("macro") or {}
+        srcs = sorted({str(v.get("출처", "")).split(" ")[0] for v in mac.values() if isinstance(v, dict)} - {""})
+        chk("경제뉴스", bool(rep or (out.get("all") or {}).get("업종")),
+            f"업종 {len((out.get('all') or {}).get('업종') or [])}개" + (" · 요약 있음" if rep else " · 요약 없음(GPT 꺼짐/실패)"))
+        chk("매크로 지표", bool(mac), (f"{len(mac)}개 · 출처 " + "/".join(srcs)) if mac else "FRED·BLS 둘 다 못 받음")
         if send and (rep or (out.get("all") or {}).get("업종")):
             notify.send_slack("오늘의 경제뉴스 5초 요약", [{"type": "header", "text": {"type": "plain_text", "text": "오늘의 경제뉴스 5초 요약"}},
                                                     {"type": "section", "text": {"type": "mrkdwn", "text": news.slack_text(out)[:2900]}}])
@@ -602,6 +685,7 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
         ai.flush()
     except Exception as e:
         log.warning("경제뉴스 리포트 실패: %s", e)
+        chk("경제뉴스", False, e)
 
 
 def run_sim(store, app: dict, now):
@@ -629,8 +713,13 @@ def run_sim(store, app: dict, now):
             if traded:
                 push.send(store, title, " / ".join(st["today"][:3])[:170], "#/score", "daily", tag="sim")
             simtrade.maybe_evaluate(store, st, tell, sig)
+            chk("자동 모의투자", True, " / ".join((st.get("today") or ["거래 없음"])[:3])[:180])
+        else:
+            chk("자동 모의투자", None, "모의 계좌가 아직 없어요")
+        return st
     except Exception as e:
         log.warning("자동 모의매매 실패: %s", e)
+        chk("자동 모의투자", False, e)
 
 
 def save_perf(store, now, notify_stops: bool = True) -> dict | None:
@@ -642,6 +731,10 @@ def save_perf(store, now, notify_stops: bool = True) -> dict | None:
         perf["sim"] = simtrade.summary(st, perf["signals"]) if st else None
         ref = simtrade.load(store, simtrade.REF_KEY)
         perf["sim_ref"] = simtrade.summary(ref, perf["signals"]) if ref else None
+        try:
+            perf["runs"] = (json.loads(store.get_blob("perf") or "{}") or {}).get("runs") or []   # 실행 기록은 지우지 않고 이어 가요
+        except Exception:
+            perf["runs"] = []
         store.put_blob("perf", appdata.dumps(appdata._clean(perf)))
         hit = [x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")]
         if hit and notify_stops:
@@ -651,6 +744,7 @@ def save_perf(store, now, notify_stops: bool = True) -> dict | None:
         return perf
     except Exception as e:
         log.warning("성적 계산 실패: %s", e)
+        chk("성적 계산", False, e)
         return None
 
 
@@ -660,11 +754,15 @@ def _fmt(v, unit="%"):
 
 def run_weekly(dry: bool):
     """F-A12 주간 리포트: 신호 성적 + 모의 계좌 + 보유 결론 변화 + 회고 알림 → 슬랙·메일·앱·푸시."""
+    t0 = time.time()
+    CHECKS.clear()
     store = Store()
     now = config.now_kst()
     cfg, _ = config.merge_settings(store.settings())
     ai.init(store, cfg)
     perf = save_perf(store, now, notify_stops=False) if not dry else performance.update(store)
+    if perf:
+        chk("성적 계산", True, "신호 성적·모의 계좌 갱신")
     # RAG: 내 거래 기록·회고를 자료로 쌓아요 ('비슷한 지난 거래는 어땠나')
     if not dry:
         try:
@@ -751,8 +849,11 @@ def run_weekly(dry: bool):
         store.put_blob("weekly", appdata.dumps({"at": at, "lines": lines}))
         appdata.add_alert(store, "weekly", "주간 요약", first, at, "info")
         push.send(store, "주간 요약 · 신호 성적", first, "#/score", "weekly")
+        chk("주간 요약 저장", True, f"{len(lines)}줄")
     except Exception as e:
         log.warning("주간 요약 앱 알림 실패: %s", e)
+        chk("주간 요약 저장", False, e)
+    record_run(store, "weekly", t0, True, [first])
 
 
 def notify_fail(msg: str):

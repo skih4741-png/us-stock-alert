@@ -264,3 +264,29 @@ body { transition: transform .12s ease-out; }
 .radial > span { width: 42px; height: 42px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1; }
 .radial small { display: block; font-size: 9px; font-weight: 500; color: var(--sub); }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } body { transition: none; } }
+
+/* ---- 활동 피드 · 실행 증거 · 내가 볼 것 (symphony-kanban 참고) ---- */
+.cnt { position: absolute; top: 4px; right: 2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.runline { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 10px; color: var(--ink); min-height: 44px; }
+.needcard { border-left: 4px solid var(--warn); }
+.item.need { color: var(--ink); text-decoration: none; }
+.item.need.bad { border-left: 3px solid var(--bad); }
+.item.need.warn { border-left: 3px solid var(--warn); }
+.item .ic { font-size: 20px; width: 28px; text-align: center; flex: none; }
+details.sig.run > summary { display: block; }
+details.sig.run > summary .row b { display: inline; }
+details.sig.run { padding-bottom: 6px; }
+.needcard > .row b { white-space: nowrap; }
+details.run > summary::-webkit-details-marker { display: none; }
+details.run ul.checks li.bad-t { color: var(--bad); }
+pre.errtail { white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--bad-bg); color: var(--ink); padding: 8px; border-radius: 8px; max-height: 180px; overflow: auto; }
+ul.tlog li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+ul.tlog li:last-child { border-bottom: 0; }
+.segs.act button { flex: 1 1 0; }
+
+/* 시스템 설정 존중: 움직임 줄이기 · 투명도 줄이기 · 대비 높이기 */
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+@media (prefers-reduced-transparency: reduce) { #tabs, .segs, .back, .head { background: var(--bg) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; } }
+@media (prefers-contrast: more) { :root { --line: var(--sub); } .small, .sub { color: var(--ink) !important; opacity: 1 !important; } .badge { border-color: currentColor !important; } }
+#app a.item { color: var(--ink); text-decoration: none; }
