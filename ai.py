@@ -188,6 +188,8 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
     _record(where, model, int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
     try:
         text = j["choices"][0]["message"]["content"] or ""
+        if not text.strip():
+            log.warning("GPT 빈 답(%s): finish=%s · 생각 토큰이 한도(%d)를 다 쓴 듯", where, j["choices"][0].get("finish_reason"), max_tokens)
         m = re.search(r"\{.*\}", text, re.S)
         return json.loads(m.group(0)) if m else None
     except Exception:
@@ -207,8 +209,15 @@ INSPECT = """너는 비판적인 검토자(검사관)야. '답'을 '자료'와 �
 
 def inspect(where: str, answer: dict, data) -> dict | None:
     """F-C15 검사관 모드: 숫자·계산·단위·출처·날짜·근거를 재검토. 실패하면 None → 그 답은 앱에 올리지 않아요."""
-    res = chat_json(where + "·검사", INSPECT + "\n\n— 답 —\n" + json.dumps(answer, ensure_ascii=False), data, "small", 1800)
-    if res is None or not isinstance(res.get("issues", None), list):
+    q = INSPECT + "\n\n— 답 —\n" + json.dumps(answer, ensure_ascii=False)
+    res = None
+    for budget in (4000, 8000):   # 작은 모델은 생각 토큰을 많이 써서 1800이면 빈 답이 자주 나와요 → 넉넉히, 한 번 더
+        res = chat_json(where + "·검사", q, data, "small", budget, 120)
+        if res is not None and isinstance(res.get("issues", None), list):
+            break
+        log.warning("검사관 답 없음(%s) — 한도 %d로 다시", where, budget)
+        res = None
+    if res is None:
         return None
     issues = [i for i in res["issues"][:12] if isinstance(i, dict) and str(i.get("원래") or "").strip()]
     return {"issues": issues, "ok": not issues}
@@ -236,14 +245,20 @@ def _apply_fixes(ans, issues: list[dict]):
     return fix(ans), n
 
 
-def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90) -> dict | None:
-    """답 + 검사관. 검사가 실패하면 답을 버려요. 검사관이 찾은 오류는 답에 바로 고쳐 넣고 기록해요."""
+def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90,
+            keep_unchecked: bool = False) -> dict | None:
+    """답 + 검사관. 검사관이 찾은 오류는 답에 바로 고쳐 넣고 기록해요.
+    검사관 자체가 답을 못 하면: 기본은 답을 버려요. keep_unchecked=True(뉴스 요약처럼 숫자가 시세 표와 나란히 보이는 곳)는
+    답을 살리되 '검사 못 함'을 정직하게 붙여요 — '확인된 수정 사항 없음'으로 꾸미지 않아요."""
     ans = chat_json(where, task, data, kind, max_tokens, timeout)
     if ans is None:
         return None
     ins = inspect(where, ans, data)
     if ins is None:
-        return None
+        if not keep_unchecked:
+            return None
+        ans["_검사"] = {"ok": None, "issues": [], "note": "검사관이 답하지 못했어요 — 숫자는 아래 시세 표로 한 번 더 확인하세요"}
+        return ans
     if ins["issues"]:
         ans, n = _apply_fixes(ans, ins["issues"])
         ins["fixed"] = n

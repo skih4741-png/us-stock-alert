@@ -1063,7 +1063,7 @@
   }
 
   /* ---------- 4단계: GPT 화면 · 장 전 갭 · 성향 인터뷰 · AI에게 묻기 ---------- */
-  const checkNote = c => !c ? "" : (c.ok || !(c.issues || []).length) ? '<div class="small">🔍 검사관: 확인된 수정 사항 없음</div>'
+  const checkNote = c => !c ? "" : c.ok === null ? '<div class="small warn-t">🔍 ' + esc(c.note || "검사관이 확인하지 못했어요") + "</div>" : (c.ok || !(c.issues || []).length) ? '<div class="small">🔍 검사관: 확인된 수정 사항 없음</div>'
     : '<details class="sig"><summary><span class="small warn-t">🔍 ' + esc(c.note || ("검사관이 " + c.issues.length + "곳을 확인했어요")) + ' ▾</span></summary><ul class="plain small">' +
       c.issues.map(i => "<li>[" + esc(i["종류"] || "숫자") + "] " + esc(i["원래"] || "") + " → <b>" + esc(i["고친 값"] || "삭제(확인 못 함)") + "</b>" + (i["근거"] ? " · " + esc(i["근거"]) : "") + "</li>").join("") + "</ul></details>";
   const tone3 = v => /통과|좋음|상회/.test(v || "") ? "good" : /탈락|나쁨|하회/.test(v || "") ? "bad" : "warn";
@@ -1325,7 +1325,7 @@
       const w = r["시장 날씨"] || {};
       h += '<div class="card"><div class="big">' + (WEATHER[w["날씨"]] || "🌤️") + " 시장 날씨: " + esc(w["날씨"] || "") + "</div><div>" + esc(w["한 줄"] || "") + "</div>" +
         (w["예시"] ? '<div class="ex">💡 ' + esc(w["예시"]) + "</div>" : "") + "</div>" +
-        '<h2>⏱️ 5초 요약</h2><div class="card"><ul class="plain five">' + (r["5초 요약"] || []).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>";
+        '<h2>⏱️ 5초 요약</h2><div class="card"><ul class="plain five">' + (r["5초 요약"] || []).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" + checkNote(r["_검사"]) + "</div>";
       if ((r["숫자 3개"] || []).length) h += '<h2>🔢 오늘 꼭 볼 숫자 3개</h2><div class="nums3">' + r["숫자 3개"].map(x => '<div class="card"><div class="small">' + esc(x["이름"]) +
         '</div><div class="big num">' + esc(x["값"]) + '</div><div class="small">' + esc(x["쉬운 뜻"]) + "</div></div>").join("") + "</div>";
       if ((r["트렌드"] || []).length) h += "<h2>📈 지금 미국 주식 트렌드</h2>" + r["트렌드"].map((x, i) => '<div class="card"><div class="row between"><b>' + (i + 1) + ". " + esc(x["제목"]) +

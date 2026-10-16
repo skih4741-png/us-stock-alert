@@ -339,16 +339,16 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
         # 1) 시장 요약
         d1 = dict(base, **{"매크로 지표(FRED)": macro, "업종 시세": {x[0]: mk.get(x[1][0]) for x in SECTOR_DEF}, "시장 뉴스": headlines[:24],
                            "보유 목록": [{"종목": h, "업종": cache.get(h, {}).get("industry", "")} for h in holdings[:20]]})
-        rep = ai.checked("경제뉴스 리포트", TASK, d1, "big", 5000, 150)
+        rep = ai.checked("경제뉴스 리포트", TASK, d1, "big", 8000, 180, keep_unchecked=True)
         if rep:
             out["report"] = rep
         else:
-            out["why"] = "시장 요약이 검사를 통과하지 못했어요(숫자 확인 실패). 숫자·뉴스 목록만 보여 드려요."
+            out["why"] = "시장 요약을 만들지 못했어요(GPT 응답 없음). 숫자·뉴스 목록만 보여 드려요."
         # 2) 업종 13개 깊게 (5개씩 3번)
         secs = []
         for i in range(0, len(SECTOR_NAMES), 5):
             part = SECTOR_NAMES[i:i + 5]
-            res = ai.checked(f"경제뉴스 업종 {i // 5 + 1}", TASK_SEC, dict(base, 업종={n: sec_data[n] for n in part}), "big", 7000, 180)
+            res = ai.checked(f"경제뉴스 업종 {i // 5 + 1}", TASK_SEC, dict(base, 업종={n: sec_data[n] for n in part}), "big", 9000, 200, keep_unchecked=True)
             got = {x.get("업종"): x for x in (res or {}).get("업종") or [] if isinstance(x, dict)}
             for n in part:
                 x = got.get(n)
@@ -361,7 +361,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
             d3 = dict(base, 종목={h: {"업종": cache.get(h, {}).get("industry", ""), "PER": cache.get(h, {}).get("pe"), "PBR": cache.get(h, {}).get("pb"),
                                      "배당수익률": cache.get(h, {}).get("div"), "부채비율": cache.get(h, {}).get("de"),
                                      "뉴스": [{"제목": x["제목"], "링크": x["링크"]} for x in (yahoo_news(h.replace(".", "-"), 4) or gnews(f"{h} stock", n=4))]} for h in holdings[:20]})
-            mine = ai.checked("경제뉴스 내 종목", TASK_MINE, d3, "big", 5000, 150)
+            mine = ai.checked("경제뉴스 내 종목", TASK_MINE, d3, "big", 8000, 180, keep_unchecked=True)
         out["all"] = {"업종": secs, "종목": (mine or {}).get("종목") or []}
     hist = [h for h in (ab.get("news_hist") or []) if h.get("date") != out["date"]]
     secs = (out["all"] or {}).get("업종") or []
