@@ -640,12 +640,12 @@
      ③ 오래된 자료: 와야 할 아침 실행이 안 왔으면 숫자를 '오늘 것'처럼 보여 주지 않고 먼저 알려요.
      ④ 종목 일지: 알림·모의 체결·주문표를 종목마다 모아 쌓아요. */
   const runsOf = () => (S.perf && S.perf.runs) || [];
-  // 아침 실행은 매주 화~토 07:00(한국) — 2시간 여유를 두고 그 시각보다 오래된 기록이면 '오래됨'
+  // 아침 실행은 매주 화~토 07:00(한국) 예약 — GitHub 예약 실행은 붐비면 2~5시간 늦게 시작해서(실측 07:57~11:45) 6시간 여유를 둬요
   function expectedDaily(now) {
     for (let d = 0; d < 9; d++) {
       const k = new Date(now + 9 * 36e5 - d * 864e5), dow = k.getUTCDay();
       const t = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate(), 7) - 9 * 36e5;
-      if (dow >= 2 && dow <= 6 && t + 2 * 36e5 <= now) return t;
+      if (dow >= 2 && dow <= 6 && t + 6 * 36e5 <= now) return t;
     }
     return 0;
   }
