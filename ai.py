@@ -219,7 +219,9 @@ def inspect(where: str, answer: dict, data) -> dict | None:
         res = None
     if res is None:
         return None
-    issues = [i for i in res["issues"][:12] if isinstance(i, dict) and str(i.get("원래") or "").strip()]
+    # 검사관은 숫자·날짜를 보는 역할 — 숫자가 하나도 없는 지적(제목·비유·형식 트집)은 버려요
+    issues = [i for i in res["issues"][:12] if isinstance(i, dict) and str(i.get("원래") or "").strip()
+              and re.search(r"\d", str(i.get("원래"))) and len(str(i.get("원래"))) <= 200]
     return {"issues": issues, "ok": not issues}
 
 
