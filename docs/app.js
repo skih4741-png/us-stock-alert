@@ -733,6 +733,53 @@
       '<h2>남은 여유</h2><div class="card"><div class="row"><span class="radial" style="--p:' + (100 - w).toFixed(1) + '"><span>' + Math.round(100 - w) + '<small>%</small></span></span>' +
       '<div class="grow" style="margin-left:12px"><b>GPT 이번 달 남은 한도</b><div class="small num">$' + fmt(u.total) + " 씀 / $" + fmt(u.cap || 5, 0) + " · 아침 분석 $" + fmt(u.program) + " · 앱 질문 $" + fmt(u.app) + "</div></div></div></div>";
   }
+  /* ---------- 펀드매니저 4단계 (Kronos 예측 · skfolio 배분 · NautilusTrader 백테스트 · 보고서) ---------- */
+  const FUND_NAME = { meanrisk: "MeanRisk", hrp: "HRP", equal: "균등", spy: "SPY 보유" };
+  function sparkSvg(series) {
+    const all = series.flatMap(x => (x.c || []).map(p => p[1]));
+    if (!all.length) return "";
+    const lo = Math.min(...all), hi = Math.max(...all), W = 320, H = 120, n = Math.max(...series.map(x => (x.c || []).length)) - 1 || 1;
+    const path = c => c.map((p, i) => (i ? "L" : "M") + (i / n * W).toFixed(1) + "," + (H - (p[1] - lo) / ((hi - lo) || 1) * (H - 8) - 4).toFixed(1)).join("");
+    return '<svg viewBox="0 0 ' + W + " " + H + '" class="fundspark" role="img" aria-label="누적 평가액">' +
+      series.map(x => '<path d="' + path(x.c || []) + '" fill="none" stroke="' + x.col + '" stroke-width="' + (x.w || 1.6) + '"' + (x.dash ? ' stroke-dasharray="4 3"' : "") + "/>").join("") + "</svg>" +
+      '<div class="small legend">' + series.map(x => '<span><i style="background:' + x.col + '"></i>' + esc(x.n) + "</span>").join("") + "</div>";
+  }
+  function fundHtml(f) {
+    if (!f) return emp("🧑‍💼", "펀드매니저 4단계는 일요일에 돌아요", "보유·모의·후보 종목으로 예측(Kronos) → 비중(skfolio) → 매주 리밸런싱 백테스트(NautilusTrader) → 한 장 보고서를 만들어요.", "#/score", "자동 모의 보기");
+    const st = f.steps || {}, fc = (f.forecast && f.forecast.items) || {}, w = f.weights || {}, bt = f.backtest || {}, sc = f.forecast_score || {};
+    let h = '<div class="card"><div class="row between"><b>🧑‍💼 이번 주 펀드매니저</b><span class="small">' + esc(whenText(f.at)) + "</span></div>" +
+      '<ul class="checks">' + Object.keys(st).map(k => checkLine({ n: k, ok: st[k].ok, d: st[k].d })).join("") + "</ul>" +
+      '<div class="small">실제 주문 없음 · 예측과 과거 검증은 수익을 보장하지 않아요</div></div>';
+    if (f.why) return h + '<div class="msg note">' + esc(f.why) + "</div>";
+    const r = f.report;
+    if (r) h += '<h2>📝 한 장 보고서</h2><div class="card">' + (r["한 줄"] ? "<b>" + esc(r["한 줄"]) + "</b>" : "") +
+      ["무엇이 통했나", "위험", "다음 주에 바꿔 볼 것"].map(k => (r[k] || []).length ? '<div class="sub" style="margin-top:8px">' + esc(k) + '</div><ul class="plain">' + r[k].map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "").join("") +
+      (r["예시"] ? '<div class="ex">💡 ' + esc(r["예시"]) + "</div>" : "") + checkNote(r["_검사"]) + "</div>";
+    if (f.vibe) h += '<details class="sig"><summary><b>🤖 Vibe-Trading 보고서</b></summary><pre class="weekly">' + esc(f.vibe) + "</pre></details>";
+    const T = Object.keys(fc);
+    h += '<h2>① 예측 · Kronos (다음 5거래일)</h2>' + (T.length ? '<div class="card"><table class="tbl num"><tr><th>종목</th><th>지금</th><th>5일 뒤</th><th>예상</th></tr>' +
+      T.sort((a, b) => fc[b].exp_ret - fc[a].exp_ret).map(t => "<tr><td><b>" + esc(t) + "</b></td><td>$" + fmt(fc[t].last) + "</td><td>$" + fmt((fc[t].pred || []).slice(-1)[0]) +
+        '</td><td class="' + (fc[t].exp_ret >= 0 ? "good-t" : "bad-t") + '">' + pct(fc[t].exp_ret * 100) + "</td></tr>").join("") + "</table>" +
+      '<div class="small">' + esc(f.forecast.model || "") + " · 표본 " + esc(f.forecast.samples || "") + "번 평균 · " + esc(f.forecast.date || "") + " 종가 기준</div></div>"
+      : '<div class="msg note">이번 주 예측이 없어요 — 비중은 과거 1년 평균으로 계산했어요.</div>');
+    h += '<h2>🎯 지난 예측 채점</h2><div class="card">' + (sc.n ? '<div class="row between"><b>방향 적중 ' + sc.hit + '%</b><span class="small">' + sc.n + "건 · 평균 오차 " + fmt(sc.mae) + "%p</span></div>" +
+      '<div class="small">50% 근처면 동전 던지기와 비슷해요. 표본이 쌓일수록 믿을 만해져요.</div>'
+      : '<div class="small">예측한 5거래일이 지나면 실제 종가와 비교해 여기에 채점해요.</div>') + "</div>";
+    const A = (w.assets || []);
+    if (A.length) h += '<h2>② 비중 · skfolio</h2><div class="card"><table class="tbl num"><tr><th>종목</th><th>MeanRisk</th><th>HRP</th><th>균등</th></tr>' +
+      A.map(t => "<tr><td><b>" + esc(t) + "</b></td>" + ["meanrisk", "hrp", "equal"].map(k => "<td>" + (w[k] && w[k][t] ? Math.round(w[k][t] * 100) + "%" : "—") + "</td>").join("") + "</tr>").join("") +
+      '</table><div class="small">MeanRisk 기준: ' + esc(w.prior || "") + " · 한 종목 최대 " + Math.round(Math.min(100, Math.max(25, 100 / A.length + 5))) + "%</div></div>";
+    const K = ["meanrisk", "hrp", "equal", "spy"].filter(k => bt[k] && bt[k].ret != null);
+    if (K.length) h += '<h2>③ 실행 · NautilusTrader 백테스트</h2><div class="card">' +
+      sparkSvg([{ n: "MeanRisk", c: (bt.meanrisk || {}).curve, col: "var(--accent)", w: 2.2 }, { n: "HRP", c: (bt.hrp || {}).curve, col: "var(--good)" },
+        { n: "균등", c: (bt.equal || {}).curve, col: "var(--warn)" }, { n: "SPY", c: (bt.spy || {}).curve, col: "var(--sub)", dash: 1 }].filter(x => (x.c || []).length)) +
+      '<table class="tbl num"><tr><th>방법</th><th>수익</th><th>샤프</th><th>최대 낙폭</th><th>거래</th></tr>' +
+      K.map(k => "<tr><td>" + esc(FUND_NAME[k]) + '</td><td class="' + (bt[k].ret >= 0 ? "good-t" : "bad-t") + '">' + pct(bt[k].ret) + "</td><td>" + (bt[k].sharpe == null ? "—" : fmt(bt[k].sharpe)) +
+        "</td><td>" + pct(bt[k].mdd) + "</td><td>" + (bt[k].trades == null ? "—" : bt[k].trades) + "</td></tr>").join("") + "</table>" +
+      '<div class="small">' + esc(bt.start || "") + "부터 · 매주 첫 거래일에 그때까지의 1년 자료로만 비중을 다시 계산(미래 정보 없음) · 수수료 " + esc(bt.fee || "") + " · " + esc(bt.engine || "") + "</div></div>";
+    else if (bt.skip) h += '<div class="msg note">' + esc(bt.skip) + "</div>";
+    return h + '<p class="foot">가이드: Claude 펀드매니저 4단계 (Kronos · skfolio · NautilusTrader · Vibe-Trading) · 오픈소스 각 저장소의 라이선스를 따라요</p>';
+  }
   function viewAlerts() {
     const items = S.alerts || [];
     if (items[0]) { S.lastSeenAlert = items[0].at; store.set("seenAlert", S.lastSeenAlert); }
@@ -1022,13 +1069,15 @@
           "<br>5일 " + (r.r5 == null ? "—" : pct(r.r5)) + " · 20일 " + (r.r20 == null ? "—" : pct(r.r20)) + '</div><span class="badge ' +
           (r.result === "목표 먼저" ? "good" : r.result === "손절 먼저" ? "bad" : "") + '">' + esc(r.result || "진행 중") + "</span></div>").join("")
           : emp("📊", "신호 기록이 쌓이는 중이에요", "아침 후보가 5일·20일 지나면 결과가 채워져요.", "", "")) + "</div>";
+    } else if (seg === "fund") {
+      body = fundHtml(S.ai && S.ai.fund);
     } else {
       const w = S.weekly;
       body = w && w.lines ? '<div class="card"><div class="small">' + esc(whenText(w.at)) + '</div><pre class="weekly">' + esc(w.lines.join("\n")) + "</pre></div>"
         : emp("📅", "주간 리포트는 일요일에 와요", "한 주의 모의투자·신호 성적을 정리해 드려요.", "#/news", "그동안 경제뉴스 보기");
     }
     appShell("score", '<div class="head"><div><h1>모의투자 · 성적</h1><div class="small">모두 가상 돈 · 실제 주문 없음</div></div></div>' + statusLine() +
-      '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + "</div>" +
+      '<div class="segs">' + segBtn("auto", "자동 모의") + segBtn("acct", "내 계좌") + segBtn("skill", "실력·운") + segBtn("sig", "신호") + segBtn("week", "주간") + segBtn("fund", "펀드매니저") + "</div>" +
       body + '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => { S.scoreSeg = b.dataset.s; viewScore(); }));
     const tc = document.getElementById("tkcopy");

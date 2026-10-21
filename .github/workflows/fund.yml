@@ -1,0 +1,89 @@
+name: 펀드매니저 4단계 (Kronos 예측 · skfolio 배분 · Nautilus 백테스트 · 보고서)
+on:
+  schedule:
+    - cron: "0 1 * * 0"   # 한국 일요일 10:00 (주간 요약 뒤)
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: fund
+  cancel-in-progress: false
+jobs:
+  universe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tickers: ${{ steps.u.outputs.tickers }}
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - id: u
+        name: 대상 종목 (보유·모의·후보 상위, 최대 15개 + SPY)
+        run: echo "tickers=$(python fund.py --universe | tail -1)" >> "$GITHUB_OUTPUT"
+
+  kronos:
+    # ① 예측: 외부 코드(Kronos)는 비밀 키가 하나도 없는 이 작업에서만 돌아요
+    needs: universe
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KRONOS_COMMIT: 67b630e67f6a18c9e9be918d9b4337c960db1e9a   # 고정 버전 (바꿀 땐 이 값만)
+      KRONOS_DIR: /tmp/Kronos
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kronos 받기 (고정 커밋)
+        run: |
+          git init -q "$KRONOS_DIR" && cd "$KRONOS_DIR"
+          git remote add origin https://github.com/shiyu-coder/Kronos.git
+          git fetch -q --depth 1 origin "$KRONOS_COMMIT" && git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$KRONOS_COMMIT"
+      - name: 설치 (CPU용 torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install einops==0.8.1 huggingface_hub==0.33.1 safetensors==0.6.2 tqdm "pandas>=2.2" numpy yfinance
+      - name: 다음 5거래일 종가 예측
+        run: python fund_kronos.py ${{ needs.universe.outputs.tickers }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fund-forecast
+          path: data/fund_forecast.json
+          retention-days: 7
+
+  fund:
+    # ② 배분(skfolio) · ③ 실행(NautilusTrader 백테스트) · 보고서 → 시트 → 앱
+    needs: [universe, kronos]
+    if: ${{ always() && needs.universe.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      SHEET_ID: ${{ secrets.SHEET_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt skfolio==1.9.7 nautilus_trader==1.231.0
+      - name: Kronos 예측 파일 (없으면 과거 평균으로 배분)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: fund-forecast
+          path: data
+      - name: 배분 · 백테스트 · 보고서
+        run: python fund.py

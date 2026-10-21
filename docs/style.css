@@ -290,3 +290,11 @@ ul.tlog li:last-child { border-bottom: 0; }
 @media (prefers-reduced-transparency: reduce) { #tabs, .segs, .back, .head { background: var(--bg) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; } }
 @media (prefers-contrast: more) { :root { --line: var(--sub); } .small, .sub { color: var(--ink) !important; opacity: 1 !important; } .badge { border-color: currentColor !important; } }
 #app a.item { color: var(--ink); text-decoration: none; }
+
+/* 펀드매니저 4단계 */
+svg.fundspark { width: 100%; height: 120px; display: block; margin: 4px 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 6px; }
+.legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.segs { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.segs::-webkit-scrollbar { display: none; }
+.segs button { white-space: nowrap; flex: none; }
