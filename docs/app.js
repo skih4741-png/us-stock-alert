@@ -461,16 +461,21 @@
     if (!m) return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live off"></span>모의투자 준비 중</b><span class="badge info">가상 $1,000</span></div>' +
       '<div class="small">다음 아침 리포트부터 3개월 자동 모의투자가 시작돼요</div></a>';
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
-    const pos = m.positions || [], pend = m.pending || [], today = (m.today || []).slice(0, 3);
-    return '<a class="card simlive" href="#/score"><div class="row between"><b><span class="live"></span>모의투자 진행 중</b>' +
+    const pos = m.positions || [], pend = m.pending || [], up = m.ret >= 0, gain = m.equity - m.budget;
+    const c = m.curve || [];
+    let today = "";
+    if (c.length >= 2) {
+      const d = c[c.length - 1][1] - c[c.length - 2][1], base = c[c.length - 2][1];
+      today = "오늘 " + (d >= 0 ? "▲" : "▼") + " " + usd(d) + (base ? " (" + pct(d / base * 100) + ")" : "");
+    }
+    return '<a class="card simlive" href="#/score"><div class="row between"><span class="sub"><span class="live"></span>모의 평가금액 <span class="small">· 가상 $' + fmt(m.budget, 0) + "</span></span>" +
       '<span class="radial" style="--p:' + prog.toFixed(1) + '" title="' + m.day + "/" + m.days + '일째"><span>' + m.day + "<small>/" + m.days + "일</small></span></span></div>" +
-      '<div class="row between"><span class="big num">$' + fmt(m.equity) + '</span><b class="num ' + (m.ret >= 0 ? "good-t" : "bad-t") + '">' + pct(m.ret) +
-      ' <span class="small">(SPY ' + pct(m.spy_ret) + ")</span></b></div>" +
-      '<div class="small num">가상 $' + fmt(m.budget, 0) + " 시작 · 현금 $" + fmt(m.cash) + " · 번 돈 " + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + "</div>" +
+      '<div class="broker-eq num">$' + fmt(m.equity) + "</div>" +
+      '<div class="broker-ret num ' + (up ? "good-t" : "bad-t") + '">' + (up ? "▲" : "▼") + " " + usd(gain) + " (" + pct(m.ret) + ")" +
+      (today ? ' <span class="small" style="color:var(--sub)">· ' + today + "</span>" : "") + "</div>" +
+      '<div class="small num">현금 $' + fmt(m.cash) + " · 주식 $" + fmt(m.equity - m.cash) + " · " + pos.length + "종목 · 같은 기간 SPY " + pct(m.spy_ret) + "</div>" +
       '<div class="small" style="margin-top:6px"><b>보유</b> ' + (pos.length ? pos.map(p => esc(p.t) + " " + p.qty + "주").join(", ") : "없음") +
-      " · <b>다음 주문</b> " + (pend.length ? pend.map(o => esc(o.t)).join(", ") : "없음") + "</div>" +
-      (today.length ? '<div class="small" style="margin-top:4px">' + today.map(esc).join("<br>") + "</div>" : "") +
-      '<div class="small" style="margin-top:6px;opacity:.8">' + esc(m.start) + " ~ " + esc(m.end) + " · 실제 돈·실제 주문 없음 · 자세히 →</div></a>";
+      " · <b>다음 주문</b> " + (pend.length ? pend.map(o => esc(o.t)).join(", ") : "없음") + " · 자세히 →</div></a>";
   }
   function homePaperCard() {
     if (!(S.paper || []).length) return "";
@@ -932,7 +937,7 @@
         reps.slice(1).map(r => '<div class="card"><b>' + esc(r.title) + '</b><div class="small">' + esc(r.date) + '</div><pre class="weekly">' + esc(r.text) + "</pre></div>").join("") + "</details>" : "");
   }
   function kisHtml(k) {
-    const h = '<h2>증권사 모의계좌 연결 <span class="small">(선택 사항)</span></h2>';
+    const h = "";
     const calm = why => h + '<div class="card small">' + esc(why) + "<br>위의 3개월 자동 모의투자는 증권사 연결 없이 가상 장부로 <b>정상 진행 중</b>이에요. 실전 직전에 연결해 봐도 충분해요.</div>";
     if (!k) return calm("아직 연결 안 함.");
     if (!k.on) return calm("꺼져 있어요.");
@@ -945,12 +950,25 @@
       (today.length ? '<b>최근 주문</b><ul class="plain small">' + today.map(o => "<li>" + esc(o.date) + " " + esc(o.side) + " " + esc(o.t) + " " + o.qty + "주 @" + fmt(o.price) + " · " + esc(o.status) + "</li>").join("") + "</ul>" : '<div class="small">아직 주문 없음</div>') +
       "</div>";
   }
-  function refSimHtml(r) {
-    if (!r) return "";
-    return '<h2>참고용 $' + fmt(r.budget, 0) + ' 모의' + (r.max_pos ? " · 최대 " + r.max_pos + "종목" : "") + ' <span class="small">(같은 규칙, 판단에는 안 써요)</span></h2><div class="card"><dl class="kv num">' +
-      "<dt>평가금액</dt><dd>$" + fmt(r.equity) + " (" + pct(r.ret) + ")</dd><dt>번 돈 · 잃은 돈</dt><dd>" + usd(r.gain) + " · " + usd(r.loss) + "</dd>" +
-      "<dt>거래</dt><dd>" + (r.wins + r.losses) + "번 · 보유 " + (r.positions || []).length + "종목</dd><dt>최대 낙폭</dt><dd>" + fmt(r.mdd, 1) + "%</dd></dl>" +
-      '<div class="small">종목 수를 적게(집중) 가져가면 결과가 어떻게 달라지는지 비교하는 용도예요</div></div>';
+  // 증권사 앱처럼 "평가금액 · 수익률"을 맨 위에 크게 (자동 모의 기준)
+  function brokerCard(m, ref) {
+    const gain = m.equity - m.budget;
+    const up = m.ret >= 0;
+    const c = m.curve || [];
+    let today = "";
+    if (c.length >= 2) {
+      const d = c[c.length - 1][1] - c[c.length - 2][1], base = c[c.length - 2][1];
+      today = '<div class="broker-today small num">오늘 ' + (d >= 0 ? "▲" : "▼") + " " + usd(d) + (base ? " (" + pct(d / base * 100) + ")" : "") + "</div>";
+    }
+    const gapp = (m.ret != null && m.spy_ret != null) ? m.ret - m.spy_ret : null;
+    return '<div class="card broker">' +
+      '<div class="row between"><span class="sub">모의 평가금액</span><span class="badge info">가상 $' + fmt(m.budget, 0) + " · 실제 주문 없음</span></div>" +
+      '<div class="broker-eq num">$' + fmt(m.equity) + "</div>" +
+      '<div class="broker-ret num ' + (up ? "good-t" : "bad-t") + '">' + (up ? "▲" : "▼") + " " + usd(gain) + " (" + pct(m.ret) + ")</div>" +
+      today +
+      '<div class="broker-row small num">현금 $' + fmt(m.cash) + " · 주식 $" + fmt(m.equity - m.cash) + " · " + (m.positions || []).length + "종목</div>" +
+      (m.spy_ret != null ? '<div class="small num">같은 기간 SPY ' + pct(m.spy_ret) + (gapp != null ? " · " + (gapp >= 0 ? "+" : "") + fmt(gapp, 1) + "%p " + (gapp >= 0 ? "앞서요" : "뒤처져요") : "") + "</div>" : "") +
+      (ref ? '<div class="small broker-ref">참고: 같은 규칙으로 ' + (ref.max_pos || 2) + "종목만 집중했다면 " + pct(ref.ret) + "</div>" : "") + "</div>";
   }
   // 리허설 주문표: 증권사 앱에 그대로 넣는다면 + 채점(체결률)
   function ticketHtml(m) {
@@ -971,25 +989,17 @@
         esc(x.day || x.signal) + " · " + (x.qty || "") + "주 지정가 $" + fmt(x.limit) + (x.fill_px ? " → $" + fmt(x.fill_px) + " (" + esc(x.at || "") + ")" : "") + '</span><span class="badge ' +
         (RES[x.result] || "") + '">' + esc(x.result) + "</span></div>").join("") + "</div>" : '<div class="small">첫 주문표 결과는 다음 거래일부터 쌓여요</div>') + "</div>";
   }
-  function autoSimHtml(m) {
+  function autoSimHtml(m, ref) {
     if (!m) return emp("🧪", "자동 모의투자를 준비하고 있어요", "다음 아침 리포트부터 가상 1,000달러로 시작해요.", "#/picks", "오늘 후보 보기");
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
     const passN = (m.checks || []).filter(c => c[1]).length;
-    return '<div class="card"><div class="row between"><b>3개월 자동 모의매매</b><span class="badge info">모의 · 실제 주문 없음</span></div>' +
-      '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · " + m.day + "/" + m.days + "일째 · 가상 $" + fmt(m.budget, 0) + " · 11장 규칙 그대로</div>" +
-      '<div class="plbar" style="margin-top:8px"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
-      '<div class="big num">$' + fmt(m.equity) + ' <span class="badge ' + signTone(m.ret) + '">' + pct(m.ret) + "</span></div>" +
-      '<div class="small num">현금 $' + fmt(m.cash) + " · 같은 기간 SPY " + pct(m.spy_ret) + " · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +
-      '<div class="card"><div class="sub">얼마 벌고 얼마 잃었나 (수수료·환전 추정치 뺀 금액)</div>' +
-      '<div class="pl"><div><div class="small">번 돈 (' + m.wins + '건)</div><div class="big num good-t">' + usd(m.gain) + "</div></div>" +
-      '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
-      '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
-      '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd>" +
-      (m.fees != null ? "<dt>수수료·환전 비용(추정, 포함됨)</dt><dd>$" + fmt(m.fees) + "</dd>" : "") + "</dl></div>" +
-      reportsHtml(m.reports) +
-      "<h2>지난 거래일에 한 일</h2>" + '<div class="card small">' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" +
-      ticketHtml(m) +
+    // ── 맨 위: 증권사처럼 평가금액·수익률 한눈에 ──
+    return brokerCard(m, ref) +
+      '<div class="card"><div class="row between"><span class="sub">3개월 자동 모의매매</span><span class="small">' + m.day + "/" + m.days + "일째</span></div>" +
+      '<div class="plbar" style="margin:6px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
+      '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · 11장 규칙 그대로 자동 매매 · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +
+      // ── 보유 종목 ──
       "<h2>지금 가진 종목</h2>" + ((m.positions || []).length ? '<div class="list">' + m.positions.map(p =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(p.t) + '</span><div class="grow small num">' + esc(p.date) + " · " + p.qty + "주 @$" + fmt(p.entry) +
         "<br>손절 " + fmt(p.stop) + " · 목표 " + fmt(p.target) + (p.half ? " · 절반 익절함" : "") + (p.fill_time ? " · 체결 " + esc(p.fill_time) : "") + "</div></div>").join("") + "</div>" : emp("🫙", "지금 가진 종목은 없어요", "아래 '다음 거래일 주문 계획'이 체결되면 여기에 나와요.", "", "")) +
@@ -997,13 +1007,24 @@
         '<div class="item" style="cursor:default"><span class="tk">' + esc(o.t) + '</span><div class="grow small num">' + o.qty + "주 · 지정가 $" + fmt(o.limit) +
         " 이하 · 시작가 $" + fmt(o.skip_above) + " 위면 안 삼<br>" + esc(o.why) + vetoTag(o.t) + "</div></div>").join("") + "</div>"
         : emp("🗓️", "다음 거래일엔 주문을 쉬어요", "조건에 맞는 후보가 없거나 보유 자리가 찼어요. 쉬는 것도 규칙이에요.", "#/picks", "오늘 후보 보기")) +
-      "<h2>실전 기준 " + passN + "/" + (m.checks || []).length + " <span class=\"small\">(3개월 끝에 최종 판단 → 알림)</span></h2>" +
+      // ── 자세히: 손익·주문표·실전 기준·판 거래·기록 ──
+      '<details class="sig"><summary><b>💰 얼마 벌고 얼마 잃었나</b></summary>' +
+      '<div class="card"><div class="sub">수수료·환전 추정치 뺀 금액</div>' +
+      '<div class="pl"><div><div class="small">번 돈 (' + m.wins + '건)</div><div class="big num good-t">' + usd(m.gain) + "</div></div>" +
+      '<div><div class="small">잃은 돈 (' + m.losses + '건)</div><div class="big num bad-t">' + usd(m.loss) + "</div></div></div>" +
+      '<div class="plbar"><span class="g" style="width:' + (Math.abs(m.gain) / w * 100) + '%"></span><span class="l" style="width:' + (Math.abs(m.loss) / w * 100) + '%"></span></div>' +
+      '<dl class="kv num"><dt>판 거래 합계</dt><dd><b class="' + (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + "</b></dd>" +
+      (m.fees != null ? "<dt>수수료·환전 비용(추정, 포함됨)</dt><dd>$" + fmt(m.fees) + "</dd>" : "") + "</dl></div></details>" +
+      '<details class="sig"><summary><b>🧾 주문표 · 체결률</b></summary>' +
+      '<div class="card small">지난 거래일에 한 일<br>' + ((m.today || []).length ? m.today.map(esc).join("<br>") : "체결·매도 없음") + "</div>" + ticketHtml(m) + "</details>" +
+      '<details class="sig"><summary><b>🎯 실전 기준 ' + passN + "/" + (m.checks || []).length + ' <span class="small">(3개월 끝에 최종 판단)</span></b></summary>' +
       '<div class="card"><ul class="checks">' + (m.checks || []).map(c => '<li class="' + (c[1] ? "ok" : "no") + '">' + (c[1] ? "✓ " : "– ") + esc(c[0]) +
-        '<div class="small">' + esc(c[2]) + "</div></li>").join("") + "</ul></div>" +
-      "<h2>판 거래</h2>" + ((m.closed || []).length ? '<div class="list">' + m.closed.map(c =>
+        '<div class="small">' + esc(c[2]) + "</div></li>").join("") + "</ul></div></details>" +
+      '<details class="sig"><summary><b>🧾 판 거래 · 기록</b></summary>' + reportsHtml(m.reports) +
+      ((m.closed || []).length ? '<div class="list">' + m.closed.map(c =>
         '<div class="item" style="cursor:default"><span class="tk">' + esc(c.t) + '</span><div class="grow small num">' + esc(c.date) + " → " + esc(c.exit_date) + " · " + esc(c.why) +
-        '</div><b class="num ' + (c.pnl >= 0 ? "good-t" : "bad-t") + '">' + usd(c.pnl) + "</b></div>").join("") + "</div>" : emp("🧾", "아직 판 거래가 없어요", "손절·목표·제자리 규칙으로 팔면 손익과 함께 여기에 쌓여요.", "", "")) +
-      "<h2>기록</h2>" + '<div class="card small">' + (m.log || []).map(esc).join("<br>") + "</div>";
+        '</div><b class="num ' + (c.pnl >= 0 ? "good-t" : "bad-t") + '">' + usd(c.pnl) + "</b></div>").join("") + "</div>" : '<div class="small">아직 판 거래가 없어요</div>') +
+      '<div class="card small" style="margin-top:8px">' + (m.log || []).map(esc).join("<br>") + "</div></details>";
   }
 
   function viewScore() {
@@ -1017,7 +1038,7 @@
     const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
     let body = "";
     if (seg === "auto") {
-      body = autoSimHtml(S.perf && S.perf.sim) + kisHtml(S.kis) + refSimHtml(S.perf && S.perf.sim_ref);
+      body = autoSimHtml(S.perf && S.perf.sim, S.perf && S.perf.sim_ref) + '<details class="sig"><summary><b>🔌 증권사 모의계좌 연결 (선택)</b></summary>' + kisHtml(S.kis) + "</details>";
     } else if (seg === "acct") {
       body = '<div class="card"><div class="sub">모의 계좌 평가금액</div><div class="big num">$' + fmt(eq) + ' <span class="badge ' + signTone(ret) + '">' + pct(ret) + "</span></div>" +
         '<div class="small num">현금 $' + fmt(cash) + " · 보유 " + open.length + "종목 · 시작 $1,000" +
