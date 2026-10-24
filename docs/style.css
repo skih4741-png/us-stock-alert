@@ -1,23 +1,27 @@
 :root {
-  --bg: #ffffff; --bg2: #f6f8fa; --line: #d0d7de; --ink: #1f2328; --sub: #57606a;
-  --accent: #1f5ed6; --accent-bg: #e8f0fe;
-  --bad: #cf222e; --bad-bg: #ffebe9; --warn: #9a6700; --warn-bg: #fff8c5; --good: #1a7f37; --good-bg: #dafbe1;
-  --radius: 12px; --tabh: 58px;
+  /* 토스증권 톤: 하얀 바탕·얇은 선·상승 빨강/하락 파랑·포인트 파랑 */
+  --bg: #ffffff; --bg2: #f2f4f6; --line: #eef0f3; --line2: #e5e8eb; --ink: #191f28; --sub: #687078;
+  --accent: #3182f6; --accent-bg: #e8f1fe;
+  --up: #f04452; --up-bg: #fdeaec; --down: #3182f6; --down-bg: #e8f1fe;
+  --bad: #f04452; --bad-bg: #fdeaec; --warn: #e8820e; --warn-bg: #fff3e2; --good: #15a34a; --good-bg: #e4f6ea;
+  --radius: 14px; --tabh: 58px;
   --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0d1117; --bg2: #161b22; --line: #30363d; --ink: #e6edf3; --sub: #8d96a0;
-    --accent: #4c8dff; --accent-bg: #15233f;
-    --bad: #ff7b72; --bad-bg: #3a1618; --warn: #e3b341; --warn-bg: #33290f; --good: #56d364; --good-bg: #12301a;
+    --bg: #17171c; --bg2: #1f2026; --line: #26272e; --line2: #33343c; --ink: #e9ebee; --sub: #99a2b2;
+    --accent: #4d93ff; --accent-bg: #17233c;
+    --up: #ff5c6c; --up-bg: #2a1518; --down: #4d93ff; --down-bg: #17233c;
+    --bad: #ff5c6c; --bad-bg: #2a1518; --warn: #ffa62e; --warn-bg: #2a2010; --good: #2fb866; --good-bg: #10261d;
     color-scheme: dark;
   }
 }
 /* 테마 컨트롤러: 설정에서 고른 모드가 폰 설정보다 우선 */
-:root[data-theme="dark"] { --bg: #0d1117; --bg2: #161b22; --line: #30363d; --ink: #e6edf3; --sub: #8d96a0;
-    --accent: #4c8dff; --accent-bg: #15233f;
-    --bad: #ff7b72; --bad-bg: #3a1618; --warn: #e3b341; --warn-bg: #33290f; --good: #56d364; --good-bg: #12301a;
+:root[data-theme="dark"] { --bg: #17171c; --bg2: #1f2026; --line: #26272e; --line2: #33343c; --ink: #e9ebee; --sub: #99a2b2;
+    --accent: #4d93ff; --accent-bg: #17233c;
+    --up: #ff5c6c; --up-bg: #2a1518; --down: #4d93ff; --down-bg: #17233c;
+    --bad: #ff5c6c; --bad-bg: #2a1518; --warn: #ffa62e; --warn-bg: #2a2010; --good: #2fb866; --good-bg: #10261d;
     color-scheme: dark; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
@@ -62,6 +66,8 @@ a { color: var(--accent); text-decoration: none; }
 .badge.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 .badge.good { color: var(--good); background: var(--good-bg); border-color: transparent; }
 .badge.info { color: var(--accent); background: var(--accent-bg); border-color: transparent; }
+.badge.up { color: var(--up); background: var(--up-bg); border-color: transparent; }
+.badge.down { color: var(--down); background: var(--down-bg); border-color: transparent; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 
 /* 칩 */
@@ -181,7 +187,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.tbl th, table.tbl td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
 table.tbl th:first-child, table.tbl td:first-child { text-align: left; color: var(--sub); }
 pre.weekly { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
-.good-t { color: var(--good); } .bad-t { color: var(--bad); }
+.good-t { color: var(--up); } .bad-t { color: var(--down); }
 .pl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
 .plbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); margin: 4px 0 12px; }
 .plbar .g { background: var(--good); } .plbar .l { background: var(--bad); }
@@ -298,3 +304,16 @@ svg.fundspark { width: 100%; height: 120px; display: block; margin: 4px 0; }
 .segs { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .segs::-webkit-scrollbar { display: none; }
 .segs button { white-space: nowrap; flex: none; }
+
+/* 증권사 앱처럼 평가금액·수익률 한눈에 */
+.broker-eq { font-size: 34px; font-weight: 700; line-height: 1.1; margin: 6px 0 2px; }
+.broker-ret { font-size: 17px; font-weight: 600; }
+.broker-today { margin-top: 2px; color: var(--sub); }
+.broker-row { margin-top: 8px; }
+.broker .broker-ref { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); opacity: .8; }
+.card.simlive .broker-eq { margin-top: 4px; }
+
+/* 종목 상세 '자세히 분석' 탭 */
+.segs.dtabs { gap: 14px; }
+.dpanes { margin-top: 4px; }
+.dpane > h2:first-child { margin-top: 10px; }
