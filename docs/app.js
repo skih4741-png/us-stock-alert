@@ -1219,8 +1219,10 @@
     const x = S.ai && S.ai.rep && S.ai.rep[t];
     if (!x) return '<div class="empty">' + esc(aiOff() || "이 종목의 쉬운 리포트는 아직 없어요(보유·후보 상위만, 7일마다).") + "</div>";
     return '<div class="card"><b>7줄 요약</b><ol class="plain">' + (x["7줄 요약"] || []).map(l => "<li>" + esc(l) + "</li>").join("") + "</ol></div>" +
-      '<div class="card"><b>지표 신호</b><dl class="kv">' + (x["신호"] || []).map(g => "<dt>" + esc(g["지표"]) + '</dt><dd><span class="badge ' + tone3(g["좋음/나쁨"]) + '">' +
-        esc(g["좋음/나쁨"]) + "</span> " + esc(g["값"]) + '<div class="small">' + esc(g["한 줄"]) + "</div></dd>").join("") + "</dl></div>" +
+      '<div class="card"><b>지표 신호</b><div class="sigrows">' + (x["신호"] || []).map(g =>
+        '<div class="sigrow"><div class="row between"><span class="signame">' + esc(g["지표"]) + '</span><span class="badge ' + tone3(g["좋음/나쁨"]) + '">' +
+        esc(g["좋음/나쁨"]) + '</span></div><div class="sigval">' + esc(g["값"]) + "</div>" +
+        (g["한 줄"] ? '<div class="small">' + esc(g["한 줄"]) + "</div>" : "") + "</div>").join("") + "</div></div>" +
       (x["10년 주인이라면"] ? '<div class="card"><b>10년 가질 주인이라면</b><p class="sub">' + esc(x["10년 주인이라면"]) + "</p></div>" : "") +
       '<div class="small">' + esc(x.date || "") + " · GPT 작성</div>" + checkNote(x["_검사"]);
   }
