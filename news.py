@@ -108,8 +108,9 @@ TASK_MINE = """목표: 내 보유 종목 하나하나에 대해 초보자가 5�
 """ + COMMON_RULES + """
 - 종목마다: 자료의 뉴스 제목으로 무슨 일이 있었는지 한 줄 (뉴스가 있으면 '소식 없음'이라고 하지 마), 호재·악재·소음·소식 없음 구분, 확인할 것 하나(기업명 + 지표 + 기간을 구체적으로).
 - 뉴스가 없으면 '최근 소식 없음'과 노랑. 자료의 종목을 하나도 빼지 마.
+- 뉴스: 자료의 뉴스를 최대 3건, 영어 제목은 한국어로 자연스럽게 번역하고, 요약은 초보자가 알 만한 1~2줄로 (자료의 제목·요약 범위 안에서만, 기사 전문 복사 금지). 링크는 자료에 있는 것 그대로. 뉴스가 없으면 빈 배열.
 출력 JSON:
-{"종목":[{"종목":"","신호등":"초록|노랑|빨강","한 줄":"","구분":"호재|악재|소음|소식 없음","확인할 것":"","출처":{"제목":"","링크":""}}]}"""
+{"종목":[{"종목":"","신호등":"초록|노랑|빨강","한 줄":"","구분":"호재|악재|소음|소식 없음","확인할 것":"","출처":{"제목":"","링크":""},"뉴스":[{"제목":"한국어 번역","요약":"쉬운 1~2줄","구분":"호재|악재|소음","링크":"자료 그대로"}]}]}"""
 
 
 def _pct(a, b):
@@ -360,7 +361,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
         if holdings:
             d3 = dict(base, 종목={h: {"업종": cache.get(h, {}).get("industry", ""), "PER": cache.get(h, {}).get("pe"), "PBR": cache.get(h, {}).get("pb"),
                                      "배당수익률": cache.get(h, {}).get("div"), "부채비율": cache.get(h, {}).get("de"),
-                                     "뉴스": [{"제목": x["제목"], "링크": x["링크"]} for x in (yahoo_news(h.replace(".", "-"), 4) or gnews(f"{h} stock", n=4))]} for h in holdings[:20]})
+                                     "뉴스": [{"제목": x["제목"], "요약": x.get("요약", ""), "링크": x["링크"]} for x in (yahoo_news(h.replace(".", "-"), 4) or gnews(f"{h} stock", n=4))]} for h in holdings[:20]})
             mine = ai.checked("경제뉴스 내 종목", TASK_MINE, d3, "big", 8000, 180, keep_unchecked=True)
         out["all"] = {"업종": secs, "종목": (mine or {}).get("종목") or []}
     hist = [h for h in (ab.get("news_hist") or []) if h.get("date") != out["date"]]

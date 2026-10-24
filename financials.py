@@ -155,6 +155,12 @@ def analyze(raw: dict, price: float | None, sector: str | None, name: str | None
     g = lambda k, i=1: _last(r.get(k) or [], i)
     rev, net, op, gross = g("revenue"), g("net"), g("op"), g("gross")
     fin_co = _is_financial(sector, name)
+    # ROIC(투하자본이익률) · 유동비율 — 월가 애널리스트 재무 카드(04번) 보강
+    _eq0, _ltd0 = g("equity"), g("lt_debt")
+    _ebit0 = g("ebit") if g("ebit") is not None else op
+    _invested = (_eq0 or 0) + (_ltd0 or 0)
+    roic = (_ebit0 * 0.79 / _invested) if (_ebit0 is not None and _invested > 0) else None   # NOPAT≈EBIT×(1-21%)
+    cur_ratio = _div(g("cur_assets"), g("cur_liab"))
 
     signals = []
 
@@ -174,7 +180,7 @@ def analyze(raw: dict, price: float | None, sector: str | None, name: str | None
     signals.append({"key": "profit", "title": {"good": "돈을 벌어요", "warn": "벌긴 하지만 얇아요",
                                               "bad": "손해를 보고 있어요", "none": "돈을 버나"}[s1[0]],
                     "tone": s1[0], "text": s1[1],
-                    "nums": {"영업이익률": _pct(op_m), "순이익률": _pct(net_m), "순이익": money(net)}})
+                    "nums": {"영업이익률": _pct(op_m), "순이익률": _pct(net_m), "ROIC(투하자본이익률)": _pct(roic) if roic is not None else None, "순이익": money(net)}})
 
     # 2. 커지고 있나
     revs = [x for x in (r.get("revenue") or []) if x]
@@ -231,8 +237,8 @@ def analyze(raw: dict, price: float | None, sector: str | None, name: str | None
                                             "bad": "빚이 부담돼요", "info": "빚은 업종 기준으로",
                                             "none": "빚을 감당하나"}[s3[0]],
                     "tone": s3[0], "text": s3[1],
-                    "nums": {"부채비율(빚÷주주 몫)": None if d2e is None else round(d2e * 100), "이자보상배율": None if icov is None else round(icov, 1),
-                             "부도 위험 점수(알트만 Z)": None if z is None else round(z, 2)}})
+                    "nums": {"부채비율(빚÷주주 몫)": None if d2e is None else round(d2e * 100), "유동비율(1년 안 갚을 빚 대비)": None if cur_ratio is None else round(cur_ratio, 2),
+                             "이자보상배율": None if icov is None else round(icov, 1), "부도 위험 점수(알트만 Z)": None if z is None else round(z, 2)}})
 
     # 4. 현금이 실제로 들어오나
     ocf, capex = g("ocf"), g("capex")

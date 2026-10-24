@@ -499,7 +499,7 @@
     const f = $app.querySelector("#waddForm");
     if (f) f.onsubmit = e => { e.preventDefault(); const i = $app.querySelector("#waddInput"); const t = (i.value || "").trim().toUpperCase(); if (t) { i.value = ""; watchDo("watchAdd", t); } };
   }
-  function watchCard() {
+  function watchBody() {
     const list = S.watchlist || [], w = (S.watch && S.watch.items) || {};
     const rows = list.map(t => { const q = w[t] || {}, chg = q.chg;
       return '<div class="item" style="cursor:default"><span class="tk">' + esc(t) + "</span>" +
@@ -507,10 +507,22 @@
         (chg != null ? ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '">' + (chg >= 0 ? "▲" : "▼") + " " + Math.abs(chg) + "%</span>" : "") + "</span>" +
         '<button class="iconbtn" data-wdel="' + esc(t) + '" aria-label="관심에서 빼기" style="min-width:38px;min-height:38px;font-size:15px">✕</button></div>';
     }).join("");
-    return "<h2>관심종목" + (list.length ? " " + list.length : "") + '</h2><div class="card">' +
+    return '<div class="card">' +
       (list.length ? '<div class="list">' + rows + "</div>" : '<div class="small">지켜볼 종목을 담아보세요. 종목 화면에서 ☆를 누르거나 아래에 코드를 넣어요.</div>') +
       '<form id="waddForm" class="row" style="margin-top:10px;gap:6px"><input id="waddInput" placeholder="예: TSLA" autocapitalize="characters" autocomplete="off" style="flex:1;min-width:0;padding:10px;border:1px solid var(--line2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><button type="submit" class="btn" style="width:auto;margin:0;padding:10px 16px">추가</button></form>' +
       '<div class="small" style="margin-top:6px">시세는 아침·장중 자동 실행 때 갱신돼요 (실시간 아님).</div></div>';
+  }
+  function watchCard() {
+    const n = (S.watchlist || []).length;
+    return "<h2>관심종목" + (n ? " " + n : "") + "</h2>" + watchBody();
+  }
+  function viewWatch() {
+    if (!S.token) return;
+    const at = S.watch && S.watch.at;
+    appShell("watch", '<div class="head"><div><h1>관심종목</h1><div class="small">' + (at ? "시세 " + esc(whenText(at)) + " 기준" : "지켜볼 종목을 모아봐요") + "</div></div></div>" +
+      statusLine() + watchBody() +
+      '<p class="foot">종목 화면의 ☆로도 담을 수 있어요 · 시세는 자동 실행 때 갱신(실시간 아님) · ' + esc(DISCLAIMER) + "</p>");
+    bindWatch();
   }
 
   function viewHome() {
@@ -1482,7 +1494,11 @@
       if (M.length) h += '<div class="small" style="margin:6px 0">내 보유 종목 ' + M.length + "개 하나하나 · 누르면 종목 화면</div>" + M.map(x => '<div class="card" onclick="location.hash=\'#/hold/' + encodeURIComponent(x["종목"]) +
         '\'" style="cursor:pointer"><div class="row between"><b>' + (DOT[x["신호등"]] || "⚪") + " " + esc(x["종목"]) + '</b><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>" +
         "<div>" + esc(x["한 줄"] || "") + "</div>" + (x["확인할 것"] ? '<div class="small">✅ ' + esc(x["확인할 것"]) + "</div>" : "") +
-        (x["출처"] && x["출처"]["링크"] ? '<a class="small link" href="' + esc(x["출처"]["링크"]) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc((x["출처"]["제목"] || "출처").slice(0, 50)) + "</a>" : "") + "</div>").join("");
+        ((x["뉴스"] || []).length ? '<div class="newslist" onclick="event.stopPropagation()">' + x["뉴스"].slice(0, 3).map(nw =>
+          '<div class="newsitem"><div class="row between"><b class="small">📰 ' + (nw["링크"] ? '<a class="link" href="' + esc(nw["링크"]) + '" target="_blank" rel="noopener">' + esc(nw["제목"] || "") + "</a>" : esc(nw["제목"] || "")) + "</b>" +
+          (nw["구분"] ? '<span class="badge ' + (KIND[nw["구분"]] ?? "") + '">' + esc(nw["구분"]) + "</span>" : "") + "</div>" +
+          (nw["요약"] ? '<div class="small">' + esc(nw["요약"]) + "</div>" : "") + "</div>").join("") + "</div>"
+          : (x["출처"] && x["출처"]["링크"] ? '<a class="small link" href="' + esc(x["출처"]["링크"]) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc((x["출처"]["제목"] || "출처").slice(0, 50)) + "</a>" : "")) + "</div>").join("");
       else h += emp("📰", "내 종목 의견을 준비하고 있어요", "다음 아침 경제뉴스 리포트부터 종목마다 한 줄 의견이 붙어요.", "#/holdings", "보유 보기");
       if (r && (r["내 보유와 닿는 소식"] || []).length) h += "<h2>💼 오늘 특히 닿는 소식</h2><div class=\"list\">" + r["내 보유와 닿는 소식"].map(x => '<div class="item" onclick="location.hash=\'#/hold/' +
         encodeURIComponent(x["종목"]) + '\'"><span class="tk">' + esc(x["종목"]) + '</span><span class="grow small">' + esc(x["한 줄"]) + '</span><span class="badge ' + (KIND[x["구분"]] ?? "") + '">' + esc(x["구분"] || "") + "</span></div>").join("") + "</div>";
@@ -1716,6 +1732,7 @@
       case "picks": return viewPicks();
       case "pick": return viewPick(decodeURIComponent(arg || ""));
       case "holdings": return viewHoldings();
+      case "watch": return viewWatch();
       case "hold": return viewHold(decodeURIComponent(arg || ""));
       case "alerts": if (arg) S.actSeg = arg; return viewAlerts();
       case "score": return viewScore();
