@@ -39,8 +39,14 @@ B4 = """목표: 워런 버핏식 4관점 점검(사업 이해·경쟁 우위·�
 - 가격은 PER·PBR·잉여현금흐름 수익률 같은 자료 숫자로만."""
 
 REP = """목표: 초보자가 5초에 이해하는 기업 리포트.
-출력: {"7줄 요약":["7개 문장"],"신호":[{"지표":"","값":"자료 숫자","좋음/나쁨":"좋음|보통|나쁨","한 줄":""}],"10년 주인이라면":"한 단락"}
-- 신호는 4~6개. 숫자는 자료의 재무 요약에서만."""
+출력: {"7줄 요약":["7개 문장"],"신호":[{"지표":"","값":"읽기 쉬운 값","좋음/나쁨":"좋음|보통|나쁨","한 줄":""}],"10년 주인이라면":"한 단락"}
+- 신호는 4~6개. 매출·이익·마진·부채는 '재무 요약(앱)'(연간 10-K)을 먼저 쓰고, 분기 숫자는 보조로만 써.
+- 값은 사람이 5초에 읽게 적어: 돈은 억/조 달러로 반올림(예: '매출 8.9억 달러'), 비율은 % 한 자리, 배수는 '배', 증감은 '전년 대비 +12%'.
+  자릿수를 그대로 쓴 긴 숫자(예: 32,000,000)나 만 단위로 묶은 숫자(예: 6,7600)는 절대 쓰지 마.
+- 숫자는 '계산(파이썬)'·'재무 요약(앱)'·'분기 손익(야후)'에 실제로 있는 값만. 지어내지 마.
+- 매출이 음수이거나 말이 안 되는 값이면 그 지표는 값에 「확인 못 함」이라고만 적어(이상한 숫자를 그대로 쓰지 마).
+- 값 뒤에 'GAAP' 같은 출처 꼬리표나 괄호 설명은 붙이지 마. 출처는 한 줄 설명에서 자연스럽게."""
+REP_VER = 2  # 쉬운 리포트 지표값 포맷 규칙 버전. 올리면 저장된 리포트가 다음 실행에서 한 번 다시 만들어져요.
 
 PM = """목표: 사기 전에 실패부터 가정하는 사전 부검. 이 종목이 6개월 뒤 30% 떨어졌다고 가정해.
 출력: {"원인":[{"시나리오":"","가능성":"상|중|하","가장 먼저 보일 신호":"","지금 값":"자료 숫자 또는 「확인 못 함」","다음 확인일":""}],
@@ -253,7 +259,8 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     week_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
     for t in focus:
         need_b4 = (b4.get(t) or {}).get("date", "") < week_ago
-        need_rep = (rep.get(t) or {}).get("date", "") < week_ago
+        need_rep = ((rep.get(t) or {}).get("date", "") < week_ago
+                    or (rep.get(t) or {}).get("_v") != REP_VER)
         need_earn = False
         if (earn.get(t) or {}).get("date", "") < week_ago:
             ld = last_report_days(t)
@@ -274,7 +281,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         if need_rep:
             r = ai.checked("쉬운 리포트", REP, f, "small", 2500)
             if r:
-                rep[t] = dict(r, date=today)
+                rep[t] = dict(r, date=today, _v=REP_VER)
     keep = set(focus) | set(holds)
     blob["earn"] = {k: v for k, v in earn.items() if k in keep and v.get("date", "") >= week_ago}
     blob["b4"] = {k: v for k, v in b4.items() if k in keep}
