@@ -1232,8 +1232,8 @@
     const v = x["판정"] || {};
     return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2><div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
       '<span class="badge ' + tone3(v["실적"]) + '">실적 ' + esc(v["실적"] || "") + '</span> <span class="badge ' + tone3(v["가이던스"]) + '">가이던스 ' + esc(v["가이던스"] || "") + "</span></span></div>" +
-      '<table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>직전 분기</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
-        "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["직전 분기"] || "—") + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
+      '<div class="tblwrap"><table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>직전 분기</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
+        "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["직전 분기"] || "—") + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table></div>" +
       '<dl class="kv"><dt>가이던스</dt><dd>' + esc(x["가이던스"]) + "</dd><dt>마진</dt><dd>" + esc(x["마진이 변한 이유"]) + "</dd><dt>현금흐름</dt><dd>" + esc(x["현금흐름"]) + "</dd></dl>" +
       (x["한 줄"] ? '<div class="sub">' + esc(x["한 줄"]) + "</div>" : "") + checkNote(x["_검사"]) + "</div>";
   }

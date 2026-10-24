@@ -192,6 +192,10 @@ select { width: 100%; font-size: 16px; padding: 10px; border-radius: 10px; borde
 table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.tbl th, table.tbl td { padding: 6px 4px; text-align: right; border-bottom: 1px solid var(--line); }
 table.tbl th:first-child, table.tbl td:first-child { text-align: left; color: var(--sub); }
+.tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px; }
+.tblwrap table.tbl.num { min-width: 340px; }
+.tblwrap table.tbl.num th, .tblwrap table.tbl.num td { white-space: nowrap; }
+.tblwrap table.tbl.num td:first-child { white-space: normal; }
 pre.weekly { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.6; margin: 6px 0 0; }
 .good-t { color: var(--up); } .bad-t { color: var(--down); }
 .pl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
