@@ -164,7 +164,29 @@ const ACTIONS = {
     return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [],
              perf: parse_(blobs.perf), weekly: parse_(blobs.weekly), paper: paperRows_(),
              ai: aiPublic_(parse_(blobs.ai)), gap: parse_(blobs.gap), profile: profile_(), aiUsage: aiUsage_(blobs),
-             kis: kisPublic_(parse_(blobs.kis)) };
+             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_() };
+  },
+
+  /* ---- 관심종목 (사지 않았지만 지켜볼 종목) ---- */
+  watchAdd: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const t = String(r.t || '').toUpperCase().trim();
+    if (!/^[A-Z][A-Z.\-]{0,9}$/.test(t)) return { ok: false, error: '종목 코드가 올바르지 않아요 (예: AAPL).' };
+    let list = watchList_();
+    if (list.indexOf(t) < 0) {
+      if (list.length >= 50) return { ok: false, error: '관심종목은 50개까지예요.' };
+      sheet_('관심 종목', ['종목']).appendRow([t]);
+      list = watchList_();
+    }
+    return { ok: true, watchlist: list };
+  },
+  watchDel: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const t = String(r.t || '').toUpperCase().trim();
+    const sh = sheet_('관심 종목', ['종목']);
+    const v = sh.getDataRange().getDisplayValues();
+    for (let i = v.length - 1; i >= 1; i--) { if (String(v[i][0]).toUpperCase().trim() === t) sh.deleteRow(i + 1); }
+    return { ok: true, watchlist: watchList_() };
   },
 
   /* ---- 4단계: 성향 인터뷰 (F-A1) ---- */
@@ -339,6 +361,13 @@ function sheet_(name, header) {
   let sh = ss.getSheetByName(name);
   if (!sh) { sh = ss.insertSheet(name); sh.getRange(1, 1, 1, header.length).setValues([header]); }
   return sh;
+}
+function watchList_() {
+  const sh = sheet_('관심 종목', ['종목']);
+  const v = sh.getDataRange().getDisplayValues().slice(1);
+  const seen = {}, out = [];
+  v.forEach(function (x) { const t = String(x[0] || '').toUpperCase().trim(); if (t && !seen[t]) { seen[t] = 1; out.push(t); } });
+  return out;
 }
 function profile_() {
   const sh = sheet_('성향', ['항목', '답']);

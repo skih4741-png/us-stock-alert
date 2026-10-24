@@ -26,9 +26,9 @@
   const S = {
     token: store.get("token") || store.get("token", sessionStorage),
     scope: store.get("scope") || store.get("scope", sessionStorage),
-    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
+    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -114,7 +114,7 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null;
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || [];
         saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
@@ -125,7 +125,7 @@
   }
 
   function saveCache() {
-    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, at: Date.now() }));
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -483,6 +483,36 @@
     return '<a class="card" href="#/score" style="display:block;color:var(--ink)"><div class="row between"><span class="sub">모의 계좌 (가상 $1,000)</span><b class="num ' +
       (net >= 0 ? "good-t" : "bad-t") + '">' + usd(net) + '</b></div><div class="small num">번 돈 ' + usd(m.gain) + " · 잃은 돈 " + usd(m.loss) + " · 성적 보기 →</div></a>";
   }
+  /* ---------- 관심종목 (사지 않았지만 지켜볼 종목) ---------- */
+  const isWatched = t => (S.watchlist || []).indexOf(String(t).toUpperCase()) >= 0;
+  async function watchDo(action, t) {
+    try {
+      const j = await api(action, { token: S.token, t: String(t).toUpperCase() });
+      if (j && j.watchlist) { S.watchlist = j.watchlist; saveCache(); render(); }
+      else if (j && j.error) toast(j.error);
+      else if (j && j.auth) { clearAll(); go("#/login"); }
+    } catch (e) { toast("관심종목을 바꾸지 못했어요"); }
+  }
+  function bindWatch() {
+    $app.querySelectorAll("[data-wdel]").forEach(b => b.onclick = () => watchDo("watchDel", b.dataset.wdel));
+    $app.querySelectorAll("[data-wadd]").forEach(b => b.onclick = () => watchDo("watchAdd", b.dataset.wadd));
+    const f = $app.querySelector("#waddForm");
+    if (f) f.onsubmit = e => { e.preventDefault(); const i = $app.querySelector("#waddInput"); const t = (i.value || "").trim().toUpperCase(); if (t) { i.value = ""; watchDo("watchAdd", t); } };
+  }
+  function watchCard() {
+    const list = S.watchlist || [], w = (S.watch && S.watch.items) || {};
+    const rows = list.map(t => { const q = w[t] || {}, chg = q.chg;
+      return '<div class="item" style="cursor:default"><span class="tk">' + esc(t) + "</span>" +
+        '<span class="grow small num">' + (q.px != null ? "$" + fmt(q.px) : "시세 준비 중") +
+        (chg != null ? ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '">' + (chg >= 0 ? "▲" : "▼") + " " + Math.abs(chg) + "%</span>" : "") + "</span>" +
+        '<button class="iconbtn" data-wdel="' + esc(t) + '" aria-label="관심에서 빼기" style="min-width:38px;min-height:38px;font-size:15px">✕</button></div>';
+    }).join("");
+    return "<h2>관심종목" + (list.length ? " " + list.length : "") + '</h2><div class="card">' +
+      (list.length ? '<div class="list">' + rows + "</div>" : '<div class="small">지켜볼 종목을 담아보세요. 종목 화면에서 ☆를 누르거나 아래에 코드를 넣어요.</div>') +
+      '<form id="waddForm" class="row" style="margin-top:10px;gap:6px"><input id="waddInput" placeholder="예: TSLA" autocapitalize="characters" autocomplete="off" style="flex:1;min-width:0;padding:10px;border:1px solid var(--line2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><button type="submit" class="btn" style="width:auto;margin:0;padding:10px 16px">추가</button></form>' +
+      '<div class="small" style="margin-top:6px">시세는 아침·장중 자동 실행 때 갱신돼요 (실시간 아님).</div></div>';
+  }
+
   function viewHome() {
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
@@ -494,7 +524,7 @@
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (needN ? '<span class="cnt">' + needN + "</span>" : hasNew ? '<span class="dot"></span>' : "") + "</button>" +
       '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
-      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeSimCard() + homeNewsCard() +
+      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeSimCard() + watchCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -515,6 +545,7 @@
         '</span><span class="grow small">' + esc(p.band) + '</span><span class="num"><b>' + fmt(p.total, 0) + "</b>점</span></div>").join("")
         : '<div class="empty">' + (d.market.rest_day ? "매수 쉬는 날이라 후보가 없어요" : "오늘은 조건에 맞는 종목이 없어요") + "</div>") + "</div>" +
       '<a class="link" href="#/picks">전체 후보 보기 →</a><p class="foot">' + esc(DISCLAIMER) + "</p>");
+    bindWatch();
   }
 
   function pickCard(p) {
@@ -628,6 +659,7 @@
       '<div class="row between"><div class="grow"><h1 style="margin:0">' + esc(h.t) + '</h1><div class="sub">' + esc(h.name || "") + "</div></div>" +
       '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
       '<div class="big num" style="margin-top:4px">$' + fmt(h.price) + "</div>" +
+      '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       // 내 평가손익
       '<div class="card"><div class="sub">내 평가손익</div>' +
       '<div class="big num ' + (h.gain_pct >= 0 ? "good-t" : "bad-t") + '" style="font-size:26px">' + (h.gain_pct >= 0 ? "▲ " : "▼ ") + pct(h.gain_pct) + "</div>" +
@@ -655,6 +687,7 @@
       $app.querySelectorAll(".dtabs button").forEach(x => x.classList.toggle("on", x === b));
       $app.querySelectorAll(".dpane").forEach((p, j) => { p.hidden = String(j) !== i; });
     }));
+    bindWatch();
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------

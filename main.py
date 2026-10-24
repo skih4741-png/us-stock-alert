@@ -409,6 +409,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             run_ai(store, app, cfg, now)
             run_news(store, app, cfg, now)
             save_perf(store, now)
+            run_watchlist(store)
             # ---- 자동 점검 + 바뀐 것 → 실행 기록 ----
             from datetime import date as _d
             lag = (now.date() - _d.fromisoformat(bar_date)).days
@@ -460,6 +461,36 @@ def _us_market_open(now_utc) -> tuple[bool, bool]:
         return False, False
     mins = et.hour * 60 + et.minute
     return (9 * 60 + 30 <= mins <= 16 * 60), (8 * 60 + 30 <= mins < 9 * 60 + 30)
+
+
+def run_watchlist(store):
+    """관심종목(사용자가 지켜볼 종목)의 현재가·등락을 받아 앱에 저장. 실제 매매와 무관, 실패해도 리포트는 그대로."""
+    try:
+        try:
+            df = store.read("관심 종목")
+        except Exception:
+            return
+        cols = list(getattr(df, "columns", []))
+        col = "종목" if "종목" in cols else (cols[0] if cols else None)
+        if col is None:
+            return
+        tickers = [str(t).strip().upper() for t in df[col].tolist() if str(t).strip()]
+        tickers = list(dict.fromkeys(tickers))[:50]
+        at = config.now_kst().isoformat(timespec="minutes")
+        if not tickers:
+            store.put_blob("watch", appdata.dumps({"at": at, "items": {}}))
+            return
+        q = prices.last_price_intraday([t.replace(".", "-") for t in tickers])
+        items = {}
+        for t in tickers:
+            d = q.get(t.replace(".", "-"))
+            if d and d.get("price"):
+                chg = round((d["price"] / d["prev_close"] - 1) * 100, 2) if d.get("prev_close") else None
+                items[t] = {"px": round(d["price"], 2), "chg": chg}
+        store.put_blob("watch", appdata.dumps({"at": at, "items": items}))
+        log.info("관심종목 시세 %d/%d", len(items), len(tickers))
+    except Exception as e:
+        log.warning("관심종목 시세 실패: %s", e)
 
 
 def run_gap(store, holdings: list[dict], dry: bool):
@@ -558,6 +589,7 @@ def _run_watch(kind: str, dry: bool, changed: list):
     store = Store()
     cfg, _ = config.merge_settings(store.settings())
     holdings = store.holdings()
+    run_watchlist(store)   # 관심종목 시세 갱신 (장 전·장중)
     if kind == "premarket":
         try:
             g = run_gap(store, holdings, dry)
