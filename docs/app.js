@@ -26,9 +26,9 @@
   const S = {
     token: store.get("token") || store.get("token", sessionStorage),
     scope: store.get("scope") || store.get("scope", sessionStorage),
-    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], cal: null, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
+    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], cal: null, palerts: {}, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; S.cal = c.cal || null; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; S.cal = c.cal || null; S.palerts = c.palerts || {}; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -114,7 +114,7 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || []; S.cal = j.cal || null;
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || []; S.cal = j.cal || null; S.palerts = j.palerts || {};
         saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
@@ -125,7 +125,7 @@
   }
 
   function saveCache() {
-    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, cal: S.cal, at: Date.now() }));
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, cal: S.cal, palerts: S.palerts, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -493,6 +493,33 @@
       else if (j && j.auth) { clearAll(); go("#/login"); }
     } catch (e) { toast("관심종목을 바꾸지 못했어요"); }
   }
+  function priceAlertCard(t) {
+    const p = (S.palerts && S.palerts[t]) || {}, set = p.above != null || p.below != null;
+    const inp = (cls, ph, v) => '<input type="number" step="any" inputmode="decimal" class="' + cls + '" placeholder="' + ph + '" value="' + (v != null ? v : "") +
+      '" style="width:100%;padding:9px;border:1px solid var(--line2);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit">';
+    return '<div class="card"><div class="row between"><b>🔔 가격 알림</b>' + (set ? '<span class="badge info">설정됨</span>' : "") + "</div>" +
+      '<div class="small" style="margin:4px 0 8px">정한 가격에 닿으면 알림·푸시가 와요 (장중·아침 확인)</div>' +
+      '<form class="paform" data-t="' + esc(t) + '"><div class="row" style="gap:8px;align-items:flex-end">' +
+      '<label class="small" style="flex:1">위로 ▲ 목표가<br>' + inp("pa-above", "예: 200", p.above) + "</label>" +
+      '<label class="small" style="flex:1">아래로 ▼ 지정가<br>' + inp("pa-below", "예: 150", p.below) + "</label></div>" +
+      '<div class="row" style="gap:6px;margin-top:8px"><button type="submit" class="btn" style="width:auto;margin:0;padding:9px 16px">저장</button>' +
+      (set ? '<button type="button" class="btn ghost pa-clear" style="width:auto;margin:0;padding:9px 16px">해제</button>' : "") + "</div></form></div>";
+  }
+  async function savePriceAlert(t, above, below) {
+    try {
+      const j = await api("priceAlertSet", { token: S.token, t: t, above: above, below: below });
+      if (j && j.ok) { S.palerts = j.palerts || {}; saveCache(); toast(above || below ? "가격 알림을 저장했어요" : "가격 알림을 해제했어요"); render(); }
+      else if (j && j.error) toast(j.error);
+      else if (j && j.auth) { clearAll(); go("#/login"); }
+    } catch (e) { toast("저장하지 못했어요"); }
+  }
+  function bindPriceAlert() {
+    $app.querySelectorAll(".paform").forEach(f => {
+      f.onsubmit = e => { e.preventDefault(); savePriceAlert(f.dataset.t, parseFloat(f.querySelector(".pa-above").value) || 0, parseFloat(f.querySelector(".pa-below").value) || 0); };
+      const clr = f.querySelector(".pa-clear");
+      if (clr) clr.onclick = () => savePriceAlert(f.dataset.t, 0, 0);
+    });
+  }
   function detailHash(t) {
     if (((S.data && S.data.holdings) || []).some(h => h.t === t)) return "#/hold/" + encodeURIComponent(t);
     if (allPicks().some(p => p.t === t)) return "#/pick/" + encodeURIComponent(t);
@@ -538,8 +565,10 @@
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       liveChartBox(t, null) +
       '<div class="card"><b>종목 정보</b><dl class="kv"><dt>52주 최고·최저</dt><dd id="wk52">불러오는 중…</dd></dl></div>' +
+      priceAlertCard(t) +
       '<p class="foot">관심 종목은 실시간 차트·시세만 보여줘요. 매일 AI 리포트·재무 신호는 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
+    bindPriceAlert();
     liveStock(t);
     fetchQuote(t, "1y").then(q => {
       const b = (q && q.bars) || []; if (!b.length) return;
@@ -712,7 +741,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) +
+      tags(p.tags) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
@@ -741,6 +770,7 @@
       seg.innerHTML = segs[b.dataset.s];
       if (b.dataset.s === "chart") mountChartBox(p.t);
     }));
+    bindPriceAlert();
     liveStock(p.t);
   }
 
@@ -783,6 +813,7 @@
       // 상단: 종목·현재가·결론 (후보 상세와 공통 머리글)
       stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
+      priceAlertCard(h.t) +
       // 내 평가손익
       '<div class="card"><div class="sub">내 평가손익</div>' +
       '<div class="big num ' + (h.gain_pct >= 0 ? "good-t" : "bad-t") + '" style="font-size:26px">' + (h.gain_pct >= 0 ? "▲ " : "▼ ") + pct(h.gain_pct) + "</div>" +
@@ -811,6 +842,7 @@
       $app.querySelectorAll(".dpane").forEach((p, j) => { p.hidden = String(j) !== i; });
     }));
     bindWatch();
+    bindPriceAlert();
     liveStock(h.t);
   }
 

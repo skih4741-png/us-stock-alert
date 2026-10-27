@@ -411,6 +411,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             save_perf(store, now)
             run_watchlist(store)
             run_calendar(store, holdings)
+            run_price_alerts(store, holdings, cfg)
             # ---- 자동 점검 + 바뀐 것 → 실행 기록 ----
             from datetime import date as _d
             lag = (now.date() - _d.fromisoformat(bar_date)).days
@@ -495,6 +496,86 @@ def run_calendar(store, holdings: list[dict]):
         _calendar_alerts(store, cal)
     except Exception as e:
         log.warning("캘린더 저장 실패: %s", e)
+
+
+def read_price_alerts(store) -> dict:
+    """'가격 알림' 탭의 사용자 지정 목표가·지정가. {종목: {above, below}}. 없으면 빈 dict."""
+    try:
+        df = store.read("가격 알림")
+    except Exception:
+        return {}
+    cols = list(getattr(df, "columns", []))
+    if "종목" not in cols:
+        return {}
+    out = {}
+    for _, row in df.iterrows():
+        t = str(row.get("종목", "")).strip().upper()
+        if not t:
+            continue
+        def _n(k):
+            try:
+                v = float(row.get(k))
+                return v if v > 0 else None
+            except (TypeError, ValueError):
+                return None
+        out[t] = {"above": _n("목표가"), "below": _n("지정가")}
+    return out
+
+
+def run_price_alerts(store, holdings: list[dict], cfg: dict | None = None):
+    """가격 알림: ①목표가·지정가 터치 ②하루 ±N% 큰 폭 ③52주 신고·신저. 같은 날 같은 종류는 한 번만."""
+    try:
+        big = float((cfg or {}).get("가격 알림 큰 폭 %", 7))
+        targets = read_price_alerts(store)
+        uni = list(dict.fromkeys([h["ticker"] for h in holdings] + watch_tickers(store) + list(targets.keys())))
+        if not uni:
+            return
+        q = prices.last_price_intraday([t.replace(".", "-") for t in uni])
+        try:
+            chart = json.loads(store.get_blob("chart") or "{}")
+        except Exception:
+            chart = {}
+        try:
+            sent = set(json.loads(store.get_blob("price_sent") or "[]"))
+        except Exception:
+            sent = set()
+        today = config.now_kst().strftime("%Y-%m-%d")
+        at = config.now_kst().isoformat(timespec="minutes")
+        added = []
+
+        def fire(key, title, body, tone="warn"):
+            if key in sent:
+                return
+            appdata.add_alert(store, "price", title, body, at, tone)
+            try:
+                push.send(store, title, body, "#/hold/" + key.split(":")[1], "daily", tag="price")
+            except Exception:
+                pass
+            added.append(key)
+
+        for t in uni:
+            d = q.get(t.replace(".", "-"))
+            if not d or not d.get("price"):
+                continue
+            px = round(d["price"], 2)
+            chg = round((px / d["prev_close"] - 1) * 100, 2) if d.get("prev_close") else None
+            tg = targets.get(t) or {}
+            if tg.get("above") and px >= tg["above"]:
+                fire("tgtup:" + t + ":" + today, f"{t} 목표가 도달", f"목표가 ${tg['above']} 도달 · 현재 ${px}")
+            if tg.get("below") and px <= tg["below"]:
+                fire("tgtdn:" + t + ":" + today, f"{t} 지정가 이하", f"지정가 ${tg['below']} 이하 · 현재 ${px}", "bad")
+            if chg is not None and abs(chg) >= big:
+                fire("big:" + t + ":" + today, f"{t} 하루 {'+' if chg >= 0 else ''}{chg}%", f"현재 ${px} · 큰 폭 움직임", "warn" if chg >= 0 else "bad")
+            c = chart.get(t) or {}
+            hi, lo = c.get("hi52"), c.get("lo52")
+            if hi and px >= hi * 0.999:
+                fire("hi52:" + t + ":" + today, f"{t} 52주 신고가 근처", f"현재 ${px} · 52주 최고 ${hi}")
+            if lo and px <= lo * 1.001:
+                fire("lo52:" + t + ":" + today, f"{t} 52주 신저가 근처", f"현재 ${px} · 52주 최저 ${lo}", "bad")
+        if added:
+            store.put_blob("price_sent", appdata.dumps(list(sent | set(added))[-400:]))
+    except Exception as e:
+        log.warning("가격 알림 실패: %s", e)
 
 
 def _calendar_alerts(store, cal: dict):
@@ -632,6 +713,11 @@ def run_sim_intraday(store):
             except Exception as e:
                 log.warning("푸시 실패: %s", e)
             save_perf(store, config.now_kst(), notify_stops=False)
+    try:  # 장중에도 가격 알림 체크 (목표가 터치를 제때 알려요)
+        pcfg, _ = config.merge_settings(store.settings())
+        run_price_alerts(store, store.holdings(), pcfg)
+    except Exception as e:
+        log.warning("장중 가격 알림 실패: %s", e)
     return out
 
 

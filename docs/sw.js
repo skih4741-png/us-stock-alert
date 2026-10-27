@@ -1,6 +1,6 @@
 // 앱 화면 틀만 저장해요(오프라인에서도 열리게). 주식 데이터는 저장하지 않아요.
-const CACHE = "stock-app-v40";
-const SHELL = ["./", "index.html", "style.css?v=40", "app.js?v=40", "config.js?v=40", "manifest.webmanifest",
+const CACHE = "stock-app-v41";
+const SHELL = ["./", "index.html", "style.css?v=41", "app.js?v=41", "config.js?v=41", "manifest.webmanifest",
   "icons/icon-192.png", "icons/apple-touch-icon.png", "icons/favicon.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

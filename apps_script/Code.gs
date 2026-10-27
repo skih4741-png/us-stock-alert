@@ -232,7 +232,7 @@ const ACTIONS = {
     return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [],
              perf: parse_(blobs.perf), weekly: parse_(blobs.weekly), paper: paperRows_(),
              ai: aiPublic_(parse_(blobs.ai)), gap: parse_(blobs.gap), profile: profile_(), aiUsage: aiUsage_(blobs),
-             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_(), cal: parse_(blobs.cal) };
+             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_(), cal: parse_(blobs.cal), palerts: priceAlerts_() };
   },
 
   /* ---- 관심종목 (사지 않았지만 지켜볼 종목) ---- */
@@ -255,6 +255,22 @@ const ACTIONS = {
     const v = sh.getDataRange().getDisplayValues();
     for (let i = v.length - 1; i >= 1; i--) { if (String(v[i][0]).toUpperCase().trim() === t) sh.deleteRow(i + 1); }
     return { ok: true, watchlist: watchList_() };
+  },
+
+  priceAlertSet: function (r) {
+    if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
+    const t = String(r.t || '').toUpperCase().trim();
+    if (!/^[A-Z][A-Z.\-]{0,9}$/.test(t)) return { ok: false, error: '종목 코드가 올바르지 않아요 (예: AAPL).' };
+    const above = Number(r.above) > 0 ? Number(r.above) : '';
+    const below = Number(r.below) > 0 ? Number(r.below) : '';
+    const sh = sheet_('가격 알림', ['종목', '목표가', '지정가']);
+    const v = sh.getDataRange().getDisplayValues();
+    let row = -1;
+    for (let i = 1; i < v.length; i++) if (String(v[i][0]).toUpperCase().trim() === t) { row = i + 1; break; }
+    if (!above && !below) { if (row > 0) sh.deleteRow(row); }
+    else if (row > 0) sh.getRange(row, 1, 1, 3).setValues([[t, above, below]]);
+    else { if (v.length - 1 >= 100) return { ok: false, error: '가격 알림은 100개까지예요.' }; sh.appendRow([t, above, below]); }
+    return { ok: true, palerts: priceAlerts_() };
   },
 
   /* ---- 4단계: 성향 인터뷰 (F-A1) ---- */
@@ -435,6 +451,17 @@ function watchList_() {
   const v = sh.getDataRange().getDisplayValues().slice(1);
   const seen = {}, out = [];
   v.forEach(function (x) { const t = String(x[0] || '').toUpperCase().trim(); if (t && !seen[t]) { seen[t] = 1; out.push(t); } });
+  return out;
+}
+
+function priceAlerts_() {
+  const sh = sheet_('가격 알림', ['종목', '목표가', '지정가']);
+  const v = sh.getDataRange().getDisplayValues().slice(1);
+  const out = {};
+  v.forEach(function (x) {
+    const t = String(x[0] || '').toUpperCase().trim(); if (!t) return;
+    out[t] = { above: parseFloat(x[1]) || null, below: parseFloat(x[2]) || null };
+  });
   return out;
 }
 function profile_() {
