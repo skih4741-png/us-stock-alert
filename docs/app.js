@@ -26,9 +26,9 @@
   const S = {
     token: store.get("token") || store.get("token", sessionStorage),
     scope: store.get("scope") || store.get("scope", sessionStorage),
-    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
+    data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], cal: null, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; S.cal = c.cal || null; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -114,7 +114,7 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || [];
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || []; S.cal = j.cal || null;
         saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
@@ -125,7 +125,7 @@
   }
 
   function saveCache() {
-    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, at: Date.now() }));
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, cal: S.cal, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -574,6 +574,34 @@
       '<div class="card grow" style="margin:0"><div class="sub" style="margin-bottom:4px">급등 Top</div><div class="list">' + up.map(line).join("") + "</div></div>" +
       '<div class="card grow" style="margin:0"><div class="sub" style="margin-bottom:4px">급락 Top</div><div class="list">' + dn.map(line).join("") + "</div></div></div>";
   }
+  function dLabel(days) { return days <= 0 ? "D-DAY" : "D-" + days; }
+  function calRow(days, t, extra) {
+    const soon = days <= 3;
+    return '<div class="item" style="cursor:pointer" onclick="location.hash=\'' + detailHash(t) + '\'"><span class="badge ' + (soon ? "warn" : "info") +
+      '" style="min-width:48px;text-align:center">' + dLabel(days) + '</span><span class="tk" style="margin-left:8px">' + esc(t) + '</span><span class="grow small" style="text-align:right">' + extra + "</span></div>";
+  }
+  function divYield(y) { return y == null ? "" : fmt(y < 1 ? y * 100 : y, 2) + "%"; }
+  function homeCalCard() {
+    const c = S.cal; if (!c) return "";
+    const e = (c.earnings || []).slice(0, 3), d = (c.dividends || []).slice(0, 2);
+    if (!e.length && !d.length) return "";
+    return '<h2>📅 다가오는 실적·배당</h2><div class="card"><div class="list">' +
+      e.map(x => calRow(x.days, x.t, "실적 발표 · " + x.date)).join("") +
+      d.map(x => calRow(x.days, x.t, "배당락 · " + x.exdate + (x.yield != null ? " · " + divYield(x.yield) : ""))).join("") +
+      '</div><a class="link" href="#/cal">전체 캘린더 보기 →</a></div>';
+  }
+  function viewCal() {
+    if (needData("home")) return;
+    const c = S.cal || { earnings: [], dividends: [] }, e = c.earnings || [], d = c.dividends || [];
+    appShell("home", '<button class="back" onclick="history.back()">← 뒤로</button><h1>📅 실적·배당 캘린더</h1>' +
+      '<div class="small" style="margin-bottom:8px">보유·관심 종목의 다가오는 일정 · 누르면 종목 상세</div>' +
+      '<h2>실적 발표</h2><div class="card"><div class="list">' +
+      (e.length ? e.map(x => calRow(x.days, x.t, "실적 발표 · " + x.date)).join("") : '<div class="small">다가오는 실적 발표가 없어요</div>') + "</div></div>" +
+      '<h2>배당락일</h2><div class="card"><div class="list">' +
+      (d.length ? d.map(x => calRow(x.days, x.t, "배당락 · " + x.exdate + (x.amount != null ? " · 주당 $" + fmt(x.amount) : "") + (x.yield != null ? " · " + divYield(x.yield) : ""))).join("")
+        : '<div class="small">다가오는 배당락일이 없어요</div>') + "</div></div>" +
+      '<p class="foot">야후 자료 기준이라 날짜는 바뀔 수 있어요 · 배당은 배당락일 전에 사야 받아요 · ' + esc(DISCLAIMER) + "</p>");
+  }
   function viewHome() {
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
@@ -586,7 +614,7 @@
       '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (needN ? '<span class="cnt">' + needN + "</span>" : hasNew ? '<span class="dot"></span>' : "") + "</button>" +
       '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
       idxBar() +
-      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeSimCard() + watchCard() + homeNewsCard() +
+      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeCalCard() + homeSimCard() + watchCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
@@ -1887,6 +1915,7 @@
       case "pick": return viewPick(decodeURIComponent(arg || ""));
       case "holdings": return viewHoldings();
       case "watch": return viewWatch();
+      case "cal": return viewCal();
       case "stock": return viewStock(decodeURIComponent(arg || ""));
       case "hold": return viewHold(decodeURIComponent(arg || ""));
       case "alerts": if (arg) S.actSeg = arg; return viewAlerts();

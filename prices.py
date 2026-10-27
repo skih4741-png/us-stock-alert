@@ -93,6 +93,37 @@ def fundamentals(tickers: list[str], max_age_days: int = 7, pause: float = 0.3) 
     return {t: cache[t] for t in tickers if t in cache}
 
 
+def dividend_info(tickers: list[str], pause: float = 0.2) -> dict[str, dict]:
+    """다가오는 배당락일·배당금·배당수익률. 모르면 빠져요."""
+    import yfinance as yf
+
+    out = {}
+    for t in tickers:
+        try:
+            tk = yf.Ticker(t)
+            cal = tk.calendar
+            ex = None
+            if isinstance(cal, dict):
+                v = cal.get("Ex-Dividend Date")
+                ex = v[0] if isinstance(v, list) and v else v
+            elif isinstance(cal, pd.DataFrame) and "Ex-Dividend Date" in cal.index:
+                ex = cal.loc["Ex-Dividend Date"].iloc[0]
+            if ex is None:
+                continue
+            amount = dy = None
+            try:
+                info = tk.info or {}
+                amount = info.get("dividendRate") or info.get("lastDividendValue")
+                dy = info.get("dividendYield")
+            except Exception:
+                pass
+            out[t] = {"exdate": pd.Timestamp(ex).strftime("%Y-%m-%d"), "amount": amount, "yield": dy}
+        except Exception as e:
+            log.info("배당 정보 실패 %s: %s", t, e)
+        time.sleep(pause)
+    return out
+
+
 def earnings_dates(tickers: list[str]) -> dict[str, str]:
     """다가오는 실적 발표일 (YYYY-MM-DD). 모르면 빠져요."""
     import yfinance as yf

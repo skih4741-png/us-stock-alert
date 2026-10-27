@@ -410,6 +410,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             run_news(store, app, cfg, now)
             save_perf(store, now)
             run_watchlist(store)
+            run_calendar(store, holdings)
             # ---- 자동 점검 + 바뀐 것 → 실행 기록 ----
             from datetime import date as _d
             lag = (now.date() - _d.fromisoformat(bar_date)).days
@@ -461,6 +462,37 @@ def _us_market_open(now_utc) -> tuple[bool, bool]:
         return False, False
     mins = et.hour * 60 + et.minute
     return (9 * 60 + 30 <= mins <= 16 * 60), (8 * 60 + 30 <= mins < 9 * 60 + 30)
+
+
+def watch_tickers(store) -> list[str]:
+    """관심 종목 탭의 종목 코드(원래 형태, 대문자). 없으면 빈 목록."""
+    try:
+        df = store.read("관심 종목")
+    except Exception:
+        return []
+    cols = list(getattr(df, "columns", []))
+    col = "종목" if "종목" in cols else (cols[0] if cols else None)
+    if not col:
+        return []
+    return list(dict.fromkeys([str(t).strip().upper() for t in df[col].tolist() if str(t).strip()]))[:50]
+
+
+def run_calendar(store, holdings: list[dict]):
+    """보유·관심 종목의 다가오는 실적 발표일·배당락일을 모아 'cal' 블롭에 저장. 실패해도 리포트는 그대로."""
+    try:
+        import evcal
+        uni = list(dict.fromkeys([h["ticker"] for h in holdings] + watch_tickers(store)))
+        if not uni:
+            store.put_blob("cal", appdata.dumps(evcal.build({}, {})))
+            return
+        dash = [t.replace(".", "-") for t in uni]
+        d2o = {t.replace(".", "-"): t for t in uni}
+        earn = {d2o.get(k, k): v for k, v in prices.earnings_dates(dash).items()}
+        divs = {d2o.get(k, k): v for k, v in prices.dividend_info(dash).items()}
+        store.put_blob("cal", appdata.dumps(evcal.build(earn, divs)))
+        log.info("실적·배당 캘린더 저장 (실적 %d·배당 %d)", len(earn), len(divs))
+    except Exception as e:
+        log.warning("캘린더 저장 실패: %s", e)
 
 
 def run_watchlist(store):

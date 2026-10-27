@@ -213,7 +213,7 @@ const ACTIONS = {
     return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [],
              perf: parse_(blobs.perf), weekly: parse_(blobs.weekly), paper: paperRows_(),
              ai: aiPublic_(parse_(blobs.ai)), gap: parse_(blobs.gap), profile: profile_(), aiUsage: aiUsage_(blobs),
-             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_() };
+             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_(), cal: parse_(blobs.cal) };
   },
 
   /* ---- 관심종목 (사지 않았지만 지켜볼 종목) ---- */
