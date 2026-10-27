@@ -489,10 +489,54 @@ def run_calendar(store, holdings: list[dict]):
         d2o = {t.replace(".", "-"): t for t in uni}
         earn = {d2o.get(k, k): v for k, v in prices.earnings_dates(dash).items()}
         divs = {d2o.get(k, k): v for k, v in prices.dividend_info(dash).items()}
-        store.put_blob("cal", appdata.dumps(evcal.build(earn, divs)))
+        cal = evcal.build(earn, divs)
+        store.put_blob("cal", appdata.dumps(cal))
         log.info("실적·배당 캘린더 저장 (실적 %d·배당 %d)", len(earn), len(divs))
+        _calendar_alerts(store, cal)
     except Exception as e:
         log.warning("캘린더 저장 실패: %s", e)
+
+
+def _calendar_alerts(store, cal: dict):
+    """실적 D-3 이내·배당락 D-1 이내면 알림·푸시. 같은 일정은 한 번만(중복 방지)."""
+    try:
+        sent = set(json.loads(store.get_blob("cal_sent") or "[]"))
+    except Exception:
+        sent = set()
+    at = config.now_kst().isoformat(timespec="minutes")
+    added = []
+    for x in (cal.get("earnings") or []):
+        if x["days"] > 3:
+            continue
+        k = "earn:" + x["t"] + ":" + x["date"]
+        if k in sent:
+            continue
+        when = "오늘" if x["days"] == 0 else ("내일" if x["days"] == 1 else f"D-{x['days']}")
+        appdata.add_alert(store, "cal", f"{x['t']} 실적 발표 {when}", f"{x['date']} 발표 예정 · 변동성 주의", at, "warn")
+        try:
+            push.send(store, f"{x['t']} 실적 발표 {when}", f"{x['date']} 예정 · 변동성에 유의하세요", "#/cal", "daily", tag="cal")
+        except Exception:
+            pass
+        added.append(k)
+    for x in (cal.get("dividends") or []):
+        if x["days"] > 1:
+            continue
+        k = "div:" + x["t"] + ":" + x["exdate"]
+        if k in sent:
+            continue
+        amt = f" · 주당 ${round(x['amount'], 2)}" if x.get("amount") else ""
+        if x["days"] == 1:
+            title, body = f"{x['t']} 배당락 내일", f"배당 받으려면 오늘까지 매수{amt}"
+        else:
+            title, body = f"{x['t']} 배당락 오늘", f"오늘부터는 사도 이번 배당은 못 받아요{amt}"
+        appdata.add_alert(store, "cal", title, f"{x['exdate']} 배당락{amt}", at, "warn")
+        try:
+            push.send(store, title, body, "#/cal", "daily", tag="cal")
+        except Exception:
+            pass
+        added.append(k)
+    if added:
+        store.put_blob("cal_sent", appdata.dumps(list(sent | set(added))[-300:]))
 
 
 def run_watchlist(store):
