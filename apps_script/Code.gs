@@ -649,6 +649,63 @@ function yfetch_(url) {
   } catch (e) { return null; }
 }
 function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 100; }
+/* ---------------- 뉴스레터 (매일 아침 이메일) ---------------- */
+function nlDlab_(n) { return n <= 0 ? 'D-DAY' : 'D-' + n; }
+
+function newsletter_() {
+  const blobs = readBlobs_();
+  const daily = parse_(blobs.daily) || {};
+  const cal = parse_(blobs.cal) || {};
+  const alerts = parse_(blobs.alerts) || [];
+  const L = [];
+  L.push('■ ' + (daily.date_label || '오늘') + ' 미국주식 리포트');
+  if (daily.market) L.push('시장: ' + (daily.market.label || '') + (daily.market.rest_day ? ' · 오늘은 매수 쉬는 날' : (daily.market.threshold != null ? ' · 매수 기준 ' + daily.market.threshold + '점' : '')));
+  if (daily.summary) L.push('오늘 볼 것: 매도 ' + (daily.summary.sell || 0) + ' · 신규 매수 ' + (daily.summary.new || 0) + ' · 매수 후보 ' + (daily.summary.buy || 0));
+  L.push('');
+  const byKind = function (k) { for (var i = 0; i < alerts.length; i++) if (alerts[i].kind === k) return alerts[i]; return null; };
+  const sim = byKind('sim');
+  L.push('【모의투자】');
+  L.push(sim ? (sim.title + ' — ' + sim.body) : '오늘 새 체결 소식은 없어요.');
+  L.push('');
+  L.push('【보유 종목 한 줄 결론】');
+  const hs = daily.holdings || [];
+  if (hs.length) hs.slice(0, 12).forEach(function (h) { L.push('· ' + h.t + ': ' + (h.conclusion || '') + (h.gain_pct != null ? ' (' + (h.gain_pct >= 0 ? '+' : '') + h.gain_pct + '%)' : '')); });
+  else L.push('보유 종목이 아직 없어요.');
+  L.push('');
+  L.push('【다가오는 실적·배당】');
+  const e = (cal.earnings || []).slice(0, 6), dv = (cal.dividends || []).slice(0, 5);
+  if (!e.length && !dv.length) L.push('다가오는 일정이 없어요.');
+  e.forEach(function (x) { L.push('· [실적] ' + x.t + ' ' + nlDlab_(x.days) + ' (' + x.date + ')'); });
+  dv.forEach(function (x) { L.push('· [배당락] ' + x.t + ' ' + nlDlab_(x.days) + ' (' + x.exdate + ')'); });
+  L.push('');
+  const news = byKind('news');
+  L.push('【뉴스·시장 요약】');
+  L.push(news ? news.body : '오늘 뉴스 요약은 없어요.');
+  L.push('');
+  L.push('— 자세한 내용은 앱에서 확인하세요. 이 메일은 자동 발송이에요.');
+  return { subject: '[' + APP_NAME + '] ' + (daily.date || '') + ' 아침 리포트', body: L.join('\n') };
+}
+
+function newsletterTick() {
+  try {
+    const daily = parse_(readBlobs_().daily) || {};
+    if (!daily.date || !daily.run_at) return;
+    const today = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd');
+    if (String(daily.run_at).slice(0, 10) !== today) return;   // 오늘 아침 실행이 끝난 뒤에만
+    if (PROPS.getProperty('NL_SENT') === today) return;         // 하루 한 번만
+    const nl = newsletter_();
+    MailApp.sendEmail({ to: OWNER_EMAIL, subject: nl.subject, body: nl.body });
+    PROPS.setProperty('NL_SENT', today);
+  } catch (e) {}
+}
+
+// 한 번만 실행 — 뉴스레터용 매시간 트리거를 만들어요 (중복 제거 후 생성).
+function setupNewsletterTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'newsletterTick') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('newsletterTick').timeBased().everyHours(1).create();
+  return 'ok';
+}
+
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
 /** 편집기에서 한 번 실행하면 메일·시트 권한을 승인하는 창이 떠요. */
