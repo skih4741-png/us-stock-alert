@@ -75,6 +75,25 @@ const ACTIONS = {
     return out;
   },
 
+  search: function (r) {
+    var q = String(r && r.q || '').trim();
+    if (!q) return { ok: true, results: [] };
+    var cache = CacheService.getScriptCache(), key = 'srch_' + q.toLowerCase().slice(0, 40);
+    var hit = cache.get(key); if (hit) return JSON.parse(hit);
+    var d = yfetch_('https://query1.finance.yahoo.com/v1/finance/search?q=' + encodeURIComponent(q) + '&quotesCount=15&newsCount=0&enableFuzzyQuery=false');
+    var out = [];
+    if (d && d.quotes) {
+      for (var i = 0; i < d.quotes.length; i++) {
+        var x = d.quotes[i], ty = x.quoteType || '';
+        if (!x.symbol || (ty !== 'EQUITY' && ty !== 'ETF')) continue;
+        out.push({ t: x.symbol, name: x.shortname || x.longname || '', exch: x.exchDisp || x.exchange || '', type: ty === 'ETF' ? 'ETF' : '' });
+      }
+    }
+    var res = { ok: true, results: out.slice(0, 10) };
+    try { cache.put(key, JSON.stringify(res), 300); } catch (e) {}
+    return res;
+  },
+
   indices: function () {
     var cache = CacheService.getScriptCache(), hit = cache.get('idx');
     if (hit) return JSON.parse(hit);
@@ -704,6 +723,13 @@ function setupNewsletterTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'newsletterTick') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('newsletterTick').timeBased().everyHours(1).create();
   return 'ok';
+}
+
+// 수동 테스트용 — 가드 없이 지금 데이터로 뉴스레터 한 통 보내요.
+function testNewsletter() {
+  var nl = newsletter_();
+  MailApp.sendEmail({ to: OWNER_EMAIL, subject: nl.subject + ' (테스트)', body: '※ 테스트 발송입니다. 실제 발송은 매일 아침 자동으로 가요.\n\n' + nl.body });
+  return 'sent';
 }
 
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }

@@ -602,6 +602,27 @@
         : '<div class="small">다가오는 배당락일이 없어요</div>') + "</div></div>" +
       '<p class="foot">야후 자료 기준이라 날짜는 바뀔 수 있어요 · 배당은 배당락일 전에 사야 받아요 · ' + esc(DISCLAIMER) + "</p>");
   }
+  function viewSearch() {
+    if (!S.token) { go("#/login"); return; }
+    appShell("home", '<button class="back" onclick="history.back()">← 뒤로</button><h1>🔍 종목 검색</h1>' +
+      '<form id="srchForm" class="row" style="gap:6px;margin:8px 0"><input id="srchInput" placeholder="종목명 또는 코드 (예: Apple, NVDA, SCHD)" autocapitalize="characters" autocomplete="off" style="flex:1;min-width:0;padding:11px;border:1px solid var(--line2);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><button type="submit" class="btn" style="width:auto;margin:0;padding:11px 16px">검색</button></form>' +
+      '<div id="srchResults" class="list"></div>' +
+      '<p class="foot">미국 주식·ETF를 찾아 상세(실시간 차트·시세)로 들어가요 · 전체 종목 대상 · ' + esc(DISCLAIMER) + "</p>");
+    const el = () => document.getElementById("srchResults");
+    async function doSearch(q) {
+      el().innerHTML = '<div class="small" style="padding:12px">검색 중…</div>';
+      try {
+        const j = await api("search", { q: q });
+        const rs = (j && j.results) || [];
+        el().innerHTML = rs.length ? rs.map(x => '<div class="item" style="cursor:pointer" onclick="location.hash=\'' + detailHash(x.t) + '\'"><span class="tk">' + esc(x.t) +
+          '</span><span class="grow small" style="margin-left:8px">' + esc(x.name) + "</span>" + (x.type ? '<span class="badge info">' + esc(x.type) + "</span>" : "") +
+          '<span class="small" style="margin-left:6px">' + esc(x.exch) + "</span></div>").join("") : '<div class="empty">검색 결과가 없어요</div>';
+      } catch (e) { el().innerHTML = '<div class="empty">검색을 못 했어요. 잠시 후 다시 시도해 주세요.</div>'; }
+    }
+    const f = $app.querySelector("#srchForm");
+    f.onsubmit = e => { e.preventDefault(); const q = ($app.querySelector("#srchInput").value || "").trim(); if (q) doSearch(q); };
+    const i = $app.querySelector("#srchInput"); if (i) i.focus();
+  }
   function viewHome() {
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
@@ -621,7 +642,7 @@
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
-      '<div class="quick"><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
+      '<div class="quick"><a class="chip" href="#/search">🔍 종목 검색</a><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
         (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
       freshBanner() + assetCard() + briefCard() + homePaperCard() + rankCard() +
@@ -1916,6 +1937,7 @@
       case "holdings": return viewHoldings();
       case "watch": return viewWatch();
       case "cal": return viewCal();
+      case "search": return viewSearch();
       case "stock": return viewStock(decodeURIComponent(arg || ""));
       case "hold": return viewHold(decodeURIComponent(arg || ""));
       case "alerts": if (arg) S.actSeg = arg; return viewAlerts();
