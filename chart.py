@@ -91,10 +91,22 @@ def analyze(df: pd.DataFrame) -> dict | None:
           f"저항 ${res[0]:.2f}를 넘으면 52주 최고 ${hi52:.2f} 시험" if res else "52주 최고가 근처라 위쪽 저항이 뚜렷하지 않아요")
     down = (f"지지 ${sup[0]:.2f}가 깨지면 다음 지지 ${sup[1]:.2f}" if len(sup) > 1 else
             f"지지 ${sup[0]:.2f}가 깨지면 52주 최저 ${lo52:.2f} 쪽" if sup else "52주 최저가 근처라 아래 지지가 뚜렷하지 않아요")
-    return {"at": str(df.index[-1])[:10], "price": round(price, 2), "ma": ma, "rsi": rsi,
+    # 그려진 차트용 종가 시계열 + 전일 대비 (크기 줄이려 반올림·다운샘플)
+    closes = [round(float(x), 2) for x in c.tolist()]
+    prev = round(float(c.iloc[-2]), 2) if len(c) >= 2 else None
+    chg = round((price / prev - 1) * 100, 2) if prev else None
+
+    def _ds(seq: list, step: int) -> list:
+        s = seq[::step]
+        if s and seq and s[-1] != seq[-1]:
+            s = s + [seq[-1]]
+        return s
+    series = {"1M": closes[-22:], "3M": closes[-66:], "1Y": _ds(closes, 5)}
+
+    return {"at": str(df.index[-1])[:10], "price": round(price, 2), "prev": prev, "chg": chg, "ma": ma, "rsi": rsi,
             "macd": {"macd": round(float(macd.iloc[-1]), 3), "signal": round(float(sig.iloc[-1]), 3), "hist": round(float(hist.iloc[-1]), 3), "cross": cross},
             "vol_ratio": vol_ratio, "hi52": hi52, "lo52": lo52, "support": sup, "resist": res, "trend": trend,
-            "lines": lines, "up": up, "down": down}
+            "series": series, "lines": lines, "up": up, "down": down}
 
 
 def build(tickers: list[str]) -> dict:
@@ -103,6 +115,11 @@ def build(tickers: list[str]) -> dict:
     if not tickers:
         return out
     hist = prices.download_history([t.replace(".", "-") for t in tickers], period="1y")
+    fund = {}
+    try:  # 재무 캐시(시총·PER·배당 등) — 이미 받아 둔 저장본이라 추가 호출이 거의 없어요
+        fund = prices.fundamentals([t.replace(".", "-") for t in tickers])
+    except Exception as e:
+        log.info("차트 재무 캐시 실패: %s", e)
     for t in tickers:
         df = hist.get(t.replace(".", "-"))
         if df is None:
@@ -110,6 +127,10 @@ def build(tickers: list[str]) -> dict:
         try:
             r = analyze(df)
             if r:
+                fd = fund.get(t.replace(".", "-")) or {}
+                r["info"] = {"name": fd.get("long_name") or fd.get("short_name") or "",
+                             "sector": fd.get("sector"), "per": fd.get("per"), "pbr": fd.get("pbr"),
+                             "mktcap": fd.get("market_cap"), "div": fd.get("div_yield")}
                 out[t] = r
         except Exception as e:
             log.info("차트 분석 실패 %s: %s", t, e)

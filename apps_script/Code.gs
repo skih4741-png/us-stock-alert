@@ -46,6 +46,55 @@ const ACTIONS = {
     return { ok: true, hasAccount: !!acct_().hash };
   },
 
+  // 시세 프록시 (로그인 없이 공개 시장 데이터만). 야후를 서버에서 받아 앱에 넘겨요(CORS 없음).
+  quote: function (r) {
+    var t = String(r && r.t || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (!t) return { ok: false, error: '종목이 없어요' };
+    var ok = { '5d': '15m', '1mo': '1d', '3mo': '1d', '6mo': '1d', '1y': '1d', '2y': '1wk' };
+    var rng = ok[r.range] ? r.range : '1y';
+    var iv = ok[rng];
+    var cache = CacheService.getScriptCache(), key = 'q_' + t + '_' + rng;
+    var hit = cache.get(key); if (hit) return JSON.parse(hit);
+    var sym = t.replace(/\./g, '-');
+    var d = yfetch_('https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(sym) + '?range=' + rng + '&interval=' + iv + '&includePrePost=false');
+    var res = d && d.chart && d.chart.result && d.chart.result[0];
+    if (!res) return { ok: false, error: '시세를 못 받았어요' };
+    var meta = res.meta || {}, ts = res.timestamp || [];
+    var q = (res.indicators && res.indicators.quote && res.indicators.quote[0]) || {};
+    var o = q.open || [], h = q.high || [], l = q.low || [], c = q.close || [], v = q.volume || [];
+    var bars = [];
+    for (var i = 0; i < ts.length; i++) {
+      if (c[i] == null) continue;
+      bars.push([ts[i], r2_(o[i]), r2_(h[i]), r2_(l[i]), r2_(c[i]), Math.round(v[i] || 0)]);
+    }
+    var price = meta.regularMarketPrice != null ? meta.regularMarketPrice : (c.length ? c[c.length - 1] : null);
+    var prev = meta.chartPreviousClose != null ? meta.chartPreviousClose : meta.previousClose;
+    var chg = (price != null && prev) ? Math.round((price / prev - 1) * 10000) / 100 : null;
+    var out = { ok: true, t: t, price: r2_(price), prev: r2_(prev), chg: chg, range: rng, bars: bars };
+    try { cache.put(key, JSON.stringify(out), 60); } catch (e) {}
+    return out;
+  },
+
+  indices: function () {
+    var cache = CacheService.getScriptCache(), hit = cache.get('idx');
+    if (hit) return JSON.parse(hit);
+    var want = [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥'], ['^DJI', '다우'], ['^KS11', '코스피'], ['^KQ11', '코스닥'], ['KRW=X', '원/달러']];
+    var out = [];
+    for (var i = 0; i < want.length; i++) {
+      try {
+        var d = yfetch_('https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(want[i][0]) + '?range=1d&interval=1d');
+        var m = d && d.chart && d.chart.result && d.chart.result[0] && d.chart.result[0].meta;
+        if (m && m.regularMarketPrice != null) {
+          var pc = m.chartPreviousClose != null ? m.chartPreviousClose : m.previousClose;
+          out.push({ name: want[i][1], price: r2_(m.regularMarketPrice), chg: pc ? Math.round((m.regularMarketPrice / pc - 1) * 10000) / 100 : null });
+        }
+      } catch (e) {}
+    }
+    var r = { ok: true, at: new Date().toISOString(), items: out };
+    try { cache.put('idx', JSON.stringify(r), 120); } catch (e) {}
+    return r;
+  },
+
   sendSetupCode: function () {
     const a = acct_();
     if (a.hash) return { ok: false, error: '이미 계정이 있어요. 로그인해 주세요.' };
@@ -590,6 +639,16 @@ function mail_(subject, body) {
 }
 
 function parse_(s) { try { return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+
+// 야후 시세 받아오기 (서버에서 받아 앱에 넘김 → 브라우저 CORS 없음)
+function yfetch_(url) {
+  try {
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (resp.getResponseCode() !== 200) return null;
+    return JSON.parse(resp.getContentText());
+  } catch (e) { return null; }
+}
+function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 100; }
 function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
 /** 편집기에서 한 번 실행하면 메일·시트 권한을 승인하는 창이 떠요. */

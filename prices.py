@@ -62,6 +62,7 @@ FIELDS = {
     "revenueGrowth": "rev_growth", "earningsGrowth": "earn_growth", "returnOnEquity": "roe",
     "debtToEquity": "debt_to_equity", "sector": "sector", "industry": "industry",
     "longName": "long_name", "shortName": "short_name", "quoteType": "quote_type",
+    "dividendYield": "div_yield",
 }
 
 

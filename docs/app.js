@@ -493,16 +493,21 @@
       else if (j && j.auth) { clearAll(); go("#/login"); }
     } catch (e) { toast("관심종목을 바꾸지 못했어요"); }
   }
+  function detailHash(t) {
+    if (((S.data && S.data.holdings) || []).some(h => h.t === t)) return "#/hold/" + encodeURIComponent(t);
+    if (allPicks().some(p => p.t === t)) return "#/pick/" + encodeURIComponent(t);
+    return "#/stock/" + encodeURIComponent(t);
+  }
   function bindWatch() {
-    $app.querySelectorAll("[data-wdel]").forEach(b => b.onclick = () => watchDo("watchDel", b.dataset.wdel));
-    $app.querySelectorAll("[data-wadd]").forEach(b => b.onclick = () => watchDo("watchAdd", b.dataset.wadd));
+    $app.querySelectorAll("[data-wdel]").forEach(b => b.onclick = e => { e.stopPropagation(); watchDo("watchDel", b.dataset.wdel); });
+    $app.querySelectorAll("[data-wadd]").forEach(b => b.onclick = e => { e.stopPropagation(); watchDo("watchAdd", b.dataset.wadd); });
     const f = $app.querySelector("#waddForm");
     if (f) f.onsubmit = e => { e.preventDefault(); const i = $app.querySelector("#waddInput"); const t = (i.value || "").trim().toUpperCase(); if (t) { i.value = ""; watchDo("watchAdd", t); } };
   }
   function watchBody() {
     const list = S.watchlist || [], w = (S.watch && S.watch.items) || {};
     const rows = list.map(t => { const q = w[t] || {}, chg = q.chg;
-      return '<div class="item" style="cursor:default"><span class="tk">' + esc(t) + "</span>" +
+      return '<div class="item" style="cursor:pointer" onclick="location.hash=\'' + detailHash(t) + '\'"><span class="tk">' + esc(t) + "</span>" +
         '<span class="grow small num">' + (q.px != null ? "$" + fmt(q.px) : "시세 준비 중") +
         (chg != null ? ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '">' + (chg >= 0 ? "▲" : "▼") + " " + Math.abs(chg) + "%</span>" : "") + "</span>" +
         '<button class="iconbtn" data-wdel="' + esc(t) + '" aria-label="관심에서 빼기" style="min-width:38px;min-height:38px;font-size:15px">✕</button></div>';
@@ -521,10 +526,54 @@
     const at = S.watch && S.watch.at;
     appShell("watch", '<div class="head"><div><h1>관심종목</h1><div class="small">' + (at ? "시세 " + esc(whenText(at)) + " 기준" : "지켜볼 종목을 모아봐요") + "</div></div></div>" +
       statusLine() + watchBody() +
-      '<p class="foot">종목 화면의 ☆로도 담을 수 있어요 · 시세는 자동 실행 때 갱신(실시간 아님) · ' + esc(DISCLAIMER) + "</p>");
+      '<p class="foot">종목을 누르면 상세(실시간 차트·시세)를 봐요 · ☆로도 담을 수 있어요 · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
   }
+  // 관심 종목(보유·후보 아님) 가벼운 상세 — 실시간 캔들·시세·52주
+  function viewStock(t) {
+    if (!S.token) return;
+    const w = (S.watch && S.watch.items && S.watch.items[t]) || {}, watched = isWatched(t);
+    appShell("watch", '<button class="back" onclick="history.back()">← 뒤로</button>' +
+      stockHeader(t, "", w.px, '<span class="badge info">관심</span>') +
+      '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
+      liveChartBox(t, null) +
+      '<div class="card"><b>종목 정보</b><dl class="kv"><dt>52주 최고·최저</dt><dd id="wk52">불러오는 중…</dd></dl></div>' +
+      '<p class="foot">관심 종목은 실시간 차트·시세만 보여줘요. 매일 AI 리포트·재무 신호는 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
+    bindWatch();
+    liveStock(t);
+    fetchQuote(t, "1y").then(q => {
+      const b = (q && q.bars) || []; if (!b.length) return;
+      const lo = Math.min.apply(null, b.map(x => x[3])), hi = Math.max.apply(null, b.map(x => x[2]));
+      const el = document.getElementById("wk52"); if (el) el.textContent = "$" + fmt(hi) + " · $" + fmt(lo);
+    }).catch(() => {});
+  }
 
+  function idxBar() { return '<div id="idxbar" class="idxbar"><div class="idxchip sub" style="min-width:auto;border:0;padding:8px 2px">지수 불러오는 중…</div></div>'; }
+  async function mountIndices() {
+    const el = document.getElementById("idxbar"); if (!el) return;
+    try {
+      const j = await api("indices");
+      if (!j || !j.ok || !(j.items || []).length) { el.remove(); return; }
+      el.innerHTML = j.items.map(x => '<div class="idxchip"><span class="inm">' + esc(x.name) + '</span><span class="ipx num">' + fmt(x.price) + "</span>" +
+        (x.chg == null ? "" : '<span class="num ' + (x.chg >= 0 ? "good-t" : "bad-t") + '">' + (x.chg >= 0 ? "▲" : "▼") + fmt(Math.abs(x.chg), 2) + "%</span>") + "</div>").join("");
+    } catch (e) { el.remove(); }
+  }
+  function rankCard() {
+    const ch = (S.ai && S.ai.chart) || {}, uni = {};
+    (S.data.holdings || []).forEach(h => uni[h.t] = 1);
+    (S.watchlist || []).forEach(t => uni[t] = 1);
+    allPicks().forEach(p => uni[p.t] = 1);
+    const rows = Object.keys(uni).map(t => ({ t: t, chg: (ch[t] || {}).chg })).filter(x => x.chg != null);
+    if (rows.length < 3) return "";
+    const held = t => (S.data.holdings || []).some(h => h.t === t);
+    const line = x => '<div class="item" onclick="location.hash=\'' + (held(x.t) ? "#/hold/" : "#/pick/") + encodeURIComponent(x.t) + '\'"><span class="tk">' + esc(x.t) +
+      '</span><span class="grow"></span><span class="num ' + (x.chg >= 0 ? "good-t" : "bad-t") + '">' + (x.chg >= 0 ? "▲ " : "▼ ") + fmt(Math.abs(x.chg), 2) + "%</span></div>";
+    const up = rows.slice().sort((a, b) => b.chg - a.chg).slice(0, 5);
+    const dn = rows.slice().sort((a, b) => a.chg - b.chg).slice(0, 5);
+    return '<h2>내 종목 급등·급락 (종가 기준)</h2><div class="row" style="gap:10px;align-items:flex-start">' +
+      '<div class="card grow" style="margin:0"><div class="sub" style="margin-bottom:4px">급등 Top</div><div class="list">' + up.map(line).join("") + "</div></div>" +
+      '<div class="card grow" style="margin:0"><div class="sub" style="margin-bottom:4px">급락 Top</div><div class="list">' + dn.map(line).join("") + "</div></div></div>";
+  }
   function viewHome() {
     if (needData("home")) return;
     const d = S.data, s = d.summary || {};
@@ -536,6 +585,7 @@
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (needN ? '<span class="cnt">' + needN + "</span>" : hasNew ? '<span class="dot"></span>' : "") + "</button>" +
       '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
+      idxBar() +
       statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeSimCard() + watchCard() + homeNewsCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
@@ -546,7 +596,7 @@
       '<div class="quick"><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
         (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
-      freshBanner() + assetCard() + briefCard() + homePaperCard() +
+      freshBanner() + assetCard() + briefCard() + homePaperCard() + rankCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -558,6 +608,7 @@
         : '<div class="empty">' + (d.market.rest_day ? "매수 쉬는 날이라 후보가 없어요" : "오늘은 조건에 맞는 종목이 없어요") + "</div>") + "</div>" +
       '<a class="link" href="#/picks">전체 후보 보기 →</a><p class="foot">' + esc(DISCLAIMER) + "</p>");
     bindWatch();
+    mountIndices();
   }
 
   function pickCard(p) {
@@ -610,10 +661,8 @@
     const pl = p.plan || {};
     const cons = (p.tags || []).filter(x => /실적|보류|출렁임|위험|참고/.test(x)).concat(p.caution ? [p.caution] : []).concat(p.warn ? [p.warn] : []);
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
-      '<div class="row between"><h1>' + esc(p.t) + '</h1><span class="sub num">총점 <b>' + fmt(p.total, 0) + "</b></span></div>" +
-      '<div class="sub">' + esc(p.name) + "</div>" +
-      '<div class="big num" style="margin-top:6px">$' + fmt(p.price) + "</div>" +
-      '<div class="small">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
+      stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
+      '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
@@ -639,8 +688,11 @@
     const seg = document.getElementById("seg");
     seg.innerHTML = segs.fin;
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => {
-      $app.querySelectorAll(".segs button").forEach(x => x.classList.toggle("on", x === b)); seg.innerHTML = segs[b.dataset.s];
+      $app.querySelectorAll(".segs button").forEach(x => x.classList.toggle("on", x === b));
+      seg.innerHTML = segs[b.dataset.s];
+      if (b.dataset.s === "chart") mountChartBox(p.t);
     }));
+    liveStock(p.t);
   }
 
   function viewHoldings() {
@@ -657,6 +709,18 @@
       '<p class="foot">보유 종목은 구글 시트에서 읽어요 · ' + esc(DISCLAIMER) + "</p>");
   }
 
+  function dayChg(t) {
+    const c = S.ai && S.ai.chart && S.ai.chart[t];
+    if (!c || c.chg == null) return "";
+    return ' <span class="' + (c.chg >= 0 ? "good-t" : "bad-t") + '" style="font-size:15px;font-weight:600">' + (c.chg >= 0 ? "▲" : "▼") + " " + fmt(Math.abs(c.chg), 2) +
+      '%</span><span class="sub" style="font-size:12px;font-weight:400"> 전일대비</span>';
+  }
+  // 종목 상세(보유·후보) 공통 머리글 — 종목·이름·오른쪽 배지 + 종가·전일대비
+  function stockHeader(t, name, price, rightHtml) {
+    return '<div class="row between"><div class="grow"><h1 style="margin:0">' + esc(t) + '</h1><div class="sub">' + esc(name || "") + "</div></div>" +
+      (rightHtml || "") + "</div>" +
+      '<div class="big num" data-livehead="' + esc(t) + '" style="margin-top:4px">$' + fmt(price) + dayChg(t) + "</div>";
+  }
   function viewHold(t) {
     if (needData("holdings")) return;
     const h = findHold(t);
@@ -667,10 +731,8 @@
     const dtabs = '<div class="segs dtabs">' + panes.map((p, i) => '<button data-dt="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>").join("") + "</div>" +
       '<div class="dpanes">' + panes.map((p, i) => '<div class="dpane"' + (i ? " hidden" : "") + ">" + p[1] + "</div>").join("") + "</div>";
     appShell("holdings", '<button class="back" onclick="history.back()">← 뒤로</button>' +
-      // 상단: 종목·현재가·결론
-      '<div class="row between"><div class="grow"><h1 style="margin:0">' + esc(h.t) + '</h1><div class="sub">' + esc(h.name || "") + "</div></div>" +
-      '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>" +
-      '<div class="big num" style="margin-top:4px">$' + fmt(h.price) + "</div>" +
+      // 상단: 종목·현재가·결론 (후보 상세와 공통 머리글)
+      stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       // 내 평가손익
       '<div class="card"><div class="sub">내 평가손익</div>' +
@@ -700,6 +762,7 @@
       $app.querySelectorAll(".dpane").forEach((p, j) => { p.hidden = String(j) !== i; });
     }));
     bindWatch();
+    liveStock(h.t);
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------
@@ -825,25 +888,25 @@
       (r["예시"] ? '<div class="ex">💡 ' + esc(r["예시"]) + "</div>" : "") + checkNote(r["_검사"]) + "</div>";
     if (f.vibe) h += '<details class="sig"><summary><b>🤖 Vibe-Trading 보고서</b></summary><pre class="weekly">' + esc(f.vibe) + "</pre></details>";
     const T = Object.keys(fc);
-    h += '<h2>① 예측 · Kronos (다음 5거래일)</h2>' + (T.length ? '<div class="card"><table class="tbl num"><tr><th>종목</th><th>지금</th><th>5일 뒤</th><th>예상</th></tr>' +
+    h += '<h2>① 예측 · Kronos (다음 5거래일)</h2>' + (T.length ? '<div class="card"><div class="tblwrap"><table class="tbl num"><tr><th>종목</th><th>지금</th><th>5일 뒤</th><th>예상</th></tr>' +
       T.sort((a, b) => fc[b].exp_ret - fc[a].exp_ret).map(t => "<tr><td><b>" + esc(t) + "</b></td><td>$" + fmt(fc[t].last) + "</td><td>$" + fmt((fc[t].pred || []).slice(-1)[0]) +
-        '</td><td class="' + (fc[t].exp_ret >= 0 ? "good-t" : "bad-t") + '">' + pct(fc[t].exp_ret * 100) + "</td></tr>").join("") + "</table>" +
+        '</td><td class="' + (fc[t].exp_ret >= 0 ? "good-t" : "bad-t") + '">' + pct(fc[t].exp_ret * 100) + "</td></tr>").join("") + "</table></div>" +
       '<div class="small">' + esc(f.forecast.model || "") + " · 표본 " + esc(f.forecast.samples || "") + "번 평균 · " + esc(f.forecast.date || "") + " 종가 기준</div></div>"
       : '<div class="msg note">이번 주 예측이 없어요 — 비중은 과거 1년 평균으로 계산했어요.</div>');
     h += '<h2>🎯 지난 예측 채점</h2><div class="card">' + (sc.n ? '<div class="row between"><b>방향 적중 ' + sc.hit + '%</b><span class="small">' + sc.n + "건 · 평균 오차 " + fmt(sc.mae) + "%p</span></div>" +
       '<div class="small">50% 근처면 동전 던지기와 비슷해요. 표본이 쌓일수록 믿을 만해져요.</div>'
       : '<div class="small">예측한 5거래일이 지나면 실제 종가와 비교해 여기에 채점해요.</div>') + "</div>";
     const A = (w.assets || []);
-    if (A.length) h += '<h2>② 비중 · skfolio</h2><div class="card"><table class="tbl num"><tr><th>종목</th><th>MeanRisk</th><th>HRP</th><th>균등</th></tr>' +
+    if (A.length) h += '<h2>② 비중 · skfolio</h2><div class="card"><div class="tblwrap"><table class="tbl num"><tr><th>종목</th><th>MeanRisk</th><th>HRP</th><th>균등</th></tr>' +
       A.map(t => "<tr><td><b>" + esc(t) + "</b></td>" + ["meanrisk", "hrp", "equal"].map(k => "<td>" + (w[k] && w[k][t] ? Math.round(w[k][t] * 100) + "%" : "—") + "</td>").join("") + "</tr>").join("") +
-      '</table><div class="small">MeanRisk 기준: ' + esc(w.prior || "") + " · 한 종목 최대 " + Math.round(Math.min(100, Math.max(25, 100 / A.length + 5))) + "%</div></div>";
+      '</table></div><div class="small">MeanRisk 기준: ' + esc(w.prior || "") + " · 한 종목 최대 " + Math.round(Math.min(100, Math.max(25, 100 / A.length + 5))) + "%</div></div>";
     const K = ["meanrisk", "hrp", "equal", "spy"].filter(k => bt[k] && bt[k].ret != null);
     if (K.length) h += '<h2>③ 실행 · NautilusTrader 백테스트</h2><div class="card">' +
       sparkSvg([{ n: "MeanRisk", c: (bt.meanrisk || {}).curve, col: "var(--accent)", w: 2.2 }, { n: "HRP", c: (bt.hrp || {}).curve, col: "var(--good)" },
         { n: "균등", c: (bt.equal || {}).curve, col: "var(--warn)" }, { n: "SPY", c: (bt.spy || {}).curve, col: "var(--sub)", dash: 1 }].filter(x => (x.c || []).length)) +
-      '<table class="tbl num"><tr><th>방법</th><th>수익</th><th>샤프</th><th>최대 낙폭</th><th>거래</th></tr>' +
+      '<div class="tblwrap"><table class="tbl num"><tr><th>방법</th><th>수익</th><th>샤프</th><th>최대 낙폭</th><th>거래</th></tr>' +
       K.map(k => "<tr><td>" + esc(FUND_NAME[k]) + '</td><td class="' + (bt[k].ret >= 0 ? "good-t" : "bad-t") + '">' + pct(bt[k].ret) + "</td><td>" + (bt[k].sharpe == null ? "—" : fmt(bt[k].sharpe)) +
-        "</td><td>" + pct(bt[k].mdd) + "</td><td>" + (bt[k].trades == null ? "—" : bt[k].trades) + "</td></tr>").join("") + "</table>" +
+        "</td><td>" + pct(bt[k].mdd) + "</td><td>" + (bt[k].trades == null ? "—" : bt[k].trades) + "</td></tr>").join("") + "</table></div>" +
       '<div class="small">' + esc(bt.start || "") + "부터 · 매주 첫 거래일에 그때까지의 1년 자료로만 비중을 다시 계산(미래 정보 없음) · 수수료 " + esc(bt.fee || "") + " · " + esc(bt.engine || "") + "</div></div>";
     else if (bt.skip) h += '<div class="msg note">' + esc(bt.skip) + "</div>";
     return h + '<p class="foot">가이드: Claude 펀드매니저 4단계 (Kronos · skfolio · NautilusTrader · Vibe-Trading) · 오픈소스 각 저장소의 라이선스를 따라요</p>';
@@ -1130,11 +1193,11 @@
         "<dt>예상 적중 (목표가 먼저 닿음)</dt><dd>" + (pf.pred && pf.pred.n ? pf.pred.hit + "/" + pf.pred.n + " (" + pf.pred.rate + "%)" : "아직 없음") + "</dd>" +
         "<dt>평균 이익 ÷ 평균 손실</dt><dd>" + (pf.all && pf.all.pf != null ? fmt(pf.all.pf, 2) + (pf.all.pf >= 1.5 ? " ✓" : "") : "—") + "</dd>" +
         "<dt>거래당 SPY 대비</dt><dd>" + (pf.avg_excess != null ? pct(pf.avg_excess) + "p" : "—") + "</dd></dl></div>" +
-        '<h2>처음 20번 vs 최근 20번</h2><div class="card"><table class="tbl num"><tr><th></th><th>처음</th><th>최근</th></tr>' +
+        '<h2>처음 20번 vs 최근 20번</h2><div class="card"><div class="tblwrap"><table class="tbl num"><tr><th></th><th>처음</th><th>최근</th></tr>' +
         "<tr><td>거래</td><td>" + (f.n || 0) + "</td><td>" + (l.n || 0) + "</td></tr>" +
         "<tr><td>평균 수익</td><td>" + pct(f.avg) + "</td><td>" + pct(l.avg) + "</td></tr>" +
         "<tr><td>SPY 대비</td><td>" + pct(f.excess) + "</td><td>" + pct(l.excess) + "</td></tr>" +
-        "<tr><td>수익 비율</td><td>" + (f.win == null ? "—" : f.win + "%") + "</td><td>" + (l.win == null ? "—" : l.win + "%") + "</td></tr></table>" +
+        "<tr><td>수익 비율</td><td>" + (f.win == null ? "—" : f.win + "%") + "</td><td>" + (l.win == null ? "—" : l.win + "%") + "</td></tr></table></div>" +
         '<div class="small">' + (n < 40 ? "거래가 40번이 되기 전에는 두 묶음이 겹쳐요." : "최근이 처음보다 나빠지지 않는지가 증액 기준 중 하나예요(11장).") + "</div></div>" +
         '<p class="foot">숫자는 매일 아침 리포트 때 다시 계산돼요' + (S.perf && S.perf.at ? " · " + esc(whenText(S.perf.at)) : "") + "</p>";
     } else if (seg === "sig") {
@@ -1250,12 +1313,101 @@
       '<div class="msg ' + (v["있음"] ? "err" : "note") + '">AI 거부권(기록만): ' + (v["있음"] ? "막을 이유 있음 — " + esc(v["이유"]) : "막을 이유 없음") + "</div>" + checkNote(x["_검사"]) + "</div>";
   }
   // 차트 분석 (파이썬 계산 · GPT 없음)
+  // 토스식 라인 차트 (라이브러리 없이 가벼운 SVG). 상승 빨강/하락 파랑.
+  function sparkSvg(vals) {
+    if (!vals || vals.length < 2) return '<div class="small" style="padding:28px 0;text-align:center">차트 데이터가 아직 없어요</div>';
+    const W = 320, H = 120, pad = 6, n = vals.length;
+    const min = Math.min.apply(null, vals), max = Math.max.apply(null, vals), rng = (max - min) || 1;
+    const up = vals[n - 1] >= vals[0], col = up ? "var(--up)" : "var(--down)";
+    const pts = vals.map((v, i) => (pad + (W - 2 * pad) * i / (n - 1)).toFixed(1) + "," + (pad + (H - 2 * pad) * (1 - (v - min) / rng)).toFixed(1));
+    const id = "cg" + Math.random().toString(36).slice(2, 7);
+    const area = "M" + pts[0] + " L" + pts.join(" L") + " L" + (W - pad).toFixed(1) + "," + (H - pad) + " L" + pad + "," + (H - pad) + " Z";
+    return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:150px;display:block">' +
+      '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + col + '" stop-opacity="0.18"/><stop offset="1" stop-color="' + col + '" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + area + '" fill="url(#' + id + ')"/>' +
+      '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>' +
+      '<div class="row between small" style="margin-top:4px"><span>저점 $' + fmt(min) + "</span><span>고점 $" + fmt(max) + "</span></div>";
+  }
+  function infoCard(c) {
+    const f = c.info || {};
+    const money = v => v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 2) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 0) + "억" : "$" + fmt(v / 1e6, 0) + "백만";
+    let d = f.div; if (d != null) d = d < 1 ? d * 100 : d;
+    const rows = [["시가총액", money(f.mktcap)], ["PER", f.per != null ? fmt(f.per, 1) + "배" : "—"],
+      ["PBR", f.pbr != null ? fmt(f.pbr, 1) + "배" : "—"], ["배당수익률", d != null ? fmt(d, 2) + "%" : "—"],
+      ["52주 최고·최저", (c.hi52 != null ? "$" + fmt(c.hi52) : "—") + " · " + (c.lo52 != null ? "$" + fmt(c.lo52) : "—")],
+      ["업종", f.sector || "—"]];
+    return '<div class="card"><b>종목 정보</b><dl class="kv">' + rows.map(r => "<dt>" + r[0] + "</dt><dd>" + esc(String(r[1])) + "</dd>").join("") + "</dl></div>";
+  }
+  // ---- 실시간 캔들 차트 (Apps Script 프록시로 야후 시세를 받아 그림) ----
+  const QCACHE = {};
+  async function fetchQuote(t, range) {
+    const k = t + "|" + range;
+    if (QCACHE[k]) return QCACHE[k];
+    const j = await api("quote", { t: t, range: range });
+    if (!j || !j.ok) throw new Error((j && j.error) || "시세 실패");
+    QCACHE[k] = j; return j;
+  }
+  function candleSvg(bars) {
+    if (!bars || bars.length < 2) return '<div class="small" style="padding:32px 0;text-align:center">시세를 불러오지 못했어요</div>';
+    const W = 320, Hc = 120, Hv = 26, gap = 8, pad = 4, n = bars.length;
+    const lo = Math.min.apply(null, bars.map(b => b[3])), hi = Math.max.apply(null, bars.map(b => b[2])), rng = (hi - lo) || 1;
+    const vmax = Math.max.apply(null, bars.map(b => b[5] || 0)) || 1;
+    const cw = (W - 2 * pad) / n, bw = Math.max(1, Math.min(cw * 0.7, 11));
+    const y = v => pad + (Hc - 2 * pad) * (1 - (v - lo) / rng);
+    let g = "";
+    bars.forEach((b, i) => {
+      const o = b[1], h = b[2], l = b[3], c = b[4], vol = b[5] || 0;
+      const col = c >= o ? "var(--up)" : "var(--down)", cx = pad + cw * (i + 0.5);
+      const top = Math.min(y(o), y(c)), bh = Math.max(1, Math.abs(y(c) - y(o)));
+      g += '<line x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + y(h).toFixed(1) + '" y2="' + y(l).toFixed(1) + '" stroke="' + col + '" stroke-width="1"/>' +
+        '<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + top.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh.toFixed(1) + '" fill="' + col + '"/>' +
+        '<rect x="' + (cx - bw / 2).toFixed(1) + '" y="' + (Hc + gap + (Hv - (vol / vmax) * Hv)).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + ((vol / vmax) * Hv).toFixed(1) + '" fill="' + col + '" opacity="0.32"/>';
+    });
+    return '<svg viewBox="0 0 ' + W + " " + (Hc + gap + Hv) + '" style="width:100%;height:auto;display:block">' + g + "</svg>" +
+      '<div class="row between small" style="margin-top:4px"><span>저 $' + fmt(lo) + "</span><span>고 $" + fmt(hi) + "</span></div>";
+  }
+  const CRANGE = [["5d", "1일"], ["1mo", "1달"], ["3mo", "3달"], ["1y", "1년"]];
+  function liveChartBox(t, c) {
+    const tabs = CRANGE.map(p => '<button data-crange="' + p[0] + '"' + (p[0] === "3mo" ? ' class="on"' : "") + ">" + p[1] + "</button>").join("");
+    const init = (c && c.series) ? sparkSvg(c.series["3M"]) : '<div class="small" style="padding:32px 0;text-align:center">차트 불러오는 중…</div>';
+    return '<div class="card livechart" data-t="' + esc(t) + '"><div class="segs ctabs">' + tabs + '</div><div class="cbox">' + init + "</div></div>";
+  }
+  function updateLiveHead(t, q) {
+    if (!q || q.price == null) return;
+    const chg = q.chg;
+    document.querySelectorAll('[data-livehead="' + t + '"]').forEach(el => {
+      el.innerHTML = "$" + fmt(q.price) + (chg == null ? "" : ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '" style="font-size:15px;font-weight:600">' +
+        (chg >= 0 ? "▲" : "▼") + " " + fmt(Math.abs(chg), 2) + '%</span><span class="sub" style="font-size:12px;font-weight:400"> 전일대비</span>');
+    });
+  }
+  async function drawRange(box, t, range) {
+    const cb = box.querySelector(".cbox");
+    try { const q = await fetchQuote(t, range); cb.innerHTML = candleSvg(q.bars); } catch (e) {}
+  }
+  function mountChartBox(t) {
+    document.querySelectorAll('.livechart[data-t="' + t + '"]').forEach(box => {
+      if (box.dataset.m) return; box.dataset.m = "1";
+      box.querySelectorAll(".ctabs button").forEach(b => b.addEventListener("click", () => {
+        box.querySelectorAll(".ctabs button").forEach(x => x.classList.toggle("on", x === b));
+        drawRange(box, t, b.dataset.crange);
+      }));
+      drawRange(box, t, box.querySelector('.ctabs button.on') ? box.querySelector('.ctabs button.on').dataset.crange : "3mo");
+    });
+  }
+  async function liveStock(t) {
+    let q = null;
+    try { q = await fetchQuote(t, "3mo"); } catch (e) {}
+    updateLiveHead(t, q);
+    mountChartBox(t);
+  }
   function chartHtml(t) {
     const c = S.ai && S.ai.chart && S.ai.chart[t];
-    if (!c) return emp("📈", "이 종목은 차트 분석 대상이 아니에요", "보유 종목과 후보 상위 15개만 매일 계산해요.", "", "");
+    const box = liveChartBox(t, c);
+    if (!c) return box;
     const m = c.macd || {}, ma = c.ma || {};
     const tr = c.trend === "상승 추세" ? "good" : c.trend === "하락 추세" ? "bad" : "warn";
-    return '<div class="card"><div class="row between"><b>차트 한눈에</b><span class="badge ' + tr + '">' + esc(c.trend) + "</span></div>" +
+    return box + (c.info ? infoCard(c) : "") +
+      '<div class="card"><div class="row between"><b>차트 한눈에</b><span class="badge ' + tr + '">' + esc(c.trend) + "</span></div>" +
       '<ul class="plain">' + (c.lines || []).map(l => "<li>" + esc(l) + "</li>").join("") + "</ul>" +
       '<dl class="kv num"><dt>지지선 (아래 받쳐 주는 값)</dt><dd>' + ((c.support || []).map(v => "$" + fmt(v)).join(" · ") || "—") + "</dd>" +
       "<dt>저항선 (위에서 막는 값)</dt><dd>" + ((c.resist || []).map(v => "$" + fmt(v)).join(" · ") || "—") + "</dd>" +
@@ -1272,8 +1424,8 @@
     const big = v => v == null ? "—" : Math.abs(v) >= 1e9 ? fmt(v / 1e9, 2) + "B" : Math.abs(v) >= 1e6 ? fmt(v / 1e6, 1) + "M" : fmt(v, 2);
     return '<div class="card"><div class="small">' + esc(q.quarter) + " · " + esc(q.form || "") + " · 신고일 " + esc(q.filed || "") + "</div>" +
       ((q.changes || []).length ? '<b>직전 분기와 달라진 점</b><ol class="plain" style="padding-left:18px;list-style:decimal">' + q.changes.map(x => "<li>" + esc(x) + "</li>").join("") + "</ol>" : "") +
-      '<table class="tbl num"><tr><th></th><th>이번</th><th>직전</th><th>작년</th></tr>' + (q.rows || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + big(r["이번 분기"]) + "</td><td>" + big(r["직전 분기"]) +
-        "</td><td>" + big(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table>" +
+      '<div class="tblwrap"><table class="tbl num"><tr><th></th><th>이번</th><th>직전</th><th>작년</th></tr>' + (q.rows || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + big(r["이번 분기"]) + "</td><td>" + big(r["직전 분기"]) +
+        "</td><td>" + big(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table></div>" +
       '<div class="small">'+ (q.via === "yahoo" ? "야후가 10-Q에서 옮긴 분기 재무제표로 비교" : "SEC EDGAR XBRL 숫자를 직접 비교") + ' (GPT 아님) · 고객·공급망·소송 같은 문장 내용은 포함 안 됨 · <a class="link" href="' + esc(q.src) + '" target="_blank" rel="noopener">원문 공시</a></div></div>';
   }
   // 포트폴리오 진단 (숫자는 파이썬, 풀이만 GPT)
@@ -1735,6 +1887,7 @@
       case "pick": return viewPick(decodeURIComponent(arg || ""));
       case "holdings": return viewHoldings();
       case "watch": return viewWatch();
+      case "stock": return viewStock(decodeURIComponent(arg || ""));
       case "hold": return viewHold(decodeURIComponent(arg || ""));
       case "alerts": if (arg) S.actSeg = arg; return viewAlerts();
       case "score": return viewScore();
