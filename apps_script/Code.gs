@@ -829,7 +829,7 @@ function aiCall_(sys, usr) {
     var p = AI_PROVIDERS[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
     var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] };
-    if (p.name === 'openai') { body.max_completion_tokens = 1200; }   // gpt-5 계열: max_tokens 미지원, 기본 temperature만
+    if (p.name === 'openai') { body.max_completion_tokens = 4000; }   // gpt-5 계열: max_tokens 미지원, 추론 토큰 여유 필요(기본 temperature만)
     else { body.max_tokens = 1200; body.temperature = 0.3; }
     if (p.json) body.response_format = { type: 'json_object' };
     try {
