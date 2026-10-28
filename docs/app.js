@@ -414,6 +414,12 @@
     [...$tabs.querySelectorAll("a")].forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
     $app.innerHTML = html;
     stickOffsets();
+    // 접근성: 새 화면으로 이동했을 때만 제목으로 포커스 (배경 새로고침 땐 그대로 둬요)
+    if (appShell._h !== location.hash) {
+      appShell._h = location.hash;
+      const head = $app.querySelector("h1, .head h1, h2");
+      if (head) { head.setAttribute("tabindex", "-1"); try { head.focus({ preventScroll: true }); } catch (e) {} }
+    }
   }
   // 위에 고정되는 줄(뒤로·제목) 높이를 재서, 그 아래 탭·필터 줄이 겹치지 않게 붙여요
   function stickOffsets() {
@@ -421,10 +427,12 @@
     document.documentElement.style.setProperty("--stickH", (top ? top.offsetHeight : 0) + "px");
   }
   window.addEventListener("resize", () => stickOffsets());
+  window.__retry = () => { refresh(); };
   function statusLine() {
     let s = "";
     if (S.loading) s += '<div class="small">새로 불러오는 중…</div>';
-    if (S.error) s += '<div class="msg err">' + esc(S.error) + "</div>";
+    if (S.error) s += '<div class="msg err" role="alert">' + esc(S.error) +
+      ' <button class="btn ghost" style="width:auto;margin:6px 0 0;padding:6px 12px" onclick="window.__retry()">다시 시도</button></div>';
     return s;
   }
   function needData(tab) {
