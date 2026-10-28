@@ -1,11 +1,13 @@
-"""4단계: GPT(OpenAI API) 호출 한곳 — 비용 상한·소진 알림·검사관(F-C8, F-C15, F-A13).
+"""4단계: AI 호출 한곳 — 여러 공급자 자동 폴백 + 비용 상한·소진 알림·검사관(F-C8, F-C15, F-A13).
 
 원칙 (기획서 12장)
 - 모든 호출에 같은 공통 지침(아래 COMMON)을 넣어요: 결론 먼저, 자료에 있는 숫자만, 못 찾으면 「확인 못 함」, 매수·매도 권유 금지.
 - 답은 JSON으로만 받아요. 형식이 틀리거나 실패하면 None → 앱은 AI 없이 그대로 돌아가요.
-- 이번 달 사용액이 한도(설정 'AI 월 한도(달러)', 기본 5달러)를 넘으면 호출하지 않아요.
-  80%·100%에 닿거나 OpenAI가 '크레딧 부족'으로 답하면 푸시·슬랙으로 알려요(같은 알림은 하루 한 번).
-- 키(OPENAI_API_KEY)는 깃허브 비밀 값에만 있어요. 코드·로그·시트에 남기지 않아요.
+- 여러 AI 공급자를 순서대로 시도해요(무료 먼저, OpenAI는 마지막 보루). 한 곳이 소진·오류면 자동으로 다음 공급자로 넘어가요.
+  순서는 설정 'AI 공급자 순서'(예: groq,openrouter,nvidia,huggingface,openai)로 바꿀 수 있어요.
+- OpenAI(유료)는 이번 달 사용액이 한도(설정 'AI 월 한도(달러)', 기본 5달러)를 넘으면 건너뛰어요. 무료 공급자는 비용 0.
+- 키는 전부 깃허브 비밀 값(Secrets)에만 있어요. 코드·로그·시트에 남기지 않아요.
+  사용하는 환경변수: OPENAI_API_KEY · GROQ_API_KEY · OPENROUTER_API_KEY · NVIDIA_API_KEY · HF_API_KEY
 """
 from __future__ import annotations
 
@@ -19,10 +21,26 @@ import requests
 
 log = logging.getLogger(__name__)
 URL = "https://api.openai.com/v1"
-# 1M 토큰당 달러 (입력, 출력). 모르는 모델은 큰 모델 값으로 넉넉히 셈해요.
+# 1M 토큰당 달러 (입력, 출력). OpenAI(유료) 비용 계산용. 모르는 모델은 큰 값으로 넉넉히.
 PRICE = {"gpt-5-nano": (0.05, 0.40), "gpt-5-mini": (0.25, 2.00), "gpt-4.1-nano": (0.10, 0.40), "gpt-4o-mini": (0.15, 0.60),
          "text-embedding-3-small": (0.02, 0.0)}
 DEFAULT_PRICE = (1.25, 10.0)
+
+# 공급자 체인 — 전부 OpenAI 호환(/chat/completions). 키가 있는 것만 써요.
+# small/big: 기본 모델. 환경변수 <NAME>_MODEL 또는 설정 'AI 모델 <name>'로 덮어쓸 수 있어요.
+PROVIDERS = [
+    {"name": "groq", "url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY",
+     "small": "llama-3.1-8b-instant", "big": "llama-3.3-70b-versatile", "json": True, "paid": False},
+    {"name": "openrouter", "url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY",
+     "small": "meta-llama/llama-3.3-70b-instruct:free", "big": "meta-llama/llama-3.3-70b-instruct:free", "json": False, "paid": False},
+    {"name": "nvidia", "url": "https://integrate.api.nvidia.com/v1", "key": "NVIDIA_API_KEY",
+     "small": "meta/llama-3.1-8b-instruct", "big": "meta/llama-3.3-70b-instruct", "json": False, "paid": False},
+    {"name": "huggingface", "url": "https://router.huggingface.co/v1", "key": "HF_API_KEY",
+     "small": "meta-llama/Llama-3.1-8B-Instruct", "big": "meta-llama/Llama-3.3-70B-Instruct", "json": False, "paid": False},
+    {"name": "openai", "url": URL, "key": "OPENAI_API_KEY",
+     "small": "gpt-5-nano", "big": "gpt-5-mini", "json": True, "paid": True},
+]
+_BY = {p["name"]: p for p in PROVIDERS}
 
 COMMON = """너는 미국 주식 개인 투자 앱의 분석 도우미야. 아래 규칙을 반드시 지켜.
 1. 결론을 먼저, 근거는 그다음에. 맨 위에 기준 날짜(또는 분기)를 적어.
@@ -34,11 +52,11 @@ COMMON = """너는 미국 주식 개인 투자 앱의 분석 도우미야. 아�
 7. 쉬운 한국어로, 영어 약자는 처음 한 번 풀어서 써.
 8. 답은 요청한 모양의 JSON 하나로만."""
 
-_S = {"store": None, "cfg": {}, "usage": None, "dirty": False, "disabled_reason": ""}
+_S = {"store": None, "cfg": {}, "usage": None, "dirty": False, "disabled_reason": "", "dead": set()}
 
 
 def init(store, cfg: dict):
-    _S.update(store=store, cfg=cfg, usage=None, dirty=False, disabled_reason="")
+    _S.update(store=store, cfg=cfg, usage=None, dirty=False, disabled_reason="", dead=set())
 
 
 def _month() -> str:
@@ -55,7 +73,8 @@ def _usage() -> dict:
         except Exception:
             u = {}
         if u.get("month") != _month():
-            u = {"month": _month(), "spent": 0.0, "by": {}, "calls": 0, "alerts": {}, "app_spent": 0.0}
+            u = {"month": _month(), "spent": 0.0, "by": {}, "calls": 0, "alerts": {}, "app_spent": 0.0, "prov": {}}
+        u.setdefault("prov", {})
         _S["usage"] = u
     return _S["usage"]
 
@@ -83,16 +102,45 @@ def spent() -> float:
     return round(u["spent"] + u["app_spent"], 4)
 
 
+def _ai_on() -> bool:
+    return str(_S["cfg"].get("AI 설명 사용", "예")).strip() in ("예", "y", "Y", "yes", "true", "1")
+
+
+def _have(p: dict) -> bool:
+    return bool(os.environ.get(p["key"])) and p["name"] not in _S["dead"]
+
+
 def enabled() -> tuple[bool, str]:
-    if not os.environ.get("OPENAI_API_KEY"):
-        return False, "OPENAI_API_KEY 없음"
-    if str(_S["cfg"].get("AI 설명 사용", "예")).strip() not in ("예", "y", "Y", "yes", "true", "1"):
+    if not _ai_on():
         return False, "설정에서 AI 꺼짐"
-    if _S["disabled_reason"]:
-        return False, _S["disabled_reason"]
-    if spent() >= cap():
-        return False, f"이번 달 한도 {cap():.2f}달러 도달"
+    avail = [p for p in PROVIDERS if _have(p)]
+    if not avail:
+        return False, "쓸 수 있는 AI 키가 없어요"
+    if all(p["paid"] for p in avail) and spent() >= cap():
+        return False, f"이번 달 한도 {cap():.2f}달러 도달(무료 공급자 키를 넣으면 계속 써요)"
     return True, ""
+
+
+def _chain() -> list[dict]:
+    order = str(_S["cfg"].get("AI 공급자 순서") or "groq,openrouter,nvidia,huggingface,openai")
+    names = [x.strip().lower() for x in order.split(",") if x.strip()]
+    chain = [_BY[n] for n in names if n in _BY]
+    for p in PROVIDERS:
+        if p not in chain:
+            chain.append(p)
+    return chain
+
+
+def _model(p: dict, kind: str) -> str:
+    env = os.environ.get(p["name"].upper() + "_MODEL")
+    if env:
+        return env
+    sv = _S["cfg"].get("AI 모델 " + p["name"])
+    if sv:
+        return str(sv)
+    if p["name"] == "openai":
+        return str(_S["cfg"].get("AI 큰 모델" if kind == "big" else "AI 작은 모델") or (p["big"] if kind == "big" else p["small"]))
+    return p["big"] if kind == "big" else p["small"]
 
 
 def _alert(level: str, title: str, body: str):
@@ -115,86 +163,117 @@ def _alert(level: str, title: str, body: str):
         log.warning("AI 알림 실패: %s", e)
 
 
-def _record(where: str, model: str, pin: int, pout: int):
-    pi, po = PRICE.get(model, DEFAULT_PRICE)
-    cost = pin / 1e6 * pi + pout / 1e6 * po
+def _record(where: str, p: dict, model: str, pin: int, pout: int):
+    cost = 0.0
+    if p["paid"]:
+        pi, po = PRICE.get(model, DEFAULT_PRICE)
+        cost = pin / 1e6 * pi + pout / 1e6 * po
     u = _usage()
     u["spent"] = round(u["spent"] + cost, 6)
     u["by"][where] = round(u["by"].get(where, 0) + cost, 6)
+    u["prov"][p["name"]] = u["prov"].get(p["name"], 0) + 1
     u["calls"] += 1
     _S["dirty"] = True
-    total, c = spent(), cap()
-    if total >= c:
-        _alert("100", "GPT 이번 달 한도 도달",
-               f"이번 달 GPT 사용액 ${total:.2f} / 한도 ${c:.2f}. 다음 달 1일까지 AI 없이 규칙만으로 돌아가요(매수·매도 규칙은 그대로).")
-    elif total >= c * 0.8:
-        _alert("80", "GPT 이번 달 한도 80%",
-               f"이번 달 GPT 사용액 ${total:.2f} / 한도 ${c:.2f}. 한도는 구글 시트 '설정' 탭 'AI 월 한도(달러)'에서 바꿔요.")
+    if cost > 0:
+        total, c = spent(), cap()
+        if total >= c:
+            _alert("100", "GPT 이번 달 한도 도달",
+                   f"이번 달 OpenAI 사용액 ${total:.2f} / 한도 ${c:.2f}. 무료 공급자(Groq 등) 키가 있으면 그걸로 계속 돌아가요.")
+        elif total >= c * 0.8:
+            _alert("80", "GPT 이번 달 한도 80%",
+                   f"이번 달 OpenAI 사용액 ${total:.2f} / 한도 ${c:.2f}. 한도는 구글 시트 '설정' 탭 'AI 월 한도(달러)'에서 바꿔요.")
 
 
-def _post(path: str, body: dict, where: str, timeout: int = 90) -> dict | None:
-    key = os.environ.get("OPENAI_API_KEY")
-    for attempt in range(3):
+def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90) -> dict | None:
+    key = os.environ.get(p["key"])
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if p["name"] == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/skih4741-png/us-stock-alert"
+        headers["X-Title"] = "us-stock-alert"
+    for attempt in range(2):
         try:
-            r = requests.post(URL + path, json=body, timeout=timeout,
-                              headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+            r = requests.post(p["url"] + path, json=body, timeout=timeout, headers=headers)
         except Exception as e:
-            log.warning("GPT 연결 실패(%s): %s", where, e)
-            time.sleep(2 * (attempt + 1))
+            log.warning("%s 연결 실패(%s): %s", p["name"], where, e)
+            time.sleep(1.5 * (attempt + 1))
             continue
         if r.status_code == 200:
             return r.json()
+        err = {}
         try:
-            err = r.json().get("error", {})
+            j = r.json()
+            err = j.get("error", j) if isinstance(j, dict) else {}
         except Exception:
             err = {}
-        code = err.get("code") or err.get("type") or ""
-        if code == "insufficient_quota" or (r.status_code == 429 and "quota" in str(err.get("message", "")).lower()):
-            _S["disabled_reason"] = "OpenAI 크레딧 부족"
-            _alert("quota", "GPT 크레딧이 소진됐어요",
-                   "OpenAI 선불 크레딧이 없어 GPT 기능(설명·브리핑·4관점 등)을 멈췄어요. 매수·매도 규칙과 모의매매는 그대로 돌아가요. "
-                   "platform.openai.com → Billing에서 충전하면 다음 실행부터 다시 켜져요.")
-            return None
+        if isinstance(err, str):
+            err = {"message": err}
+        code = str(err.get("code") or err.get("type") or "")
+        msg = str(err.get("message", "") or "")
         if r.status_code in (401, 403):
-            log.warning("OpenAI 거부 (%s): %s / %s", r.status_code, err.get("code") or "", err.get("type") or "")
-            _S["disabled_reason"] = f"OpenAI 키 오류 ({r.status_code} {err.get('code') or err.get('type') or ''})"
-            _alert("key", "GPT 키를 확인해 주세요", "OpenAI가 키를 거부했어요(만료·삭제·권한). 깃허브 비밀 값 OPENAI_API_KEY를 새 키로 바꿔 주세요.")
+            _S["dead"].add(p["name"])
+            if p["name"] == "openai":
+                _S["disabled_reason"] = f"OpenAI 키 오류 ({r.status_code})"
+                _alert("key", "GPT 키를 확인해 주세요", "OpenAI가 키를 거부했어요(만료·삭제·권한). 깃허브 비밀 값 OPENAI_API_KEY를 새 키로 바꿔 주세요.")
+            else:
+                log.warning("%s 키 거부(%s) → 다음 공급자", p["name"], r.status_code)
             return None
-        if r.status_code == 429 or r.status_code >= 500:
-            time.sleep(5 * (attempt + 1))
+        if code == "insufficient_quota" or r.status_code in (402, 429):
+            _S["dead"].add(p["name"])
+            if p["name"] == "openai" and code == "insufficient_quota":
+                _S["disabled_reason"] = "OpenAI 크레딧 부족"
+                _alert("quota", "GPT 크레딧이 소진됐어요",
+                       "OpenAI 크레딧이 없어 OpenAI는 멈췄어요. 무료 공급자 키가 있으면 그걸로 계속 돌아가요. platform.openai.com → Billing에서 충전하면 다시 켜져요.")
+            else:
+                log.info("%s 소진·제한(%s) → 다음 공급자", p["name"], r.status_code)
+            return None
+        if r.status_code >= 500:
+            time.sleep(2 * (attempt + 1))
             continue
-        log.warning("GPT 오류(%s) %s: %s", where, r.status_code, str(err.get("message", ""))[:200])
+        log.warning("%s 오류(%s) %s: %s", p["name"], where, r.status_code, msg[:160])
         return None
     return None
 
 
 def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int = 2500, timeout: int = 90) -> dict | None:
-    """task: 목표·출력·경계를 적은 지시. data: '자료'(dict/list/str). 반환: JSON dict 또는 None."""
+    """task: 목표·출력·경계를 적은 지시. data: '자료'(dict/list/str). 반환: JSON dict 또는 None.
+    공급자를 순서대로 시도하다 처음 성공한 곳의 답을 써요."""
     ok, why = enabled()
     if not ok:
-        log.info("GPT 건너뜀(%s): %s", where, why)
+        log.info("AI 건너뜀(%s): %s", where, why)
         return None
-    model = str(_S["cfg"].get("AI 큰 모델" if kind == "big" else "AI 작은 모델") or ("gpt-5-mini" if kind == "big" else "gpt-5-nano"))
     src = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
-    body = {"model": model, "max_completion_tokens": max_tokens, "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": COMMON},
-                         {"role": "user", "content": task + "\n\n— 여기부터 자료 —\n" + src[:60000] + "\n— 자료 끝 —\nJSON으로만 답해."}]}
-    if model.startswith("gpt-5"):
-        body["reasoning_effort"] = "low"
-    j = _post("/chat/completions", body, where, timeout)
-    if not j:
-        return None
-    u = j.get("usage") or {}
-    _record(where, model, int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
-    try:
-        text = j["choices"][0]["message"]["content"] or ""
-        if not text.strip():
-            log.warning("GPT 빈 답(%s): finish=%s · 생각 토큰이 한도(%d)를 다 쓴 듯", where, j["choices"][0].get("finish_reason"), max_tokens)
-        m = re.search(r"\{.*\}", text, re.S)
-        return json.loads(m.group(0)) if m else None
-    except Exception:
-        log.warning("GPT 답 형식 오류(%s)", where)
-        return None
+    user = task + "\n\n— 여기부터 자료 —\n" + src[:60000] + "\n— 자료 끝 —\nJSON으로만 답해."
+    for p in _chain():
+        if not _have(p):
+            continue
+        if p["paid"] and spent() >= cap():
+            continue
+        model = _model(p, kind)
+        tok = "max_completion_tokens" if p["name"] == "openai" else "max_tokens"
+        body = {"model": model, tok: max_tokens,
+                "messages": [{"role": "system", "content": COMMON}, {"role": "user", "content": user}]}
+        if p["json"]:
+            body["response_format"] = {"type": "json_object"}
+        if p["name"] == "openai" and model.startswith("gpt-5"):
+            body["reasoning_effort"] = "low"
+        j = _post(p, "/chat/completions", body, where, timeout)
+        if not j:
+            continue
+        u = j.get("usage") or {}
+        _record(where, p, model, int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
+        try:
+            text = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            if not text.strip():
+                log.warning("%s 빈 답(%s) → 다음 공급자", p["name"], where)
+                continue
+            m = re.search(r"\{.*\}", text, re.S)
+            parsed = json.loads(m.group(0)) if m else None
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            return parsed
+        log.warning("%s 답 형식 오류(%s) → 다음 공급자", p["name"], where)
+    return None
 
 
 INSPECT = """너는 비판적인 검토자(검사관)야. '답'을 '자료'와 하나씩 대조해 재검토해.
@@ -270,16 +349,17 @@ def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 
 
 
 def embed(texts: list[str], where: str = "임베딩") -> list[list[float]] | None:
-    ok, why = enabled()
-    if not ok or not texts:
+    """임베딩은 OpenAI만 지원해요(뉴스 유사도용). 키 없으면 None → 앱은 그 기능만 건너뛰어요."""
+    oai = _BY["openai"]
+    if not os.environ.get(oai["key"]) or not texts:
         return None
     model = str(_S["cfg"].get("AI 임베딩 모델") or "text-embedding-3-small")
     out = []
     for i in range(0, len(texts), 64):
-        j = _post("/embeddings", {"model": model, "input": [t[:8000] for t in texts[i:i + 64]]}, where)
+        j = _post(oai, "/embeddings", {"model": model, "input": [t[:8000] for t in texts[i:i + 64]]}, where)
         if not j:
             return None
-        _record(where, model, int((j.get("usage") or {}).get("prompt_tokens", 0)), 0)
+        _record(where, oai, model, int((j.get("usage") or {}).get("prompt_tokens", 0)), 0)
         out += [d["embedding"] for d in j["data"]]
     return out
 
@@ -299,10 +379,12 @@ def flush():
 def status() -> dict:
     u = _usage()
     ok, why = enabled()
-    return {"month": u["month"], "spent": spent(), "cap": cap(), "calls": u["calls"], "by": u["by"], "on": ok, "why": why}
+    keys = [p["name"] for p in PROVIDERS if os.environ.get(p["key"])]
+    return {"month": u["month"], "spent": spent(), "cap": cap(), "calls": u["calls"], "by": u["by"],
+            "on": ok, "why": why, "keys": keys, "prov": u.get("prov", {})}
 
 
-if __name__ == "__main__":  # python ai.py check — 키·크레딧 확인 (값은 출력하지 않아요)
+if __name__ == "__main__":  # python ai.py check — 공급자·키 확인 (값은 출력하지 않아요)
     import sys
 
     import config
@@ -311,9 +393,9 @@ if __name__ == "__main__":  # python ai.py check — 키·크레딧 확인 (값�
     st = Store()
     cfg, _ = config.merge_settings(st.settings())
     init(st, cfg)
-    print("키 있음:", bool(os.environ.get("OPENAI_API_KEY")))
+    print("키 있는 공급자:", [p["name"] for p in PROVIDERS if os.environ.get(p["key"])])
     r = chat_json("점검", '{"ok": true} 를 그대로 JSON으로 답해.', "점검", "small", 300)
-    print("작은 모델 응답:", r)
+    print("응답:", r)
     print("상태:", json.dumps(status(), ensure_ascii=False))
     flush()
     sys.exit(0)
