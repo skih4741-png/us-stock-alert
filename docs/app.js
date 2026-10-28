@@ -1466,12 +1466,13 @@
     try { q = await fetchQuote(t, "3mo"); } catch (e) {}
     if (!q || !q.ok) { el.innerHTML = '<div class="small" style="text-align:center;padding:12px 0">시세를 불러오지 못했어요</div>'; return; }
     const cur = q.price, val = (q.vol != null && cur != null) ? q.vol * cur : null;
+    const bars = q.bars || [], openPx = q.open != null ? q.open : (bars.length ? bars[bars.length - 1][1] : null);
     let h = '<b>시세 요약</b>';
     if (q.dayLo != null && q.dayHi != null && q.dayHi > q.dayLo)
       h += '<div class="rlab"><span>1일 저 ' + usd(q.dayLo) + '</span><span>고 ' + usd(q.dayHi) + '</span></div>' + rangeBar(q.dayLo, cur, q.dayHi);
     if (q.lo52 != null && q.hi52 != null && q.hi52 > q.lo52)
       h += '<div class="rlab"><span>52주 저 ' + usd(q.lo52) + '</span><span>고 ' + usd(q.hi52) + '</span></div>' + rangeBar(q.lo52, cur, q.hi52);
-    h += '<div class="statgrid"><div class="sc"><div class="k">시가</div><div class="v num">' + usd(q.open) + '</div></div>' +
+    h += '<div class="statgrid"><div class="sc"><div class="k">시가</div><div class="v num">' + usd(openPx) + '</div></div>' +
       '<div class="sc"><div class="k">현재가</div><div class="v num">' + usd(cur) + '</div></div>' +
       '<div class="sc"><div class="k">거래량</div><div class="v num">' + bigVol(q.vol) + '</div></div>' +
       '<div class="sc"><div class="k">거래대금</div><div class="v num">' + bigMoney(val) + '</div></div></div>';
