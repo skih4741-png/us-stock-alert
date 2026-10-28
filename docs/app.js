@@ -1527,12 +1527,27 @@
       }
       h += "</div>";
     }
-    // 배당 소식
-    if (j.divRate != null || j.divYield != null || j.exDiv) {
-      h += '<div class="card"><b>배당 소식</b><dl class="kv num" style="margin-top:8px">' +
+    // 배당 소식 — 요약 + 월/분기별 지급 이력
+    var hist = j.divHist || [];
+    if (j.divRate != null || j.divYield != null || j.exDiv || hist.length) {
+      h += '<div class="card"><div class="row between"><b>배당 소식</b>' +
+        (j.divCount12 ? '<span class="small">최근 12개월</span>' : "") + "</div>";
+      if (j.divCount12) {
+        var mons = (j.divMonths || []).slice().sort(function (a, b) { return a - b; }).map(function (m) { return m + "월"; }).join(", ");
+        h += '<div class="statgrid" style="margin-top:10px">' +
+          '<div class="sc"><div class="k">지급 횟수</div><div class="v num">' + j.divCount12 + "번</div>" + (mons ? '<div class="small" style="margin-top:2px">' + esc(mons) + "</div>" : "") + "</div>" +
+          '<div class="sc"><div class="k">최근 1년 배당</div><div class="v num">' + (j.divSum12 != null ? "$" + fmt(j.divSum12) : "—") + "</div></div></div>";
+      }
+      h += '<dl class="kv num" style="margin-top:10px">' +
         (j.divRate != null ? "<dt>1주당 배당금 (연)</dt><dd>$" + fmt(j.divRate) + "</dd>" : "") +
         (j.divYield != null ? "<dt>배당수익률</dt><dd>" + asPct(j.divYield) + "</dd>" : "") +
-        (j.exDiv ? "<dt>다음 배당락일</dt><dd>" + esc(j.exDiv) + "</dd>" : "") + "</dl></div>";
+        (j.exDiv ? "<dt>다음 배당락일</dt><dd>" + esc(j.exDiv) + "</dd>" : "") + "</dl>";
+      if (hist.length) {
+        h += '<details class="sig"><summary><b>지난 배당 내역</b> <span class="small">' + hist.length + "건</span></summary>" +
+          '<div class="tblwrap"><table class="tbl num"><tr><th>지급일(배당락)</th><th>1주당</th></tr>' +
+          hist.map(function (x) { return "<tr><td>" + esc(x.date) + "</td><td>$" + fmt(x.amt) + "</td></tr>"; }).join("") + "</table></div></details>";
+      }
+      h += "</div>";
     }
     // 회사 정보
     if (j.sector || j.desc || j.nextEarnings) {

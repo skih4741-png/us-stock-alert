@@ -155,6 +155,22 @@ const ACTIONS = {
     out.epsQ = ecq.map(function (x) { return { q: x.date, act: rv(x.actual), est: rv(x.estimate) }; });
     out.epsEst = rv((en.earningsChart || {}).currentQuarterEstimate);
     out.epsEstQ = (en.earningsChart || {}).currentQuarterEstimateDate && ((en.earningsChart || {}).currentQuarterEstimateDate + (en.earningsChart || {}).currentQuarterEstimateYear || '');
+    // 배당 지급 이력 — 야후 차트 이벤트(events=div)로 월/분기별 실제 지급 내역 (크럼 불필요)
+    try {
+      var dv = yfetch_('https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(sym) + '?range=2y&interval=1mo&events=div');
+      var evd = dv && dv.chart && dv.chart.result && dv.chart.result[0] && dv.chart.result[0].events && dv.chart.result[0].events.dividends;
+      if (evd) {
+        var list = [];
+        for (var kk in evd) { if (evd[kk] && evd[kk].date != null) list.push({ date: Utilities.formatDate(new Date(evd[kk].date * 1000), 'Etc/UTC', 'yyyy-MM-dd'), amt: r2_(evd[kk].amount) }); }
+        list.sort(function (a, b) { return a.date < b.date ? 1 : -1; });   // 최신순
+        out.divHist = list.slice(0, 8);
+        var yAgo = Utilities.formatDate(new Date(Date.now() - 370 * 864e5), 'Etc/UTC', 'yyyy-MM-dd');
+        var last12 = list.filter(function (x) { return x.date >= yAgo; });
+        out.divCount12 = last12.length;
+        out.divSum12 = last12.length ? r2_(last12.reduce(function (s, x) { return s + (x.amt || 0); }, 0)) : null;
+        out.divMonths = last12.map(function (x) { return parseInt(x.date.slice(5, 7), 10); });
+      }
+    } catch (e) {}
     try { cache.put(key, JSON.stringify(out), 600); } catch (e) {}
     return out;
   },
