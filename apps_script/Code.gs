@@ -820,7 +820,7 @@ var AI_PROVIDERS = [
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
   { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false },
-  { name: 'openai', url: 'https://api.openai.com/v1/chat/completions', key: 'OPENAI_API_KEY', model: 'gpt-5-nano', json: true }
+  { name: 'openai', url: 'https://api.openai.com/v1/chat/completions', key: 'OPENAI_API_KEY', model: 'gpt-4o-mini', json: true }
 ];
 function aiCall_(sys, usr) {
   var props = PropertiesService.getScriptProperties().getProperties();
@@ -828,9 +828,7 @@ function aiCall_(sys, usr) {
   for (var i = 0; i < AI_PROVIDERS.length; i++) {
     var p = AI_PROVIDERS[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
-    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] };
-    if (p.name === 'openai') { body.max_completion_tokens = 4000; }   // gpt-5 계열: max_tokens 미지원, 추론 토큰 여유 필요(기본 temperature만)
-    else { body.max_tokens = 1200; body.temperature = 0.3; }
+    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], max_tokens: 1200, temperature: 0.3 };
     if (p.json) body.response_format = { type: 'json_object' };
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
