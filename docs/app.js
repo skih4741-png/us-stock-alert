@@ -1494,7 +1494,7 @@
     var money = function (v) { return Math.abs(v) >= 1e12 ? fmt(v / 1e12, 1) + "조" : Math.abs(v) >= 1e8 ? fmt(v / 1e8, 0) + "억" : fmt(v / 1e6, 0) + "백만"; };
     return '<div class="qbars">' + items.map(function (x) {
       var v = x.rev, h = v == null ? 0 : Math.max(3, Math.abs(v) / max * 100);
-      var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$2 $1");
+      var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$3 $1");
       return '<div class="qcol"><div class="qbarwrap"><span class="qbar" style="height:' + h + '%;background:var(--up)"></span></div><div class="qval num">' +
         (v == null ? "—" : "$" + money(v)) + '</div><div class="small">' + esc(lab) + "</div></div>";
     }).join("") + "</div>";
@@ -1517,10 +1517,12 @@
       if (j.epsQ && j.epsQ.length >= 2) {
         h += '<div class="small" style="margin-top:12px">분기 EPS · 실제 vs 예상(컨센서스)</div><div class="tblwrap"><table class="tbl num"><tr><th>분기</th><th>실제</th><th>예상</th><th>차이</th></tr>' +
           j.epsQ.slice().reverse().map(function (x) {
-            var diff = (x.act != null && x.est != null) ? x.act - x.est : null, dc = diff == null ? "" : diff >= 0 ? "good-t" : "bad-t";
-            var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$2 $1");
+            var diff = (x.act != null && x.est != null) ? x.act - x.est : null;
+            var flat = diff != null && Math.abs(diff) < 0.005, dc = diff == null || flat ? "" : diff > 0 ? "good-t" : "bad-t";
+            var ds = diff == null ? "—" : flat ? "0.00" : (diff > 0 ? "+" : "") + fmt(diff, 2);
+            var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$3 $1");
             return "<tr><td>" + esc(lab) + "</td><td>" + (x.act == null ? "—" : "$" + fmt(x.act, 2)) + "</td><td>" + (x.est == null ? "—" : "$" + fmt(x.est, 2)) +
-              '</td><td class="' + dc + '">' + (diff == null ? "—" : (diff >= 0 ? "+" : "") + fmt(diff, 2)) + "</td></tr>";
+              '</td><td class="' + dc + '">' + ds + "</td></tr>";
           }).join("") + "</table></div>";
       }
       h += "</div>";
