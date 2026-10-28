@@ -139,6 +139,11 @@ input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .skel::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.07), transparent); } }
 :root[data-theme="dark"] .skel::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.07), transparent); }
 @keyframes skelshine { 100% { transform: translateX(100%); } }
+.qbars { display: flex; gap: 10px; align-items: flex-end; height: 140px; margin: 8px 0 2px; }
+.qcol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.qbarwrap { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.qbar { width: 62%; border-radius: 6px 6px 0 0; min-height: 3px; }
+.qval { font-size: 12px; font-weight: 700; margin-top: 4px; }
 @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
 /* 화면 이동 시 제목으로 포커스 — 비상호작용 제목이라 외곽선은 숨겨요(키보드 Tab 순서엔 안 들어감) */
 h1[tabindex]:focus, h2[tabindex]:focus, .head h1[tabindex]:focus { outline: none; }

@@ -264,12 +264,19 @@
     let h = '<div class="' + bandCls + '"><b>' + esc(f.verdict_text) + '</b><div class="small" style="color:inherit">' + esc(f.reason) + "</div></div>";
     h += '<div class="small" style="margin:8px 0 4px">체력 ' + f.fscore + "/" + f.fscore_max + " " + ti("체력 점수") +
       " · 버핏 체크 " + f.buffett_pass + "/" + f.buffett_max + " " + ti("버핏 체크") + " · " + esc((f.fy || "").slice(0, 4)) + "년 연간 공시</div>";
-    h += '<div class="list">' + f.signals.map(sg =>
-      '<details class="sig"><summary><span class="sdot" style="background:' + (toneColor[sg.tone] || "var(--line)") + '"></span><span class="grow"><b>' + esc(sg.title) +
+    const sigRow = sg => '<details class="sig"><summary><span class="sdot" style="background:' + (toneColor[sg.tone] || "var(--line)") + '"></span><span class="grow"><b>' + esc(sg.title) +
       '</b><span class="small">' + esc(sg.text) + '</span></span><span class="small">숫자 ▾</span></summary><dl class="kv num">' +
       Object.entries(sg.nums || {}).map(([k, v]) => "<dt>" + esc(k) + " " + (TERMS[k] ? ti(k) : "") + "</dt><dd>" +
-        (v == null ? "—" : esc(typeof v === "number" ? (/%|률|비율|변화/.test(k) && !/배율/.test(k) ? v + "%" : v) : v)) + "</dd>").join("") +
-      "</dl></details>").join("") + "</div>";
+        (v == null ? "—" : esc(typeof v === "number" ? (/%|률|비율|변화/.test(k) && !/배율/.test(k) ? v + "%" : v) : v)) + "</dd>").join("") + "</dl></details>";
+    const byKey = {}; (f.signals || []).forEach(sg => { byKey[sg.key] = sg; });
+    const used = {};
+    [["성장성", ["growth"]], ["수익성", ["profit", "cash"]], ["안정성", ["debt", "shares"]]].forEach(g => {
+      const rows = g[1].map(k => byKey[k]).filter(Boolean);
+      rows.forEach(sg => { used[sg.key] = 1; });
+      if (rows.length) h += "<h2>" + g[0] + '</h2><div class="list">' + rows.map(sigRow).join("") + "</div>";
+    });
+    const rest = (f.signals || []).filter(sg => !used[sg.key]);
+    if (rest.length) h += '<h2>그 밖에</h2><div class="list">' + rest.map(sigRow).join("") + "</div>";
     // F-2 100달러를 팔면
     if (f.flow100) {
       const parts = f.flow100.parts, shades = ["var(--seg1)", "var(--seg2)", "var(--seg3)"];
@@ -1378,11 +1385,26 @@
       (x["10년 주인이라면"] ? '<div class="card"><b>10년 가질 주인이라면</b><p class="sub">' + esc(x["10년 주인이라면"]) + "</p></div>" : "") +
       '<div class="small">' + esc(x.date || "") + " · GPT 작성</div>" + checkNote(x["_검사"]);
   }
+  function qbars(items, field, big) {
+    const vals = items.map(x => x[field]).filter(v => v != null);
+    if (vals.length < 2) return "";
+    const max = Math.max.apply(null, vals.map(Math.abs)) || 1;
+    const money = v => big ? (Math.abs(v) >= 1e12 ? fmt(v / 1e12, 1) + "조" : Math.abs(v) >= 1e8 ? fmt(v / 1e8, 0) + "억" : fmt(v / 1e6, 0) + "백만") : fmt(v, 2);
+    return '<div class="qbars">' + items.map(x => {
+      const v = x[field], hgt = v == null ? 0 : Math.max(3, Math.abs(v) / max * 100), col = (v || 0) >= 0 ? "var(--up)" : "var(--down)";
+      return '<div class="qcol"><div class="qbarwrap"><span class="qbar" style="height:' + hgt + "%;background:" + col + '"></span></div><div class="qval num">' +
+        (v == null ? "—" : money(v)) + '</div><div class="small">' + esc((x.q || "").slice(2, 7)) + "</div></div>";
+    }).join("") + "</div>";
+  }
   function earnHtml(t) {
     const x = S.ai && S.ai.earn && S.ai.earn[t];
     if (!x) return "";
-    const v = x["판정"] || {};
-    return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2><div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
+    const v = x["판정"] || {}, qs = x["분기들"] || [];
+    const bars = qs.length >= 2
+      ? '<div class="card"><div class="row between"><b>분기 매출</b><span class="small">억/조 달러</span></div>' + qbars(qs, "rev", true) + "</div>" +
+        '<div class="card"><div class="row between"><b>분기 EPS</b><span class="small">주당순이익 $</span></div>' + qbars(qs, "eps", false) + "</div>"
+      : "";
+    return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2>' + bars + '<div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
       '<span class="badge ' + tone3(v["실적"]) + '">실적 ' + esc(v["실적"] || "") + '</span> <span class="badge ' + tone3(v["가이던스"]) + '">가이던스 ' + esc(v["가이던스"] || "") + "</span></span></div>" +
       '<div class="tblwrap"><table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>직전 분기</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
         "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["직전 분기"] || "—") + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table></div>" +

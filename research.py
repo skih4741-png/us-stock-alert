@@ -36,7 +36,18 @@ EARN = """목표: 방금 나온 분기 실적을 표 하나로.
 - 자료에 없는 칸은 「확인 못 함」. 예상치는 야후 컨센서스가 자료에 있을 때만 적어.
 - 현금흐름은 숫자를 억/조 달러로 바꿔 한 문장으로(예: '영업현금흐름 16억 달러로 순이익 8억 달러보다 큼'). 긴 원시 숫자·출처 꼬리표 금지.
 - 증감률은 직접 계산하지 말고 자료의 '계산(파이썬)' 값을 참고."""
-EARN_VER = 2  # 실적 표 포맷 규칙 버전. 올리면 저장된 실적 카드가 다음 실행에서 한 번 다시 만들어져요.
+EARN_VER = 3  # 실적 표 포맷 규칙 버전. 올리면 저장된 실적 카드가 다음 실행에서 한 번 다시 만들어져요.
+
+
+def _quarters(f: dict) -> list:
+    """분기별 매출·EPS 막대 차트용 — 오래된→최근 순, 최근 6분기."""
+    q = f.get("분기 손익(야후)") or {}
+    out = []
+    for d, v in sorted(q.items()):
+        if not isinstance(v, dict):
+            continue
+        out.append({"q": d, "rev": v.get("Total Revenue"), "eps": v.get("Diluted EPS")})
+    return out[-6:]
 
 B4 = """목표: 워런 버핏식 4관점 점검(사업 이해·경쟁 우위·경영진·가격).
 출력: {"관점":[{"이름":"사업 이해|경쟁 우위|경영진|가격","판정":"통과|조건부|탈락","근거":["자료 숫자·사실을 한 문장씩 1~3개 (문자열만, 예: '2026-06-30 분기 매출 8.9억 달러 (분기 손익, 야후)')"]}],"종합":"통과|조건부|탈락","한 줄":""}
@@ -280,7 +291,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         if need_earn:
             r = ai.checked("실적 카드", EARN, f, "big", 3000)
             if r:
-                earn[t] = dict(r, date=today, _v=EARN_VER)
+                earn[t] = dict(r, date=today, _v=EARN_VER, 분기들=_quarters(f))
         if need_b4:
             r = ai.checked("버핏 4관점", B4, f, "small", 2500)
             if r:
