@@ -580,11 +580,13 @@
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       liveChartBox(t, null) +
       quoteSumCard(t) +
+      aiCard(t) +
       statsCard(t) +
       priceAlertCard(t) +
       '<p class="foot">관심 종목도 시세·투자지표·실적·배당을 실시간으로 볼 수 있어요. AI 리포트·재무 신호 전체 분석은 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
     bindPriceAlert();
+    bindAi();
     liveStock(t);
     mountQuoteSum(t);
     mountStats(t);
@@ -754,7 +756,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + quoteSumCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
+      tags(p.tags) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
@@ -784,6 +786,7 @@
       if (b.dataset.s === "chart") mountChartBox(p.t);
     }));
     bindPriceAlert();
+    bindAi();
     liveStock(p.t);
     mountQuoteSum(p.t);
     mountStats(p.t);
@@ -829,6 +832,7 @@
       stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       quoteSumCard(h.t) +
+      aiCard(h.t) +
       statsCard(h.t) +
       priceAlertCard(h.t) +
       // 내 평가손익
@@ -860,6 +864,7 @@
     }));
     bindWatch();
     bindPriceAlert();
+    bindAi();
     liveStock(h.t);
     mountQuoteSum(h.t);
     mountStats(h.t);
@@ -1538,6 +1543,26 @@
       return '<div class="qcol"><div class="qbarwrap"><span class="qbar" style="height:' + h + '%;background:var(--up)"></span></div><div class="qval num">' +
         (v == null ? "—" : "$" + money(v)) + '</div><div class="small">' + esc(lab) + "</div></div>";
     }).join("") + "</div>";
+  }
+  // 🤖 온디맨드 AI 분석 (무료 공급자 · 참고용, 매수·매도 권유 아님)
+  function aiCard(t) {
+    return '<div class="card"><div class="row between"><b>🤖 AI 분석</b><span class="small">무료 AI · 참고용</span></div>' +
+      '<button class="btn" data-ai="' + esc(t) + '" style="width:auto;padding:10px 16px;margin:8px 0 0">AI 분석 보기</button><div id="ai-' + esc(t) + '"></div></div>';
+  }
+  function aiTone(sig) { return sig === "초록" ? "good" : sig === "빨강" ? "bad" : "warn"; }
+  function bindAi() { $app.querySelectorAll("[data-ai]").forEach(function (b) { b.addEventListener("click", function () { b.style.display = "none"; mountAi(b.dataset.ai); }); }); }
+  async function mountAi(t) {
+    var el = document.getElementById("ai-" + t); if (!el) return;
+    el.innerHTML = '<div class="small" style="padding:10px 0">AI가 자료를 읽는 중… (보통 5~15초)</div>';
+    var j = null; try { j = await api("ai", { t: t }); } catch (e) {}
+    if (!j || !j.ok) { el.innerHTML = '<div class="msg note" style="margin-top:8px">' + esc((j && j.error) || "AI 분석을 못 했어요. 잠시 후 다시 시도해 주세요.") + "</div>"; return; }
+    var a = j.a || {};
+    var list = function (title, arr) { return (arr && arr.length) ? '<div style="margin-top:8px"><b class="small">' + title + '</b><ul class="plain">' + arr.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul></div>" : ""; };
+    el.innerHTML = '<div style="margin-top:10px"><span class="badge ' + aiTone(a["신호등"]) + '" style="font-size:13px">' + esc(a["관점"] || a["신호등"] || "분석") + "</span></div>" +
+      (a["한줄"] ? '<div style="margin-top:8px">' + esc(a["한줄"]) + "</div>" : "") +
+      list("강점", a["강점"]) + list("약점", a["약점"]) + list("리스크", a["리스크"]) + list("확인 포인트", a["확인포인트"]) +
+      (a["밸류에이션"] ? '<div class="sub" style="margin-top:8px">밸류에이션: ' + esc(a["밸류에이션"]) + "</div>" : "") +
+      '<div class="msg note" style="margin-top:10px">AI가 위 자료로 정리한 <b>참고 의견</b>이에요. 매수·매도 권유가 아니고, 투자 판단과 책임은 본인에게 있어요. (' + esc(j.provider || "") + " · " + esc(j.at || "") + ")</div>";
   }
   async function mountStats(t) {
     var el = document.getElementById("stats-" + t); if (!el) return;
