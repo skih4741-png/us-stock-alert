@@ -1557,8 +1557,35 @@
         (j.targetPrice != null ? "<dt>애널리스트 목표가</dt><dd class='num'>$" + fmt(j.targetPrice) + "</dd>" : "") + "</dl>" +
         (j.desc ? '<div class="sub" style="margin-top:6px">' + esc(j.desc) + "</div>" : "") + "</div>";
     }
-    h += '<div class="small" style="margin-top:2px">야후 자료 · 투자지표·실적·배당은 실시간 조회 (GPT 아님)</div>';
+    // 재무제표 보기 (탭하면 로드)
+    h += '<div class="card"><button class="btn ghost" data-fin="' + esc(t) + '" style="width:auto;padding:9px 14px;margin:0">📑 재무제표 보기</button><div id="fin-' + esc(t) + '"></div></div>';
+    h += '<div class="small" style="margin-top:2px">야후 자료 · 투자지표·실적·배당·재무제표는 실시간 조회 (GPT 아님)</div>';
     el.innerHTML = h;
+    var fb = el.querySelector("[data-fin]");
+    if (fb) fb.addEventListener("click", function () { fb.style.display = "none"; mountFin(t); });
+  }
+  function finMoney(v) { return v == null ? "—" : Math.abs(v) >= 1e12 ? fmt(v / 1e12, 2) + "조" : Math.abs(v) >= 1e8 ? fmt(v / 1e8, 0) + "억" : Math.abs(v) >= 1e6 ? fmt(v / 1e6, 0) + "백만" : fmt(v, 0); }
+  function finTableHtml(tb) {
+    if (!tb || !tb.cols || !tb.cols.length) return '<div class="small" style="padding:8px 0">자료 없음</div>';
+    return '<div class="tblwrap"><table class="tbl num"><tr><th></th>' + tb.cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr>" +
+      tb.rows.map(function (r) { return "<tr><td>" + esc(r.label) + "</td>" + r.vals.map(function (v) { return '<td class="' + (v < 0 ? "bad-t" : "") + '">' + finMoney(v) + "</td>"; }).join("") + "</tr>"; }).join("") + "</table></div>";
+  }
+  async function mountFin(t) {
+    var el = document.getElementById("fin-" + t); if (!el) return;
+    el.innerHTML = '<div class="small" style="padding:10px 0">재무제표 불러오는 중…</div>';
+    var j = null; try { j = await api("fin", { t: t }); } catch (e) {}
+    if (!j || !j.ok) { el.innerHTML = '<div class="small" style="padding:10px 0">' + esc((j && j.error) || "재무제표를 못 받았어요") + "</div>"; return; }
+    var tabs = [["손익계산서", j.inc], ["재무상태표", j.bal], ["현금흐름표", j.cf]];
+    el.innerHTML = '<div class="segs dtabs" style="margin:12px 0 6px">' + tabs.map(function (p, i) { return '<button data-ft="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>"; }).join("") +
+      '</div><div class="small" style="margin-bottom:4px">단위: 백만/억/조 달러 · 최근 분기</div><div class="finpanes">' +
+      tabs.map(function (p, i) { return '<div class="finpane"' + (i ? " hidden" : "") + ">" + finTableHtml(p[1]) + "</div>"; }).join("") + "</div>";
+    el.querySelectorAll(".dtabs button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var i = b.dataset.ft;
+        el.querySelectorAll(".dtabs button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        el.querySelectorAll(".finpane").forEach(function (p, j2) { p.hidden = String(j2) !== i; });
+      });
+    });
   }
   // ---- 실시간 캔들 차트 (Apps Script 프록시로 야후 시세를 받아 그림) ----
   const QCACHE = {};

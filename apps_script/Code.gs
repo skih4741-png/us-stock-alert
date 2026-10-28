@@ -175,6 +175,37 @@ const ACTIONS = {
     return out;
   },
 
+  // 재무제표 (손익·재무상태·현금흐름, 분기) — 야후 quoteSummary 프록시. GPT 없음.
+  fin: function (r) {
+    var t = String(r && r.t || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (!t) return { ok: false, error: '종목이 없어요' };
+    var cache = CacheService.getScriptCache(), key = 'fin_' + t;
+    var hit = cache.get(key); if (hit) return JSON.parse(hit);
+    var sym = t.replace(/\./g, '-');
+    var mods = 'incomeStatementHistoryQuarterly,balanceSheetHistoryQuarterly,cashflowStatementHistoryQuarterly';
+    var res = ysummary_(sym, mods);
+    if (!res) { ysummary_clear_(); res = ysummary_(sym, mods); }
+    if (!res) return { ok: false, error: '재무제표를 못 받았어요' };
+    var inc = (res.incomeStatementHistoryQuarterly || {}).incomeStatementHistory || [];
+    var bal = (res.balanceSheetHistoryQuarterly || {}).balanceSheetStatements || [];
+    var cf = (res.cashflowStatementHistoryQuarterly || {}).cashflowStatements || [];
+    if (!inc.length && !bal.length && !cf.length) return { ok: false, error: '재무제표 자료가 없어요 (ETF·일부 종목)' };
+    var tbl = function (arr, fields) {
+      arr = (arr || []).slice(0, 5);
+      var cols = arr.map(function (s) { return s.endDate && s.endDate.raw ? Utilities.formatDate(new Date(s.endDate.raw * 1000), 'Etc/UTC', 'yy-MM') : '—'; });
+      var rows = fields.map(function (f) { return { label: f[1], vals: arr.map(function (s) { return s[f[0]] && s[f[0]].raw != null ? s[f[0]].raw : null; }) }; });
+      return { cols: cols, rows: rows };
+    };
+    var out = {
+      ok: true, t: t,
+      inc: tbl(inc, [['totalRevenue', '매출'], ['costOfRevenue', '매출원가'], ['grossProfit', '매출총이익'], ['operatingIncome', '영업이익'], ['netIncome', '순이익']]),
+      bal: tbl(bal, [['totalAssets', '총자산'], ['totalLiab', '총부채'], ['totalStockholderEquity', '자본총계'], ['cash', '현금성자산']]),
+      cf: tbl(cf, [['totalCashFromOperatingActivities', '영업활동'], ['totalCashflowsFromInvestingActivities', '투자활동'], ['totalCashFromFinancingActivities', '재무활동'], ['changeInCash', '현금 증감']])
+    };
+    try { cache.put(key, JSON.stringify(out), 1800); } catch (e) {}
+    return out;
+  },
+
   sendSetupCode: function () {
     const a = acct_();
     if (a.hash) return { ok: false, error: '이미 계정이 있어요. 로그인해 주세요.' };
