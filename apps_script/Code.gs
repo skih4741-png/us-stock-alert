@@ -117,6 +117,48 @@ const ACTIONS = {
     return r;
   },
 
+  // 종목 투자지표·배당·회사정보 (야후 quoteSummary 서버 프록시, 크럼 인증). GPT·재무 계산 없음.
+  stats: function (r) {
+    var t = String(r && r.t || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (!t) return { ok: false, error: '종목이 없어요' };
+    var cache = CacheService.getScriptCache(), key = 'st_' + t;
+    var hit = cache.get(key); if (hit) return JSON.parse(hit);
+    var sym = t.replace(/\./g, '-');
+    var mods = 'summaryDetail,defaultKeyStatistics,financialData,summaryProfile,price,calendarEvents,earnings';
+    var res = ysummary_(sym, mods);
+    if (!res) { ysummary_clear_(); res = ysummary_(sym, mods); }   // 크럼 만료 시 1회 재시도
+    if (!res) return { ok: false, error: '지표를 못 받았어요' };
+    var sd = res.summaryDetail || {}, ks = res.defaultKeyStatistics || {}, fd = res.financialData || {},
+        pf = res.summaryProfile || {}, pr = res.price || {}, ce = res.calendarEvents || {}, en = res.earnings || {};
+    var rv = function (o) { return o && o.raw != null ? o.raw : null; };
+    var ep = function (o) { var e = rv(o); return e ? Utilities.formatDate(new Date(e * 1000), 'Etc/UTC', 'yyyy-MM-dd') : null; };
+    var earn = ce.earnings && ce.earnings.earningsDate && ce.earnings.earningsDate[0];
+    var out = {
+      ok: true, t: t,
+      name: pr.longName || pr.shortName || '',
+      sector: pf.sector || '', industry: pf.industry || '', country: pf.country || '',
+      desc: (pf.longBusinessSummary || '').slice(0, 220),
+      mktcap: rv(sd.marketCap) != null ? rv(sd.marketCap) : rv(pr.marketCap),
+      per: rv(sd.trailingPE), forwardPer: rv(sd.forwardPE), pbr: rv(ks.priceToBook),
+      psr: rv(sd.priceToSalesTrailing12Months), roe: rv(fd.returnOnEquity),
+      margin: rv(fd.profitMargins), eps: rv(ks.trailingEps), beta: rv(sd.beta),
+      divYield: rv(sd.dividendYield), divRate: rv(sd.dividendRate),
+      exDiv: ep(sd.exDividendDate) || ep(ce.exDividendDate),
+      divDate: ep(ce.dividendDate),
+      nextEarnings: earn ? ep(earn) : null,
+      targetPrice: rv(fd.targetMeanPrice), recommend: fd.recommendationKey || ''
+    };
+    // 실적 — 분기 매출·순이익(financialsChart), 분기 EPS 실제/예상(earningsChart)
+    var fcq = (en.financialsChart && en.financialsChart.quarterly) || [];
+    var ecq = (en.earningsChart && en.earningsChart.quarterly) || [];
+    out.revQ = fcq.map(function (x) { return { q: x.date, rev: rv(x.revenue), earn: rv(x.earnings) }; });
+    out.epsQ = ecq.map(function (x) { return { q: x.date, act: rv(x.actual), est: rv(x.estimate) }; });
+    out.epsEst = rv((en.earningsChart || {}).currentQuarterEstimate);
+    out.epsEstQ = (en.earningsChart || {}).currentQuarterEstimateDate && ((en.earningsChart || {}).currentQuarterEstimateDate + (en.earningsChart || {}).currentQuarterEstimateYear || '');
+    try { cache.put(key, JSON.stringify(out), 600); } catch (e) {}
+    return out;
+  },
+
   sendSetupCode: function () {
     const a = acct_();
     if (a.hash) return { ok: false, error: '이미 계정이 있어요. 로그인해 주세요.' };
@@ -698,6 +740,39 @@ function yfetch_(url) {
   } catch (e) { return null; }
 }
 function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 100; }
+
+// 야후 quoteSummary는 쿠키+크럼이 필요해요. 쿠키/크럼을 받아 30분 캐시.
+function ysummary_clear_() { try { CacheService.getScriptCache().remove('yauth'); } catch (e) {} }
+function yauth_() {
+  var cache = CacheService.getScriptCache(), hit = cache.get('yauth');
+  if (hit) return JSON.parse(hit);
+  var cookie = '', crumb = '';
+  try {
+    var r1 = UrlFetchApp.fetch('https://fc.yahoo.com', { muteHttpExceptions: true, followRedirects: false, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    var sc = r1.getAllHeaders()['Set-Cookie'];
+    if (sc) cookie = (Array.isArray(sc) ? sc : [sc]).map(function (s) { return String(s).split(';')[0]; }).join('; ');
+  } catch (e) {}
+  try {
+    var r2 = UrlFetchApp.fetch('https://query2.finance.yahoo.com/v1/test/getcrumb',
+      { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0', 'Cookie': cookie } });
+    if (r2.getResponseCode() === 200) { var c = r2.getContentText(); if (c && c.length < 40 && c.indexOf('<') < 0) crumb = c; }
+  } catch (e) {}
+  var out = { cookie: cookie, crumb: crumb };
+  if (cookie && crumb) { try { cache.put('yauth', JSON.stringify(out), 1800); } catch (e) {} }
+  return out;
+}
+function ysummary_(sym, mods) {
+  var a = yauth_();
+  if (!a.crumb) return null;
+  var url = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(sym) +
+    '?modules=' + mods + '&crumb=' + encodeURIComponent(a.crumb);
+  try {
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0', 'Cookie': a.cookie } });
+    if (resp.getResponseCode() !== 200) return null;
+    var d = JSON.parse(resp.getContentText());
+    return d && d.quoteSummary && d.quoteSummary.result && d.quoteSummary.result[0];
+  } catch (e) { return null; }
+}
 /* ---------------- 뉴스레터 (매일 아침 이메일) ---------------- */
 function nlDlab_(n) { return n <= 0 ? 'D-DAY' : 'D-' + n; }
 
