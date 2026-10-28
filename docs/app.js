@@ -820,7 +820,7 @@
     const h = findHold(t);
     if (!h) return appShell("holdings", '<button class="back" onclick="history.back()">← 뒤로</button><div class="empty">보유 목록에 없는 종목이에요</div>');
     // 자세히 분석 — 흩어진 6개 섹션을 탭 하나로 (차트·실적·재무·가치·쉬운 리포트·분기 공시)
-    const panes = [["차트", chartHtml(h.t)], ["실적", earnHtml(h.t)], ["재무", finHtml(finFor(h.t))],
+    const panes = [["차트", chartHtml(h.t)], ["실적", earnTabHtml(h.t)], ["재무", finHtml(finFor(h.t))],
                    ["가치(버핏)", b4Html(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]];
     const dtabs = '<div class="segs dtabs">' + panes.map((p, i) => '<button data-dt="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>").join("") + "</div>" +
       '<div class="dpanes">' + panes.map((p, i) => '<div class="dpane"' + (i ? " hidden" : "") + ">" + p[1] + "</div>").join("") + "</div>";
@@ -863,6 +863,7 @@
     liveStock(h.t);
     mountQuoteSum(h.t);
     mountStats(h.t);
+    if (!(S.ai && S.ai.earn && S.ai.earn[h.t])) mountEarnTab(h.t);
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------
@@ -1484,8 +1485,47 @@
     el.innerHTML = h;
   }
   // 종목 정보 — 투자지표·실적·배당·회사정보 (야후 quoteSummary 프록시, 실시간 조회. GPT·재무 계산 없음)
+  const SCACHE = {};
+  async function fetchStats(t) {
+    if (SCACHE[t]) return SCACHE[t];
+    const j = await api("stats", { t: t });
+    if (j && j.ok) SCACHE[t] = j;
+    return j;
+  }
   function statsCard(t) {
     return '<div id="stats-' + esc(t) + '"><div class="card sub" style="text-align:center;padding:16px">종목 정보 불러오는 중…</div></div>';
+  }
+  // 실적(분기 매출 막대 + EPS 실제/예상) — stats 데이터로 렌더. 투자지표 카드와 실적 탭에서 공용.
+  function earnBarsHtml(j) {
+    if (!j || ((!j.revQ || j.revQ.length < 2) && (!j.epsQ || j.epsQ.length < 2))) return "";
+    let h = "";
+    if (j.revQ && j.revQ.length >= 2) h += '<div class="row between" style="margin:8px 0 2px"><span class="small">분기 매출</span><span class="small">억/조 달러</span></div>' + statRevBars(j.revQ);
+    if (j.epsQ && j.epsQ.length >= 2) {
+      h += '<div class="small" style="margin-top:12px">분기 EPS · 실제 vs 예상(컨센서스)</div><div class="tblwrap"><table class="tbl num"><tr><th>분기</th><th>실제</th><th>예상</th><th>차이</th></tr>' +
+        j.epsQ.slice().reverse().map(function (x) {
+          var diff = (x.act != null && x.est != null) ? x.act - x.est : null;
+          var flat = diff != null && Math.abs(diff) < 0.005, dc = diff == null || flat ? "" : diff > 0 ? "good-t" : "bad-t";
+          var ds = diff == null ? "—" : flat ? "0.00" : (diff > 0 ? "+" : "") + fmt(diff, 2);
+          var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$3 $1");
+          return "<tr><td>" + esc(lab) + "</td><td>" + (x.act == null ? "—" : "$" + fmt(x.act, 2)) + "</td><td>" + (x.est == null ? "—" : "$" + fmt(x.est, 2)) +
+            '</td><td class="' + dc + '">' + ds + "</td></tr>";
+        }).join("") + "</table></div>";
+    }
+    return h;
+  }
+  // 보유/후보 상세의 '실적' 탭 — AI 실적 카드가 있으면 그것, 없으면 실시간 실적(분기 매출·EPS)로 채워요.
+  function earnTabHtml(t) {
+    const ai = S.ai && S.ai.earn && S.ai.earn[t];
+    if (ai) return earnHtml(t);
+    return '<div id="earntab-' + esc(t) + '"><div class="card sub" style="text-align:center;padding:16px">실적 불러오는 중…</div></div>';
+  }
+  async function mountEarnTab(t) {
+    const el = document.getElementById("earntab-" + t); if (!el) return;
+    let j = null; try { j = await fetchStats(t); } catch (e) {}
+    const bars = j && j.ok ? earnBarsHtml(j) : "";
+    if (!bars) { el.innerHTML = '<div class="card sub">이 종목은 분기 실적 자료가 없어요 (ETF·일부 종목). AI 실적 분석은 보유·후보 상위만 매일 아침 생성돼요.</div>'; return; }
+    el.innerHTML = '<div class="card"><div class="row between"><b>실적</b><span class="small">실시간 · 야후</span></div>' + bars +
+      '<div class="small" style="margin-top:6px">상세 AI 실적 분석(가이던스·마진·현금흐름)은 보유·후보 상위 종목만 매일 아침 생성돼요.</div></div>';
   }
   function statRevBars(items) {
     var vals = items.map(function (x) { return x.rev; }).filter(function (v) { return v != null; });
@@ -1501,7 +1541,7 @@
   }
   async function mountStats(t) {
     var el = document.getElementById("stats-" + t); if (!el) return;
-    var j = null; try { j = await api("stats", { t: t }); } catch (e) {}
+    var j = null; try { j = await fetchStats(t); } catch (e) {}
     if (!j || !j.ok) { el.innerHTML = '<div class="card"><b>종목 정보</b><div class="small" style="padding:8px 0">지표를 불러오지 못했어요. 잠시 후 다시 열어 주세요.</div></div>'; return; }
     var money = function (v) { return v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 1) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 0) + "억" : v >= 1e4 ? "$" + fmt(v / 1e4, 0) + "만" : "$" + fmt(v, 0); };
     var mult = function (v) { return v == null ? "—" : fmt(v, 1) + "배"; };
@@ -1511,22 +1551,8 @@
     var h = '<div class="card"><b>투자지표</b><div class="statgrid g3" style="margin-top:12px">' +
       grid.map(function (g) { return '<div class="sc"><div class="k">' + g[0] + '</div><div class="v num">' + g[1] + "</div></div>"; }).join("") + "</div></div>";
     // 실적 — 분기 매출 막대 + EPS 실제/예상
-    if ((j.revQ && j.revQ.length >= 2) || (j.epsQ && j.epsQ.length >= 2)) {
-      h += '<div class="card"><b>실적</b>';
-      if (j.revQ && j.revQ.length >= 2) h += '<div class="row between" style="margin:8px 0 2px"><span class="small">분기 매출</span><span class="small">억/조 달러</span></div>' + statRevBars(j.revQ);
-      if (j.epsQ && j.epsQ.length >= 2) {
-        h += '<div class="small" style="margin-top:12px">분기 EPS · 실제 vs 예상(컨센서스)</div><div class="tblwrap"><table class="tbl num"><tr><th>분기</th><th>실제</th><th>예상</th><th>차이</th></tr>' +
-          j.epsQ.slice().reverse().map(function (x) {
-            var diff = (x.act != null && x.est != null) ? x.act - x.est : null;
-            var flat = diff != null && Math.abs(diff) < 0.005, dc = diff == null || flat ? "" : diff > 0 ? "good-t" : "bad-t";
-            var ds = diff == null ? "—" : flat ? "0.00" : (diff > 0 ? "+" : "") + fmt(diff, 2);
-            var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$3 $1");
-            return "<tr><td>" + esc(lab) + "</td><td>" + (x.act == null ? "—" : "$" + fmt(x.act, 2)) + "</td><td>" + (x.est == null ? "—" : "$" + fmt(x.est, 2)) +
-              '</td><td class="' + dc + '">' + ds + "</td></tr>";
-          }).join("") + "</table></div>";
-      }
-      h += "</div>";
-    }
+    var earnH = earnBarsHtml(j);
+    if (earnH) h += '<div class="card"><b>실적</b>' + earnH + "</div>";
     // 배당 소식 — 요약 + 월/분기별 지급 이력
     var hist = j.divHist || [];
     if (j.divRate != null || j.divYield != null || j.exDiv || hist.length) {
