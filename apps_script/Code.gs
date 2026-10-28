@@ -828,7 +828,9 @@ function aiCall_(sys, usr) {
   for (var i = 0; i < AI_PROVIDERS.length; i++) {
     var p = AI_PROVIDERS[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
-    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], temperature: 0.3, max_tokens: 1200 };
+    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] };
+    if (p.name === 'openai') { body.max_completion_tokens = 1200; }   // gpt-5 계열: max_tokens 미지원, 기본 temperature만
+    else { body.max_tokens = 1200; body.temperature = 0.3; }
     if (p.json) body.response_format = { type: 'json_object' };
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });

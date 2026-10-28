@@ -868,7 +868,6 @@
     liveStock(h.t);
     mountQuoteSum(h.t);
     mountStats(h.t);
-    if (!(S.ai && S.ai.earn && S.ai.earn[h.t])) mountEarnTab(h.t);
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------
@@ -1409,12 +1408,9 @@
   function earnHtml(t) {
     const x = S.ai && S.ai.earn && S.ai.earn[t];
     if (!x) return "";
-    const v = x["판정"] || {}, qs = x["분기들"] || [];
-    const bars = qs.length >= 2
-      ? '<div class="card"><div class="row between"><b>분기 매출</b><span class="small">억/조 달러</span></div>' + qbars(qs, "rev", true) + "</div>" +
-        '<div class="card"><div class="row between"><b>분기 EPS</b><span class="small">주당순이익 $</span></div>' + qbars(qs, "eps", false) + "</div>"
-      : "";
-    return '<h2>실적 카드 · ' + esc(x["분기"] || "") + '</h2>' + bars + '<div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
+    const v = x["판정"] || {};
+    // 분기 매출·EPS 막대는 위 '종목 정보 → 실적'(statsCard)에 있으니 여기선 생략(중복 방지). AI 상세 분석만.
+    return '<h2>AI 실적 분석 · ' + esc(x["분기"] || "") + '</h2><div class="card"><div class="row between"><span class="sub">' + esc(x["발표일"] || "") + "</span><span>" +
       '<span class="badge ' + tone3(v["실적"]) + '">실적 ' + esc(v["실적"] || "") + '</span> <span class="badge ' + tone3(v["가이던스"]) + '">가이던스 ' + esc(v["가이던스"] || "") + "</span></span></div>" +
       '<div class="tblwrap"><table class="tbl num"><tr><th></th><th>실제</th><th>예상</th><th>직전 분기</th><th>작년</th></tr>' + (x["표"] || []).map(r => "<tr><td>" + esc(r["항목"]) + "</td><td>" + esc(r["실제"]) +
         "</td><td>" + esc(r["예상(컨센서스)"]) + "</td><td>" + esc(r["직전 분기"] || "—") + "</td><td>" + esc(r["작년 같은 분기"]) + "</td></tr>").join("") + "</table></div>" +
@@ -1518,19 +1514,11 @@
     }
     return h;
   }
-  // 보유/후보 상세의 '실적' 탭 — AI 실적 카드가 있으면 그것, 없으면 실시간 실적(분기 매출·EPS)로 채워요.
+  // 보유/후보 상세의 '실적' 탭 — 분기 매출·EPS 막대는 위 '종목 정보 → 실적'에 있으니, 여기선 AI 상세 분석만(중복 방지).
   function earnTabHtml(t) {
     const ai = S.ai && S.ai.earn && S.ai.earn[t];
     if (ai) return earnHtml(t);
-    return '<div id="earntab-' + esc(t) + '"><div class="card sub" style="text-align:center;padding:16px">실적 불러오는 중…</div></div>';
-  }
-  async function mountEarnTab(t) {
-    const el = document.getElementById("earntab-" + t); if (!el) return;
-    let j = null; try { j = await fetchStats(t); } catch (e) {}
-    const bars = j && j.ok ? earnBarsHtml(j) : "";
-    if (!bars) { el.innerHTML = '<div class="card sub">이 종목은 분기 실적 자료가 없어요 (ETF·일부 종목). AI 실적 분석은 보유·후보 상위만 매일 아침 생성돼요.</div>'; return; }
-    el.innerHTML = '<div class="card"><div class="row between"><b>실적</b><span class="small">실시간 · 야후</span></div>' + bars +
-      '<div class="small" style="margin-top:6px">상세 AI 실적 분석(가이던스·마진·현금흐름)은 보유·후보 상위 종목만 매일 아침 생성돼요.</div></div>';
+    return '<div class="card sub">분기 매출·EPS(실제 vs 예상)는 위 <b>종목 정보 → 실적</b>에서 볼 수 있어요. 상세 AI 실적 분석(가이던스·마진·현금흐름)은 보유·후보 상위 종목만 매일 아침 생성돼요.</div>';
   }
   function statRevBars(items) {
     var vals = items.map(function (x) { return x.rev; }).filter(function (v) { return v != null; });
