@@ -175,33 +175,34 @@ const ACTIONS = {
     return out;
   },
 
-  // 재무제표 (손익·재무상태·현금흐름, 분기) — 야후 quoteSummary 프록시. GPT 없음.
+  // 재무제표 (손익·재무상태·현금흐름, 분기) — 야후 fundamentals-timeseries 프록시. GPT 없음.
   fin: function (r) {
     var t = String(r && r.t || '').toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
     if (!t) return { ok: false, error: '종목이 없어요' };
     var cache = CacheService.getScriptCache(), key = 'fin_' + t;
     var hit = cache.get(key); if (hit) return JSON.parse(hit);
     var sym = t.replace(/\./g, '-');
-    var mods = 'incomeStatementHistoryQuarterly,balanceSheetHistoryQuarterly,cashflowStatementHistoryQuarterly';
-    var res = ysummary_(sym, mods);
-    if (!res) { ysummary_clear_(); res = ysummary_(sym, mods); }
-    if (!res) return { ok: false, error: '재무제표를 못 받았어요' };
-    var inc = (res.incomeStatementHistoryQuarterly || {}).incomeStatementHistory || [];
-    var bal = (res.balanceSheetHistoryQuarterly || {}).balanceSheetStatements || [];
-    var cf = (res.cashflowStatementHistoryQuarterly || {}).cashflowStatements || [];
-    if (!inc.length && !bal.length && !cf.length) return { ok: false, error: '재무제표 자료가 없어요 (ETF·일부 종목)' };
-    var tbl = function (arr, fields) {
-      arr = (arr || []).slice(0, 5);
-      var cols = arr.map(function (s) { return s.endDate && s.endDate.raw ? Utilities.formatDate(new Date(s.endDate.raw * 1000), 'Etc/UTC', 'yy-MM') : '—'; });
-      var rows = fields.map(function (f) { return { label: f[1], vals: arr.map(function (s) { return s[f[0]] && s[f[0]].raw != null ? s[f[0]].raw : null; }) }; });
-      return { cols: cols, rows: rows };
+    var incF = [['quarterlyTotalRevenue', '매출'], ['quarterlyCostOfRevenue', '매출원가'], ['quarterlyGrossProfit', '매출총이익'], ['quarterlyOperatingIncome', '영업이익'], ['quarterlyNetIncome', '순이익']];
+    var balF = [['quarterlyTotalAssets', '총자산'], ['quarterlyTotalLiabilitiesNetMinorityInterest', '총부채'], ['quarterlyStockholdersEquity', '자본총계'], ['quarterlyCashAndCashEquivalents', '현금성자산']];
+    var cfF = [['quarterlyOperatingCashFlow', '영업활동'], ['quarterlyInvestingCashFlow', '투자활동'], ['quarterlyFinancingCashFlow', '재무활동'], ['quarterlyFreeCashFlow', '잉여현금흐름']];
+    var allTypes = incF.concat(balF).concat(cfF).map(function (x) { return x[0]; }).join(',');
+    var results = ytimeseries_(sym, allTypes);
+    if (!results) { ysummary_clear_(); results = ytimeseries_(sym, allTypes); }
+    if (!results || !results.length) return { ok: false, error: '재무제표를 못 받았어요' };
+    var tsTable = function (fields) {
+      var byType = {}, dateset = {};
+      fields.forEach(function (f) {
+        var r2 = results.filter(function (x) { return x.meta && x.meta.type && x.meta.type[0] === f[0]; })[0];
+        var arr = r2 ? r2[f[0]] : null, m = {};
+        (arr || []).forEach(function (it) { if (it && it.asOfDate && it.reportedValue && it.reportedValue.raw != null) { m[it.asOfDate] = it.reportedValue.raw; dateset[it.asOfDate] = 1; } });
+        byType[f[0]] = m;
+      });
+      var cols = Object.keys(dateset).sort().reverse().slice(0, 5);
+      return { cols: cols.map(function (d) { return d.slice(2, 7); }), rows: fields.map(function (f) { return { label: f[1], vals: cols.map(function (d) { return byType[f[0]][d] != null ? byType[f[0]][d] : null; }) }; }) };
     };
-    var out = {
-      ok: true, t: t,
-      inc: tbl(inc, [['totalRevenue', '매출'], ['costOfRevenue', '매출원가'], ['grossProfit', '매출총이익'], ['operatingIncome', '영업이익'], ['netIncome', '순이익']]),
-      bal: tbl(bal, [['totalAssets', '총자산'], ['totalLiab', '총부채'], ['totalStockholderEquity', '자본총계'], ['cash', '현금성자산']]),
-      cf: tbl(cf, [['totalCashFromOperatingActivities', '영업활동'], ['totalCashflowsFromInvestingActivities', '투자활동'], ['totalCashFromFinancingActivities', '재무활동'], ['changeInCash', '현금 증감']])
-    };
+    var out = { ok: true, t: t, inc: tsTable(incF), bal: tsTable(balF), cf: tsTable(cfF) };
+    var any = [out.inc, out.bal, out.cf].some(function (tb) { return tb.rows.some(function (rr) { return rr.vals.some(function (v) { return v != null; }); }); });
+    if (!any) return { ok: false, error: '재무제표 자료가 없어요 (ETF·일부 종목)' };
     try { cache.put(key, JSON.stringify(out), 1800); } catch (e) {}
     return out;
   },
@@ -807,6 +808,20 @@ function yauth_() {
   var out = { cookie: cookie, crumb: crumb };
   if (cookie && crumb) { try { cache.put('yauth', JSON.stringify(out), 1800); } catch (e) {} }
   return out;
+}
+// 분기 재무 시계열 (손익·재무상태·현금흐름) — fundamentals-timeseries (쿠키+크럼)
+function ytimeseries_(sym, types) {
+  var a = yauth_();
+  if (!a.crumb) return null;
+  var p2 = Math.floor(Date.now() / 1000) + 86400, p1 = p2 - 3 * 366 * 86400;
+  var url = 'https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/' + encodeURIComponent(sym) +
+    '?symbol=' + encodeURIComponent(sym) + '&type=' + types + '&period1=' + p1 + '&period2=' + p2 + '&merge=false&crumb=' + encodeURIComponent(a.crumb);
+  try {
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': 'Mozilla/5.0', 'Cookie': a.cookie } });
+    if (resp.getResponseCode() !== 200) return null;
+    var d = JSON.parse(resp.getContentText());
+    return d && d.timeseries && d.timeseries.result;
+  } catch (e) { return null; }
 }
 function ysummary_(sym, mods) {
   var a = yauth_();
