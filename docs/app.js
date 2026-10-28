@@ -1458,7 +1458,7 @@
     return '<div class="card qsum" id="qsum-' + esc(t) + '"><div class="small" style="padding:12px 0;text-align:center">시세 불러오는 중…</div></div>';
   }
   function bigVol(v) { return v == null ? "—" : v >= 1e8 ? fmt(v / 1e8, 1) + "억주" : v >= 1e4 ? fmt(v / 1e4, 0) + "만주" : fmt(v, 0) + "주"; }
-  function bigMoney(v) { return v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 1) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 0) + "억" : v >= 1e4 ? "$" + fmt(v / 1e4, 0) + "만" : "$" + fmt(v, 0); }
+  function bigMoney(v) { return v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 1) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 1) + "억" : v >= 1e4 ? "$" + fmt(v / 1e4, 0) + "만" : "$" + fmt(v, 0); }
   async function mountQuoteSum(t) {
     const el = document.getElementById("qsum-" + t); if (!el) return;
     const usd = v => v == null ? "—" : "$" + fmt(v);
