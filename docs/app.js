@@ -580,12 +580,14 @@
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       liveChartBox(t, null) +
       quoteSumCard(t) +
+      statsCard(t) +
       priceAlertCard(t) +
-      '<p class="foot">관심 종목은 실시간 차트·시세만 보여줘요. 매일 AI 리포트·재무 신호는 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
+      '<p class="foot">관심 종목도 시세·투자지표·실적·배당을 실시간으로 볼 수 있어요. AI 리포트·재무 신호 전체 분석은 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
     bindPriceAlert();
     liveStock(t);
     mountQuoteSum(t);
+    mountStats(t);
   }
 
   function idxBar() { return '<div id="idxbar" class="idxbar"><div class="idxchip sub" style="min-width:auto;border:0;padding:8px 2px">지수 불러오는 중…</div></div>'; }
@@ -752,7 +754,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + quoteSumCard(p.t) + priceAlertCard(p.t) +
+      tags(p.tags) + quoteSumCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
@@ -784,6 +786,7 @@
     bindPriceAlert();
     liveStock(p.t);
     mountQuoteSum(p.t);
+    mountStats(p.t);
   }
 
   function viewHoldings() {
@@ -826,6 +829,7 @@
       stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       quoteSumCard(h.t) +
+      statsCard(h.t) +
       priceAlertCard(h.t) +
       // 내 평가손익
       '<div class="card"><div class="sub">내 평가손익</div>' +
@@ -858,6 +862,7 @@
     bindPriceAlert();
     liveStock(h.t);
     mountQuoteSum(h.t);
+    mountStats(h.t);
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------
@@ -1476,6 +1481,66 @@
       '<div class="sc"><div class="k">현재가</div><div class="v num">' + usd(cur) + '</div></div>' +
       '<div class="sc"><div class="k">거래량</div><div class="v num">' + bigVol(q.vol) + '</div></div>' +
       '<div class="sc"><div class="k">거래대금</div><div class="v num">' + bigMoney(val) + '</div></div></div>';
+    el.innerHTML = h;
+  }
+  // 종목 정보 — 투자지표·실적·배당·회사정보 (야후 quoteSummary 프록시, 실시간 조회. GPT·재무 계산 없음)
+  function statsCard(t) {
+    return '<div id="stats-' + esc(t) + '"><div class="card sub" style="text-align:center;padding:16px">종목 정보 불러오는 중…</div></div>';
+  }
+  function statRevBars(items) {
+    var vals = items.map(function (x) { return x.rev; }).filter(function (v) { return v != null; });
+    if (vals.length < 2) return "";
+    var max = Math.max.apply(null, vals.map(Math.abs)) || 1;
+    var money = function (v) { return Math.abs(v) >= 1e12 ? fmt(v / 1e12, 1) + "조" : Math.abs(v) >= 1e8 ? fmt(v / 1e8, 0) + "억" : fmt(v / 1e6, 0) + "백만"; };
+    return '<div class="qbars">' + items.map(function (x) {
+      var v = x.rev, h = v == null ? 0 : Math.max(3, Math.abs(v) / max * 100);
+      var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$2 $1");
+      return '<div class="qcol"><div class="qbarwrap"><span class="qbar" style="height:' + h + '%;background:var(--up)"></span></div><div class="qval num">' +
+        (v == null ? "—" : "$" + money(v)) + '</div><div class="small">' + esc(lab) + "</div></div>";
+    }).join("") + "</div>";
+  }
+  async function mountStats(t) {
+    var el = document.getElementById("stats-" + t); if (!el) return;
+    var j = null; try { j = await api("stats", { t: t }); } catch (e) {}
+    if (!j || !j.ok) { el.innerHTML = '<div class="card"><b>종목 정보</b><div class="small" style="padding:8px 0">지표를 불러오지 못했어요. 잠시 후 다시 열어 주세요.</div></div>'; return; }
+    var money = function (v) { return v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 1) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 0) + "억" : v >= 1e4 ? "$" + fmt(v / 1e4, 0) + "만" : "$" + fmt(v, 0); };
+    var mult = function (v) { return v == null ? "—" : fmt(v, 1) + "배"; };
+    var asPct = function (v) { return v == null ? "—" : fmt(v * 100, 2) + "%"; };
+    var grid = [["시가총액", money(j.mktcap)], ["PER", mult(j.per)], ["PBR", mult(j.pbr)],
+      ["PSR", mult(j.psr)], ["ROE", asPct(j.roe)], ["배당수익률", j.divYield != null ? asPct(j.divYield) : "—"]];
+    var h = '<div class="card"><b>투자지표</b><div class="statgrid g3" style="margin-top:12px">' +
+      grid.map(function (g) { return '<div class="sc"><div class="k">' + g[0] + '</div><div class="v num">' + g[1] + "</div></div>"; }).join("") + "</div></div>";
+    // 실적 — 분기 매출 막대 + EPS 실제/예상
+    if ((j.revQ && j.revQ.length >= 2) || (j.epsQ && j.epsQ.length >= 2)) {
+      h += '<div class="card"><b>실적</b>';
+      if (j.revQ && j.revQ.length >= 2) h += '<div class="row between" style="margin:8px 0 2px"><span class="small">분기 매출</span><span class="small">억/조 달러</span></div>' + statRevBars(j.revQ);
+      if (j.epsQ && j.epsQ.length >= 2) {
+        h += '<div class="small" style="margin-top:12px">분기 EPS · 실제 vs 예상(컨센서스)</div><div class="tblwrap"><table class="tbl num"><tr><th>분기</th><th>실제</th><th>예상</th><th>차이</th></tr>' +
+          j.epsQ.slice().reverse().map(function (x) {
+            var diff = (x.act != null && x.est != null) ? x.act - x.est : null, dc = diff == null ? "" : diff >= 0 ? "good-t" : "bad-t";
+            var lab = String(x.q || "").replace(/(\dQ)(\d{2})(\d{2})/, "$2 $1");
+            return "<tr><td>" + esc(lab) + "</td><td>" + (x.act == null ? "—" : "$" + fmt(x.act, 2)) + "</td><td>" + (x.est == null ? "—" : "$" + fmt(x.est, 2)) +
+              '</td><td class="' + dc + '">' + (diff == null ? "—" : (diff >= 0 ? "+" : "") + fmt(diff, 2)) + "</td></tr>";
+          }).join("") + "</table></div>";
+      }
+      h += "</div>";
+    }
+    // 배당 소식
+    if (j.divRate != null || j.divYield != null || j.exDiv) {
+      h += '<div class="card"><b>배당 소식</b><dl class="kv num" style="margin-top:8px">' +
+        (j.divRate != null ? "<dt>1주당 배당금 (연)</dt><dd>$" + fmt(j.divRate) + "</dd>" : "") +
+        (j.divYield != null ? "<dt>배당수익률</dt><dd>" + asPct(j.divYield) + "</dd>" : "") +
+        (j.exDiv ? "<dt>다음 배당락일</dt><dd>" + esc(j.exDiv) + "</dd>" : "") + "</dl></div>";
+    }
+    // 회사 정보
+    if (j.sector || j.desc || j.nextEarnings) {
+      h += '<div class="card"><b>회사 정보</b><dl class="kv"><dt>업종</dt><dd>' + esc(j.sector || "—") + (j.industry ? " · " + esc(j.industry) : "") + "</dd>" +
+        (j.country ? "<dt>국가</dt><dd>" + esc(j.country) + "</dd>" : "") +
+        (j.nextEarnings ? "<dt>실적 발표일</dt><dd>" + esc(j.nextEarnings) + "</dd>" : "") +
+        (j.targetPrice != null ? "<dt>애널리스트 목표가</dt><dd class='num'>$" + fmt(j.targetPrice) + "</dd>" : "") + "</dl>" +
+        (j.desc ? '<div class="sub" style="margin-top:6px">' + esc(j.desc) + "</div>" : "") + "</div>";
+    }
+    h += '<div class="small" style="margin-top:2px">야후 자료 · 투자지표·실적·배당은 실시간 조회 (GPT 아님)</div>';
     el.innerHTML = h;
   }
   // ---- 실시간 캔들 차트 (Apps Script 프록시로 야후 시세를 받아 그림) ----

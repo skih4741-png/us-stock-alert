@@ -364,3 +364,8 @@ svg.fundspark { width: 100%; height: 120px; display: block; margin: 4px 0; }
 .statgrid .sc .k { font-size: 12px; color: var(--sub); }
 .statgrid .sc .v { font-weight: 700; margin-top: 3px; font-size: 15px; }
 .card.qsum { padding: 14px 16px; }
+
+/* 종목 정보 — 투자지표 3열 그리드 */
+.statgrid.g3 { grid-template-columns: 1fr 1fr 1fr; }
+.statgrid.g3 .sc { text-align: center; padding: 12px 6px; }
+.statgrid.g3 .sc .v { font-size: 14px; }
