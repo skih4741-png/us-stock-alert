@@ -70,7 +70,10 @@ const ACTIONS = {
     var price = meta.regularMarketPrice != null ? meta.regularMarketPrice : (c.length ? c[c.length - 1] : null);
     var prev = meta.chartPreviousClose != null ? meta.chartPreviousClose : meta.previousClose;
     var chg = (price != null && prev) ? Math.round((price / prev - 1) * 10000) / 100 : null;
-    var out = { ok: true, t: t, price: r2_(price), prev: r2_(prev), chg: chg, range: rng, bars: bars };
+    var out = { ok: true, t: t, price: r2_(price), prev: r2_(prev), chg: chg, range: rng, bars: bars,
+      open: r2_(meta.regularMarketOpen), dayHi: r2_(meta.regularMarketDayHigh), dayLo: r2_(meta.regularMarketDayLow),
+      vol: meta.regularMarketVolume != null ? Math.round(meta.regularMarketVolume) : null,
+      hi52: r2_(meta.fiftyTwoWeekHigh), lo52: r2_(meta.fiftyTwoWeekLow), cur: meta.currency || 'USD' };
     try { cache.put(key, JSON.stringify(out), 60); } catch (e) {}
     return out;
   },

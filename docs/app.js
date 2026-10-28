@@ -579,17 +579,13 @@
       stockHeader(t, "", w.px, '<span class="badge info">관심</span>') +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       liveChartBox(t, null) +
-      '<div class="card"><b>종목 정보</b><dl class="kv"><dt>52주 최고·최저</dt><dd id="wk52">불러오는 중…</dd></dl></div>' +
+      quoteSumCard(t) +
       priceAlertCard(t) +
       '<p class="foot">관심 종목은 실시간 차트·시세만 보여줘요. 매일 AI 리포트·재무 신호는 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
     bindPriceAlert();
     liveStock(t);
-    fetchQuote(t, "1y").then(q => {
-      const b = (q && q.bars) || []; if (!b.length) return;
-      const lo = Math.min.apply(null, b.map(x => x[3])), hi = Math.max.apply(null, b.map(x => x[2]));
-      const el = document.getElementById("wk52"); if (el) el.textContent = "$" + fmt(hi) + " · $" + fmt(lo);
-    }).catch(() => {});
+    mountQuoteSum(t);
   }
 
   function idxBar() { return '<div id="idxbar" class="idxbar"><div class="idxchip sub" style="min-width:auto;border:0;padding:8px 2px">지수 불러오는 중…</div></div>'; }
@@ -756,7 +752,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + priceAlertCard(p.t) +
+      tags(p.tags) + quoteSumCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
@@ -787,6 +783,7 @@
     }));
     bindPriceAlert();
     liveStock(p.t);
+    mountQuoteSum(p.t);
   }
 
   function viewHoldings() {
@@ -828,6 +825,7 @@
       // 상단: 종목·현재가·결론 (후보 상세와 공통 머리글)
       stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
+      quoteSumCard(h.t) +
       priceAlertCard(h.t) +
       // 내 평가손익
       '<div class="card"><div class="sub">내 평가손익</div>' +
@@ -859,6 +857,7 @@
     bindWatch();
     bindPriceAlert();
     liveStock(h.t);
+    mountQuoteSum(h.t);
   }
 
   /* ---------- symphony-kanban에서 가져온 것 ----------
@@ -1448,6 +1447,35 @@
       ["52주 최고·최저", (c.hi52 != null ? "$" + fmt(c.hi52) : "—") + " · " + (c.lo52 != null ? "$" + fmt(c.lo52) : "—")],
       ["업종", f.sector || "—"]];
     return '<div class="card"><b>종목 정보</b><dl class="kv">' + rows.map(r => "<dt>" + r[0] + "</dt><dd>" + esc(String(r[1])) + "</dd>").join("") + "</dl></div>";
+  }
+  // 토스식 시세 요약 — 라이브 시세 meta(당일·52주 범위, 시가·거래량)로 그려요. GPT·재무 계산 없음.
+  function rangeBar(lo, cur, hi) {
+    if (lo == null || hi == null || cur == null || hi <= lo) return "";
+    const p = Math.max(0, Math.min(100, (cur - lo) / (hi - lo) * 100));
+    return '<div class="rbar"><span class="rfill" style="width:' + p.toFixed(1) + '%"></span><span class="rdot" style="left:' + p.toFixed(1) + '%"></span></div>';
+  }
+  function quoteSumCard(t) {
+    return '<div class="card qsum" id="qsum-' + esc(t) + '"><div class="small" style="padding:12px 0;text-align:center">시세 불러오는 중…</div></div>';
+  }
+  function bigVol(v) { return v == null ? "—" : v >= 1e8 ? fmt(v / 1e8, 1) + "억주" : v >= 1e4 ? fmt(v / 1e4, 0) + "만주" : fmt(v, 0) + "주"; }
+  function bigMoney(v) { return v == null ? "—" : v >= 1e12 ? "$" + fmt(v / 1e12, 1) + "조" : v >= 1e8 ? "$" + fmt(v / 1e8, 0) + "억" : v >= 1e4 ? "$" + fmt(v / 1e4, 0) + "만" : "$" + fmt(v, 0); }
+  async function mountQuoteSum(t) {
+    const el = document.getElementById("qsum-" + t); if (!el) return;
+    const usd = v => v == null ? "—" : "$" + fmt(v);
+    let q = null;
+    try { q = await fetchQuote(t, "3mo"); } catch (e) {}
+    if (!q || !q.ok) { el.innerHTML = '<div class="small" style="text-align:center;padding:12px 0">시세를 불러오지 못했어요</div>'; return; }
+    const cur = q.price, val = (q.vol != null && cur != null) ? q.vol * cur : null;
+    let h = '<b>시세 요약</b>';
+    if (q.dayLo != null && q.dayHi != null && q.dayHi > q.dayLo)
+      h += '<div class="rlab"><span>1일 저 ' + usd(q.dayLo) + '</span><span>고 ' + usd(q.dayHi) + '</span></div>' + rangeBar(q.dayLo, cur, q.dayHi);
+    if (q.lo52 != null && q.hi52 != null && q.hi52 > q.lo52)
+      h += '<div class="rlab"><span>52주 저 ' + usd(q.lo52) + '</span><span>고 ' + usd(q.hi52) + '</span></div>' + rangeBar(q.lo52, cur, q.hi52);
+    h += '<div class="statgrid"><div class="sc"><div class="k">시가</div><div class="v num">' + usd(q.open) + '</div></div>' +
+      '<div class="sc"><div class="k">현재가</div><div class="v num">' + usd(cur) + '</div></div>' +
+      '<div class="sc"><div class="k">거래량</div><div class="v num">' + bigVol(q.vol) + '</div></div>' +
+      '<div class="sc"><div class="k">거래대금</div><div class="v num">' + bigMoney(val) + '</div></div></div>';
+    el.innerHTML = h;
   }
   // ---- 실시간 캔들 차트 (Apps Script 프록시로 야후 시세를 받아 그림) ----
   const QCACHE = {};

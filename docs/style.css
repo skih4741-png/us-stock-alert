@@ -353,3 +353,14 @@ svg.fundspark { width: 100%; height: 120px; display: block; margin: 4px 0; }
 .newsitem { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .newsitem:last-child { border-bottom: 0; }
 .newsitem b { font-weight: 600; }
+
+/* 토스식 시세 요약 (range bar + 스탯 그리드) */
+.rlab { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); margin-top: 14px; }
+.rbar { position: relative; height: 5px; border-radius: 3px; background: var(--line2); margin: 6px 0 2px; }
+.rbar .rfill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--down), var(--up)); opacity: .35; }
+.rbar .rdot { position: absolute; top: 50%; width: 11px; height: 11px; border-radius: 50%; transform: translate(-50%, -50%); background: var(--up); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--line2); }
+.statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.statgrid .sc { background: var(--bg2); border-radius: 12px; padding: 10px 12px; }
+.statgrid .sc .k { font-size: 12px; color: var(--sub); }
+.statgrid .sc .v { font-weight: 700; margin-top: 3px; font-size: 15px; }
+.card.qsum { padding: 14px 16px; }
