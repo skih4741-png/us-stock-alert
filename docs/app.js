@@ -758,7 +758,7 @@
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
       tags(p.tags) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
-      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + earnHtml(p.t) + pmHtml(p.t) +
+      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
       "<dt>손절</dt><dd>" + fmt(pl.stop) + " (" + fmt(pl.risk_pct, 1) + "%)</dd>" +
@@ -823,7 +823,8 @@
     const h = findHold(t);
     if (!h) return appShell("holdings", '<button class="back" onclick="history.back()">← 뒤로</button><div class="empty">보유 목록에 없는 종목이에요</div>');
     // 자세히 분석 — 흩어진 6개 섹션을 탭 하나로 (차트·실적·재무·가치·쉬운 리포트·분기 공시)
-    const panes = [["차트", chartHtml(h.t)], ["실적", earnTabHtml(h.t)], ["재무", finHtml(finFor(h.t))],
+    // '실적' 탭 제거 — 실적은 위 '종목 정보 → 실적'(statsCard)에 분기 매출·EPS + AI 상세까지 한 곳에 모았어요.
+    const panes = [["차트", chartHtml(h.t)], ["재무", finHtml(finFor(h.t))],
                    ["가치(버핏)", b4Html(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]];
     const dtabs = '<div class="segs dtabs">' + panes.map((p, i) => '<button data-dt="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>").join("") + "</div>" +
       '<div class="dpanes">' + panes.map((p, i) => '<div class="dpane"' + (i ? " hidden" : "") + ">" + p[1] + "</div>").join("") + "</div>";
@@ -1514,12 +1515,6 @@
     }
     return h;
   }
-  // 보유/후보 상세의 '실적' 탭 — 분기 매출·EPS 막대는 위 '종목 정보 → 실적'에 있으니, 여기선 AI 상세 분석만(중복 방지).
-  function earnTabHtml(t) {
-    const ai = S.ai && S.ai.earn && S.ai.earn[t];
-    if (ai) return earnHtml(t);
-    return '<div class="card sub">분기 매출·EPS(실제 vs 예상)는 위 <b>종목 정보 → 실적</b>에서 볼 수 있어요. 상세 AI 실적 분석(가이던스·마진·현금흐름)은 보유·후보 상위 종목만 매일 아침 생성돼요.</div>';
-  }
   function statRevBars(items) {
     var vals = items.map(function (x) { return x.rev; }).filter(function (v) { return v != null; });
     if (vals.length < 2) return "";
@@ -1563,9 +1558,11 @@
       ["PSR", mult(j.psr)], ["ROE", asPct(j.roe)], ["배당수익률", j.divYield != null ? asPct(j.divYield) : "—"]];
     var h = '<div class="card"><b>투자지표</b><div class="statgrid g3" style="margin-top:12px">' +
       grid.map(function (g) { return '<div class="sc"><div class="k">' + g[0] + '</div><div class="v num">' + g[1] + "</div></div>"; }).join("") + "</div></div>";
-    // 실적 — 분기 매출 막대 + EPS 실제/예상
+    // 실적 — 분기 매출 막대 + EPS 실제/예상, 그리고 (있으면) AI 상세 실적 분석까지 한 곳에
     var earnH = earnBarsHtml(j);
     if (earnH) h += '<div class="card"><b>실적</b>' + earnH + "</div>";
+    var aiEarnH = earnHtml(t);
+    if (aiEarnH) h += aiEarnH;
     // 배당 소식 — 요약 + 월/분기별 지급 이력
     var hist = j.divHist || [];
     if (j.divRate != null || j.divYield != null || j.exDiv || hist.length) {
