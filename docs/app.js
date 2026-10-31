@@ -704,13 +704,29 @@
     mountIndices();
   }
 
+  function edgeTone(e) { return e && e.ok ? "good" : (e && e.label === "동전 던지기" ? "warn" : "info"); }
   function pickCard(p) {
-    const pl = p.plan || {};
+    const pl = p.plan || {}, e = p.edge;
+    const setupTag = p.setup ? '<span class="badge ' + edgeTone(e) + '">' + esc(p.setup) + "</span> " : "";
+    const edgeLine = e ? '<div class="small' + (e.ok ? " good-t" : e.label === "동전 던지기" ? " bad-t" : "") + '">' +
+      (e.n ? "엣지: 과거 " + e.n + "번 → 이김 " + e.win + "%" + (e.ok ? " ✓ 엣지 있음" : e.label === "동전 던지기" ? " · 동전 던지기(참고)" : "") : esc(e.label || "")) + "</div>" : "";
     return '<div class="card tap' + (p.etf ? " dash" : "") + '" onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'">' +
-      '<div class="row between"><span><b>' + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
+      '<div class="row between"><span>' + setupTag + "<b>" + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
       '<div class="small">' + esc((p.name || "").slice(0, 46)) + "</div>" +
-      '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + "</div>" +
-      tags(p.tags) + "</div>";
+      '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
+      edgeLine + tags(p.tags) + "</div>";
+  }
+  // 후보 상세 — 엣지(과거 승률) 바
+  function edgeCard(p) {
+    const e = p.edge; if (!e) return "";
+    if (!e.n) return '<div class="card sub">이 자리는 과거 표본이 적어 승률을 확인 못 했어요 (' + esc(e.setup || "") + ")</div>";
+    const win = e.win, loss = e.loss != null ? e.loss : 100 - win;
+    return '<div class="card"><div class="row between"><b>사기 전 엣지 — ' + esc(e.setup || "") + "</b><span class=\"badge " + edgeTone(e) + '">' + esc(e.label || "") + "</span></div>" +
+      '<div class="small" style="margin-top:4px">같은 자리가 과거 <b>' + e.n + "번</b> 나왔을 때 · 평균 " + (e.avg >= 0 ? "+" : "") + fmt(e.avg, 1) + "%</div>" +
+      '<div class="rbar" style="height:10px;margin:10px 0 6px"><span class="rfill" style="width:' + win + '%;background:var(--up);opacity:.85;border-radius:3px"></span></div>' +
+      '<div class="legend small"><span><span class="sdot" style="background:var(--up)"></span>목표 먼저 ' + win + "%</span><span style=\"margin-left:12px\"><span class=\"sdot\" style=\"background:var(--line2)\"></span>손절·미달 " + loss + "%</span></div>" +
+      (e.ok ? "" : '<div class="small" style="margin-top:6px">⚠ 이길 확률이 뚜렷하지 않아요 — 참고만 (동전 던지기면 거르는 게 원칙)</div>') +
+      '<div class="small" style="margin-top:6px">일봉 기준, 다음 날 시가 매수·손절/목표 규칙으로 과거를 돌려 계산 (GPT 아님)</div></div>';
   }
   function viewPicks() {
     if (needData("picks")) return;
@@ -754,9 +770,9 @@
     const pl = p.plan || {};
     const cons = (p.tags || []).filter(x => /실적|보류|출렁임|위험|참고/.test(x)).concat(p.caution ? [p.caution] : []).concat(p.warn ? [p.warn] : []);
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
-      stockHeader(p.t, p.name, p.price, '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
+      stockHeader(p.t, p.name, p.price, (p.setup ? '<span class="badge ' + edgeTone(p.edge) + '">' + esc(p.setup) + "</span> " : "") + '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
+      tags(p.tags) + edgeCard(p) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +

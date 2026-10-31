@@ -71,6 +71,7 @@ def pick_view(p: dict) -> dict:
         "rank": p.get("rank"), "streak": p.get("streak", 1), "band": p.get("band", ""),
         "plan": {k: (_num(v) if k != "valid_until" else v) for k, v in pl.items()},
         "desc": p.get("desc", ""), "caution": p.get("caution", ""), "warn": p.get("warn", ""),
+        "setup": p.get("setup"), "edge": p.get("edge"),
     }
 
 
