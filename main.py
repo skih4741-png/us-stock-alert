@@ -219,6 +219,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                     except Exception as e:
                         log.warning("엣지 계산 실패 %s: %s", t, e)
                         r["edge"] = None
+                r["elite"] = setups.is_elite(r.get("edge"), (r.get("plan") or {}).get("rr"))
             buys.append(r)
         if mk["rest_day"]:
             reference = [b for b in buys if b["total"] >= float(cfg["하락장 참고 기준"])]
@@ -896,7 +897,8 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
 def run_sim(store, app: dict, now):
     """자동 모의매매 한 걸음 + 기간이 끝났으면 실전 전환 판단 알림. 실패해도 리포트는 그대로."""
     try:
-        picks = [p for b in app.get("bands", []) for p in b["picks"] + b.get("etf_picks", [])]
+        # 모의투자는 '엄선 순수종목'(엣지 통과)만 자동 매매해요. ETF·미검증 자리는 제외. 엄선이 없으면 쉬어요.
+        picks = [p for b in app.get("bands", []) for p in b["picks"] if p.get("elite")]
         st = simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"))
         try:
             simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"), key=simtrade.REF_KEY)

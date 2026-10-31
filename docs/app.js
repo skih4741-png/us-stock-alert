@@ -707,7 +707,7 @@
   function edgeTone(e) { return e && e.ok ? "good" : (e && e.label === "동전 던지기" ? "warn" : "info"); }
   function pickCard(p) {
     const pl = p.plan || {}, e = p.edge;
-    const setupTag = p.setup ? '<span class="badge ' + edgeTone(e) + '">' + esc(p.setup) + "</span> " : "";
+    const setupTag = (p.elite ? '<span class="badge good">⭐ 엄선</span> ' : "") + (p.setup ? '<span class="badge ' + edgeTone(e) + '">' + esc(p.setup) + "</span> " : "");
     const edgeLine = e ? '<div class="small' + (e.ok ? " good-t" : e.label === "동전 던지기" ? " bad-t" : "") + '">' +
       (e.n ? "엣지: 과거 " + e.n + "번 → 이김 " + e.win + "%" + (e.ok ? " ✓ 엣지 있음" : e.label === "동전 던지기" ? " · 동전 던지기(참고)" : "") : esc(e.label || "")) + "</div>" : "";
     return '<div class="card tap' + (p.etf ? " dash" : "") + '" onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'">' +
@@ -731,29 +731,37 @@
   function viewPicks() {
     if (needData("picks")) return;
     const d = S.data;
-    const limits = { all: Infinity, "10": 10, "30": 30, "50": 50, "100": 100 };
-    const lim = limits[S.filter] || Infinity;
+    if (S.eliteOnly === undefined) { const v = store.get("eliteOnly"); S.eliteOnly = (v === null || v === undefined) ? true : (v === "true" || v === true); }
+    const eliteOnly = S.eliteOnly !== false;
     const q = (S.q || "").trim().toUpperCase();
     const hit = p => !q || p.t.toUpperCase().indexOf(q) >= 0 || String(p.name || "").toUpperCase().indexOf(q) >= 0;
-    const bands = (d.bands || []).filter(b => {
-      const lo = parseFloat(b.name); return isNaN(lo) || lo < lim;
-    }).map(b => q ? Object.assign({}, b, { picks: b.picks.filter(hit), etf_picks: (b.etf_picks || []).filter(hit), dropped: [] }) : b)
-      .filter(b => b.picks.length || (b.etf_picks || []).length || (b.dropped || []).length);
-    appShell("picks", '<div class="head"><div><h1>매수 후보</h1><div class="small">미국 ' + esc(d.date) + ' 종가 기준 · 실제 체결가는 다를 수 있어요</div></div></div>' + statusLine() +
+    // 순수종목만 (ETF 제외), 가격대 평탄화 + 총점 순
+    const seen = {}, stocks = [];
+    (d.bands || []).forEach(b => (b.picks || []).forEach(p => { if (!seen[p.t] && hit(p)) { seen[p.t] = 1; stocks.push(p); } }));
+    stocks.sort((a, b) => (b.total || 0) - (a.total || 0));
+    const elite = stocks.filter(p => p.elite);
+    const shown = eliteOnly ? elite : stocks;
+    const toggle = '<div class="chips"><button class="chip' + (eliteOnly ? " on" : "") + '" data-elite="1">⭐ 엄선만</button>' +
+      '<button class="chip' + (eliteOnly ? "" : " on") + '" data-elite="0">전체 개별주</button></div>';
+    let body;
+    if (eliteOnly) {
+      body = elite.length
+        ? '<div class="small" style="margin:8px 0">⭐ 오늘 엄선 후보 <b>' + elite.length + '개</b> — 과거 승률 최상위 순수종목 (이김 ≥65%·표본 ≥12·손익비 ≥1.5). <b>보장이 아니라 확률</b>이에요.</div>' + shown.map(pickCard).join("")
+        : emp("🛌", "오늘은 확신 있는 자리가 없어요", "엄선 기준을 넘는 순수종목이 없어 쉬어요. '전체 개별주'로 보거나 내일 다시 확인해요. (셋업·엣지는 매일 아침 리포트 때 계산돼요)", "", "");
+    } else {
+      body = shown.length
+        ? '<div class="small" style="margin:8px 0">개별주 <b>' + shown.length + '개</b> (ETF 제외) · ⭐=엄선</div>' + shown.map(pickCard).join("")
+        : emp("🔎", "오늘 조건에 맞는 개별주가 없어요", "내일 아침 리포트에서 다시 확인해요.", "", "");
+    }
+    appShell("picks", '<div class="head"><div><h1>매수 후보</h1><div class="small">순수종목만 · 미국 ' + esc(d.date) + ' 종가 기준</div></div></div>' + statusLine() +
+      toggle +
       '<input type="text" id="pq" class="search" placeholder="종목 코드·이름 찾기 (예: MO)" value="' + esc(S.q || "") + '" autocomplete="off">' +
-      '<div class="chips">' + [["all", "전체"], ["10", "10달러 이하"], ["30", "30달러 이하"], ["50", "50달러 이하"], ["100", "100달러 이하"]]
-        .map(c => '<button class="chip' + (S.filter === c[0] ? " on" : "") + '" data-f="' + c[0] + '">' + c[1] + "</button>").join("") + "</div>" +
       (d.market.rest_day ? '<div class="msg note">오늘은 매수 쉬는 날이에요. 아래 목록은 참고용이에요.</div>' : "") +
-      (bands.length ? bands.map(b =>
-        "<h2>" + esc(b.name) + " · 조건 맞음 " + b.count + " · 종목 " + b.picks.length + " · ETF " + (b.etf_picks || []).length + "</h2>" +
-        b.picks.map(pickCard).join("") +
-        ((b.etf_picks || []).length ? '<div class="small" style="margin-top:10px">ETF·펀드 (따로 순위)</div>' + b.etf_picks.map(pickCard).join("") : "") +
-        ((b.dropped || []).length ? '<div class="small">어제에서 빠짐: ' + esc(b.dropped.join(", ")) + "</div>" : "")
-      ).join("") : emp("🔎", "이 가격대는 오늘 조건에 맞는 종목이 없어요", "다른 가격대나 '전체'를 눌러 보세요.", "", "")) +
-      '<p class="foot">' + esc(DISCLAIMER) + "</p>");
-    $app.querySelectorAll(".chip").forEach(b => b.addEventListener("click", () => { S.filter = b.dataset.f; store.set("filter", S.filter); viewPicks(); }));
+      body +
+      '<p class="foot">ETF·펀드는 후보에서 제외했어요. 모의투자는 엄선 순수종목만 자동 매매해요. · ' + esc(DISCLAIMER) + "</p>");
+    $app.querySelectorAll("[data-elite]").forEach(b => b.addEventListener("click", () => { S.eliteOnly = b.dataset.elite === "1"; store.set("eliteOnly", S.eliteOnly); viewPicks(); }));
     const qi = document.getElementById("pq");
-    qi.addEventListener("input", () => { clearTimeout(viewPicks._t); viewPicks._t = setTimeout(() => { S.q = qi.value; viewPicks(); const n = document.getElementById("pq"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); });
+    qi.addEventListener("input", () => { clearTimeout(viewPicks._t); viewPicks._t = setTimeout(() => { S.q = qi.value; viewPicks(); const n = document.getElementById("pq"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });
   }
 
   function scoreBars(cats) {

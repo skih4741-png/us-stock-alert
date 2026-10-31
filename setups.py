@@ -18,6 +18,19 @@ EDGE_WIN = 55.0          # 이김 비율(%) 기준
 MAX_SAMPLES = 80         # 과거 표본 상한(최근 것부터)
 GAP = 5                  # 표본 사이 최소 간격(겹침 방지)
 
+# '엄선 후보' 기준 (엄격) — 과거 승률 최상위 순수종목만. 보장이 아니라 확률이 가장 좋은 것.
+ELITE_WIN = 65.0
+ELITE_N = 12
+ELITE_RR = 1.5
+
+
+def is_elite(edge: dict | None, rr: float | None) -> bool:
+    """엄선(고확신) 여부: 엣지 통과 + 이김 ≥ 65% + 표본 ≥ 12 + 평균 > 0 + 손익비 ≥ 1.5."""
+    if not edge or not edge.get("ok"):
+        return False
+    return bool((edge.get("win") or 0) >= ELITE_WIN and (edge.get("n") or 0) >= ELITE_N
+                and (edge.get("avg") or 0) > 0 and (rr or 0) >= ELITE_RR)
+
 
 def detect(t: dict) -> str | None:
     """최신 봉의 자리(셋업) 이름. 우선순위: 돌파 → 눌림목 → 과매도 반등."""
