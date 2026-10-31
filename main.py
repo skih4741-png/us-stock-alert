@@ -35,6 +35,7 @@ import prices
 import push
 import research
 import scoring
+import setups
 import simtrade
 import timing
 import universe
@@ -208,6 +209,16 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             r["tags"] = list(r["flags"])
             if r["price"] < 5:
                 r["tags"].append("출렁임 큼")
+            # 자리(셋업) + 과거 승률(엣지) — 개별주만 (추가 정보, 기존 판정은 그대로)
+            if not r["etf"]:
+                su = setups.detect(r["tech"])
+                r["setup"] = su
+                if su and t in hist:
+                    try:
+                        r["edge"] = setups.edge(hist[t], mk["rr"], cfg, su)
+                    except Exception as e:
+                        log.warning("엣지 계산 실패 %s: %s", t, e)
+                        r["edge"] = None
             buys.append(r)
         if mk["rest_day"]:
             reference = [b for b in buys if b["total"] >= float(cfg["하락장 참고 기준"])]
