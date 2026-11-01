@@ -95,16 +95,16 @@ def simulate(o: pd.DataFrame, i: int, rr: float, cfg: dict, max_hold: int = 60) 
             px = min(bar.open, stop) if j > i + 1 else stop
             rest = (px / entry - 1)
             ret = realized + (0.5 if half_done else 1.0) * rest
-            return {"ret": ret, "days": j - i, "exit": "손절" if not half_done else "본전 손절", "first3": first3_low / entry - 1}
+            return {"ret": ret, "days": j - i, "exit": "손절" if not half_done else "본전 손절", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": True}
         if not half_done and bar.high >= target:
             realized += 0.5 * (target / entry - 1)
             half_done, stop = True, entry
         peak = max(peak, bar.close)
         if half_done and (bar.close <= peak * (1 - float(cfg["추적 매도 하락률(%)"]) / 100) or bar.close < bar.ma20):
-            return {"ret": realized + 0.5 * (bar.close / entry - 1), "days": j - i, "exit": "추적 매도", "first3": first3_low / entry - 1}
+            return {"ret": realized + 0.5 * (bar.close / entry - 1), "days": j - i, "exit": "추적 매도", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": True}
     last = o.iloc[min(len(o) - 1, i + max_hold)]
     ret = realized + (0.5 if half_done else 1.0) * (last.close / entry - 1)
-    return {"ret": ret, "days": max_hold, "exit": "기간 만료", "first3": first3_low / entry - 1}
+    return {"ret": ret, "days": max_hold, "exit": "기간 만료", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": i + max_hold < len(o)}
 
 
 def run(n_tickers: int, years: int, send: bool):

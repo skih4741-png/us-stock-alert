@@ -717,12 +717,13 @@
         '" title="규칙 기반 참고 지표 · 총점에 미반영">버핏 체질 ' + esc(f.buffett_pass) + '/' + esc(f.buffett_max) + '</span>' : "";
     const setupTag = (p.elite ? '<span class="badge good">⭐ 엄선</span> ' : "") + (p.setup ? '<span class="badge ' + edgeTone(e) + '">' + esc(p.setup) + "</span> " : "");
     const edgeLine = e ? '<div class="small' + (e.ok ? " good-t" : e.label === "동전 던지기" ? " bad-t" : "") + '">' +
-      (e.n ? "엣지: 과거 " + e.n + "번 → 이김 " + e.win + "%" + (e.ok ? " ✓ 엣지 있음" : e.label === "동전 던지기" ? " · 동전 던지기(참고)" : "") : esc(e.label || "")) + "</div>" : "";
+      (e.n ? "엣지: 과거 " + e.n + "번 → 이김 " + e.win + "%" + (e.ok ? " ✓ 엣지 있음" : e.label === "동전 던지기" ? " · 동전 던지기(참고)" : "") : esc(e.label || "")) + (e.ok ? " · 과거 통계, 보장 아님" : " · 엄선 제외") + "</div>" : "";
     return '<div class="card tap' + (p.etf ? " dash" : "") + '"' + (qty >= 1 ? "" : ' style="opacity:.6"') + ' onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'">' +
       '<div class="row between"><span>' + setupTag + "<b>" + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
       '<div class="small">' + esc((p.name || "").slice(0, 46)) + "</div>" +
       '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
       '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + '</div>' +
+      (qty >= 1 && pl.stop > 0 && pl.stop < p.price ? '<div class="small num">' + qty + '주 매수 시 손절선 기준 손실 약 $' + fmt(qty * (p.price - pl.stop)) + ' · 갭·비용으로 더 커질 수 있어요</div>' : '') +
       edgeLine + tags(p.tags) + "</div>";
   }
   // 후보 상세 — 엣지(과거 승률) 바
@@ -733,9 +734,9 @@
     return '<div class="card"><div class="row between"><b>사기 전 엣지 — ' + esc(e.setup || "") + "</b><span class=\"badge " + edgeTone(e) + '">' + esc(e.label || "") + "</span></div>" +
       '<div class="small" style="margin-top:4px">같은 자리가 과거 <b>' + e.n + "번</b> 나왔을 때 · 평균 " + (e.avg >= 0 ? "+" : "") + fmt(e.avg, 1) + "%</div>" +
       '<div class="rbar" style="height:10px;margin:10px 0 6px"><span class="rfill" style="width:' + win + '%;background:var(--up);opacity:.85;border-radius:3px"></span></div>' +
-      '<div class="legend small"><span><span class="sdot" style="background:var(--up)"></span>목표 먼저 ' + win + "%</span><span style=\"margin-left:12px\"><span class=\"sdot\" style=\"background:var(--line2)\"></span>손절·미달 " + loss + "%</span></div>" +
+      '<div class="legend small"><span><span class="sdot" style="background:var(--up)"></span>목표 먼저 ' + win + "%</span><span style=\"margin-left:12px\"><span class=\"sdot\" style=\"background:var(--line2)\"></span>목표 미달 " + loss + "%</span></div>" +
       (e.ok ? "" : '<div class="small" style="margin-top:6px">⚠ 이길 확률이 뚜렷하지 않아요 — 참고만 (동전 던지기면 거르는 게 원칙)</div>') +
-      '<div class="small" style="margin-top:6px">일봉 기준, 다음 날 시가 매수·손절/목표 규칙으로 과거를 돌려 계산 (GPT 아님)</div></div>';
+      '<div class="small" style="margin-top:6px">일봉 기준 · 다음 날 시가 매수 · 같은 날 손절·목표 모두 닿으면 손절 우선 · 관찰 완료 표본만 · 비용 반영 (GPT 아님)</div></div>';
   }
   function viewPicks() {
     if (needData("picks")) return;

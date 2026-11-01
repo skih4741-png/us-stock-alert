@@ -103,7 +103,7 @@ def _close(st, p, day, px, why):
     st["cash"] += proceeds
     cost = qty * p["entry"] * (1 + FEE)
     st["closed"].append({"t": p["t"], "qty": qty, "entry": p["entry"], "date": p["date"], "exit": round(px, 4), "exit_date": day,
-                         "why": why, "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
+                         "why": why, "signal_edge": p.get("signal_edge"), "setup": p.get("setup"), "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
     st["log"].append(f"{day} 매도 {p['t']} {qty}주 @{px:.2f} · {why}")
 
 
@@ -140,7 +140,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             else:
                 st["cash"] -= cost
                 st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": d, "stop": o["stop"],
-                                        "target": o["target"], "peak": px, "half": False, "why": o["why"], "fill_time": "장중(일봉 확인)"})
+                                        "target": o["target"], "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": "장중(일봉 확인)"})
                 st["log"].append(f"{d} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {o['why']}")
                 _ticket(st, o["t"], o["signal_date"], result="체결", day=d, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at="장중(일봉 확인)")
         else:
@@ -232,7 +232,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                 continue
             t5 = sum(1 for x in (p.get("trend5") or []) if x[1])
             st["pending"].append({"t": p["t"], "qty": qty, "limit": round(limit, 2), "skip_above": float(pl.get("skip_if_open_above") or limit * 1.03),
-                                  "stop": float(pl["stop"]), "target": float(pl["target"]), "signal_date": bar_date,
+                                  "stop": float(pl["stop"]), "target": float(pl["target"]), "signal_date": bar_date, "signal_edge": dict(p.get("edge") or {}), "setup": p.get("setup"),
                                   "why": f"총점 {p.get('total'):.0f} · 추세 합류 {t5}/5 · 손익비 {pl.get('rr')}"})
             o = st["pending"][-1]
             _ticket(st, o["t"], bar_date, result="대기", limit=o["limit"], qty=qty, skip_above=o["skip_above"], stop=o["stop"], target=o["target"])
@@ -315,7 +315,7 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
                 else:
                     st["cash"] -= cost
                     st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": day, "stop": o["stop"], "target": o["target"],
-                                            "peak": px, "half": False, "why": o["why"], "fill_time": f"{hm(i)} ET", "seen_to": ts})
+                                            "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": f"{hm(i)} ET", "seen_to": ts})
                     st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {hm(i)} ET 체결 · {o['why']}")
                     _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{hm(i)} ET")
                     events.append(f"매수 체결 {o['t']} {o['qty']}주 @${px:.2f} ({hm(i)} ET)")

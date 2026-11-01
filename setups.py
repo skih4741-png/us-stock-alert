@@ -79,21 +79,28 @@ def edge(df, rr: float, cfg: dict, setup: str | None) -> dict | None:
         if i - last >= GAP:
             picked.append(i); last = i
     picked = picked[-MAX_SAMPLES:]
-    rets = []
+    rets, targets, stops, rs = [], [], [], []
     for i in picked:
         try:
             res = backtest.simulate(o, i, rr, cfg)
         except Exception:
             res = None
-        if res and not res.get("skipped") and "ret" in res:
-            rets.append(res["ret"])
+        if res and not res.get("skipped") and res.get("complete") and "ret" in res:
+            # 자동 모의투자와 같은 왕복 비용 추정(한쪽 0.35%).
+            net = (1 + res["ret"]) * (1 - 0.0035) / (1 + 0.0035) - 1
+            rets.append(net)
+            targets.append(bool(res.get("target_hit")))
+            stops.append(res.get("exit") == "손절")
+            rs.append(net / res["risk"])
     k = len(rets)
     if k == 0:
         return {"setup": setup, "n": 0, "win": None, "avg": None, "ok": False, "label": "자료 부족"}
-    wins = sum(1 for r in rets if r > 0)
+    wins = sum(targets)
     win_pct = int(round(wins / k * 100))
     avg = round(float(sum(rets)) / k * 100, 1)
     enough = k >= MIN_SAMPLES
     ok = bool(enough and win_pct >= EDGE_WIN and avg > 0)
     label = ("엣지 있음" if ok else ("자료 부족" if not enough else "동전 던지기"))
-    return {"setup": setup, "n": int(k), "win": win_pct, "loss": 100 - win_pct, "avg": avg, "ok": ok, "label": label}
+    return {"setup": setup, "n": int(k), "win": win_pct, "loss": 100 - win_pct, "avg": avg, "ok": ok, "label": label,
+            "stop": int(round(sum(stops) / k * 100)), "profit_win": int(round(sum(r > 0 for r in rets) / k * 100)),
+            "avg_r": round(sum(rs) / k, 2), "cost_included": True}
