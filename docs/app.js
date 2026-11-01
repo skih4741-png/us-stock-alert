@@ -4,7 +4,7 @@
   const CFG = window.APP_CONFIG || {};
   const $app = document.getElementById("app");
   const $tabs = document.getElementById("tabs");
-  const DISCLAIMER = "규칙에 따른 검토 후보이며 투자 판단과 책임은 본인에게 있습니다. 자동 주문은 하지 않아요.";
+  const DISCLAIMER = "규칙에 따른 검토 후보이며 투자 판단과 책임은 본인에게 있습니다. 실전 자동 주문은 비활성이며, 연결 설정 시 증권사 모의 주문만 가능해요.";
 
   /* ---------- 저장 (실패해도 앱은 돌아가게) ---------- */
   const store = {
@@ -28,7 +28,7 @@
     scope: store.get("scope") || store.get("scope", sessionStorage),
     data: null, alerts: [], perf: null, weekly: null, paper: [], ai: null, gap: null, profile: null, aiUsage: null, watch: null, watchlist: [], cal: null, palerts: {}, loading: false, error: "", filter: store.get("filter") || "all", lastSeenAlert: store.get("seenAlert") || "",
   };
-  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; S.cal = c.cal || null; S.palerts = c.palerts || {}; } } catch (e) {}
+  try { const c = JSON.parse(store.get("cache") || "null"); if (c) { S.data = c.daily; S.alerts = c.alerts || []; S.perf = c.perf || null; S.weekly = c.weekly || null; S.paper = c.paper || []; S.ai = c.ai || null; S.gap = c.gap || null; S.profile = c.profile || null; S.aiUsage = c.aiUsage || null; S.kis = c.kis || null; S.watch = c.watch || null; S.watchlist = c.watchlist || []; S.cal = c.cal || null; S.palerts = c.palerts || {}; S.deskNotes = c.deskNotes || []; } } catch (e) {}
 
   function setSession(token, scope, keep) {
     store.del("token"); store.del("scope");
@@ -39,7 +39,7 @@
   }
   function clearAll() {
     setSession(null, null);
-    store.del("cache"); S.data = null; S.alerts = []; S.perf = null; S.weekly = null; S.paper = [];
+    store.del("cache"); S.data = null; S.alerts = []; S.perf = null; S.weekly = null; S.paper = []; S.deskNotes = []; S.ask = null;
   }
 
   /* ---------- 서버 ---------- */
@@ -114,7 +114,7 @@
     try {
       const j = await api("data", { token: S.token });
       if (j.ok) {
-        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || []; S.cal = j.cal || null; S.palerts = j.palerts || {};
+        S.data = j.daily; S.alerts = j.alerts || []; S.perf = j.perf || null; S.weekly = j.weekly || null; S.paper = j.paper || []; S.ai = j.ai || null; S.gap = j.gap || null; S.profile = j.profile || null; S.aiUsage = j.aiUsage || null; S.kis = j.kis || null; S.watch = j.watch || null; S.watchlist = j.watchlist || []; S.cal = j.cal || null; S.palerts = j.palerts || {}; S.deskNotes = j.deskNotes || [];
         saveCache();
       } else if (!j.auth) S.error = j.error || "불러오지 못했어요";
     } catch (e) {
@@ -125,7 +125,7 @@
   }
 
   function saveCache() {
-    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, cal: S.cal, palerts: S.palerts, at: Date.now() }));
+    store.set("cache", JSON.stringify({ daily: S.data, alerts: S.alerts, perf: S.perf, weekly: S.weekly, paper: S.paper, ai: S.ai, gap: S.gap, profile: S.profile, aiUsage: S.aiUsage, kis: S.kis, watch: S.watch, watchlist: S.watchlist, cal: S.cal, palerts: S.palerts, deskNotes: S.deskNotes, at: Date.now() }));
   }
 
   /* ---------- 화면: 로그인 계열 ---------- */
@@ -146,7 +146,7 @@
   }
 
   function viewLogin() {
-    authShell('<h1>미국주식 알림</h1><form id="f" autocomplete="on">' +
+    authShell('<h1>미국주식 알림</h1><p class="small">내부 모의 장부와 증권사 모의계좌를 구분해 보여요. 실전 주문은 비활성입니다.</p><form id="f" autocomplete="on">' +
       '<label for="id">아이디</label><input id="id" name="username" type="text" autocomplete="username" autocapitalize="off" spellcheck="false" required>' +
       '<label for="pw">비밀번호</label><input id="pw" name="password" type="password" autocomplete="current-password" required>' +
       '<label class="check"><input id="keep" type="checkbox" checked> 로그인 유지 (30일)</label>' +
@@ -420,6 +420,15 @@
     tabBadges(tab);
     [...$tabs.querySelectorAll("a")].forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
     $app.innerHTML = html;
+    if (window.TradeDesk) {
+      const parts = (location.hash || '#/home').split('/');
+      const route = parts[1] || 'home', t = decodeURIComponent(parts[2] || '');
+      window.TradeDesk.mount($app, {S, route, t, seg:S.scoreSeg, version:CFG.VERSION, askContext:S.ask && S.ask.context,
+        ask: ticker => { S.ask = {mode:'quick',hist:[],context:{t:ticker,date:S.data && S.data.date,from:route},
+          draft:ticker + '의 현재 앱 자료를 근거로 좋은 점·반대 근거·다음 확인 조건을 비교해줘. 기준일 ' + (S.data && S.data.date || '확인 필요')}; go('#/ask'); },
+        saveNote: async note => {const j=await api('deskSave',{token:S.token,note}); if(!j.ok) throw new Error(j.error || '저장 실패'); S.deskNotes=j.deskNotes || []; saveCache();}
+      });
+    }
     stickOffsets();
     // 접근성: 새 화면으로 이동했을 때만 제목으로 포커스 (배경 새로고침 땐 그대로 둬요)
     if (appShell._h !== location.hash) {
@@ -724,7 +733,7 @@
       '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
       '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + '</div>' +
       (qty >= 1 && pl.stop > 0 && pl.stop < p.price ? '<div class="small num">' + qty + '주 매수 시 손절선 기준 손실 약 $' + fmt(qty * (p.price - pl.stop)) + ' · 갭·비용으로 더 커질 수 있어요</div>' : '') +
-      edgeLine + tags(p.tags) + "</div>";
+      edgeLine + '<div class="small">근거: '+esc((p.reasons || [])[0] || p.setup || '자료 확인 필요')+'</div><div class="small">주의: '+esc((p.tags || []).find(t=>/주의|실적|위험|보류/.test(t)) || p.entry_exclusion || '주문 직전 재확인')+'</div>' + tags(p.tags) + "</div>";
   }
   // 후보 상세 — 엣지(과거 승률) 바
   function edgeCard(p) {
@@ -1066,8 +1075,10 @@
     return h + '<p class="foot">가이드: Claude 펀드매니저 4단계 (Kronos · skfolio · NautilusTrader · Vibe-Trading) · 오픈소스 각 저장소의 라이선스를 따라요</p>';
   }
   function viewAlerts() {
-    const items = S.alerts || [];
-    if (items[0]) { S.lastSeenAlert = items[0].at; store.set("seenAlert", S.lastSeenAlert); }
+    const latest = (S.alerts || [])[0];
+    if (latest) { S.lastSeenAlert = latest.at; store.set("seenAlert", S.lastSeenAlert); }
+    const priority = a => /실패|확인 필요/.test(a.title + a.body) ? 0 : a.tone === 'bad' ? 1 : a.tone === 'warn' ? 2 : /체결/.test(a.title + a.body) ? 3 : 4;
+    const items = (S.alerts || []).slice().sort((a,b)=>String(b.at).slice(0,10).localeCompare(String(a.at).slice(0,10)) || priority(a)-priority(b) || String(b.at).localeCompare(String(a.at)));
     const seg = S.actSeg || "all", need = needsYou(), runs = runsOf();
     const tone = { bad: "var(--bad)", warn: "var(--warn)", info: "var(--accent)" };
     const segBtn = (k, l) => '<button data-s="' + k + '"' + (seg === k ? ' class="on"' : "") + ">" + l + "</button>";
@@ -1077,7 +1088,7 @@
     else if (seg === "run") body = runningHtml();
     else if (seg === "runs") body = '<div class="small" style="margin:4px 0 8px">실행마다 바뀐 것과 자동 점검 결과를 남겨요. 프로그램의 "잘 됐어요"가 아니라 점검 결과가 증거예요 · 최근 ' + runs.length + "번</div>" +
       (runs.length ? runs.map((r, i) => runCard(r, i === 0)).join("") : emp("🧾", "실행 기록이 아직 없어요", "다음 아침 리포트(평일 아침 7시쯤)부터 쌓여요.", "#/home", "홈으로"));
-    else body = '<div class="small">푸시·슬랙으로 보낸 것과 같은 내용이에요 (최근 200개)</div><div class="list">' +
+    else body = '<div class="small">날짜별로 주문 확인·위험·체결 우선 (최근 200개)</div><div class="list">' +
       (items.length ? items.map(a => '<div class="item" style="cursor:default"><span style="width:10px;height:10px;border-radius:5px;background:' + (tone[a.tone] || tone.info) +
         '"></span><div class="grow"><div class="row between"><b>' + esc(a.title) + '</b><span class="small">' + esc(whenText(a.at)) + '</span></div><div class="small">' + esc(a.body) + "</div></div></div>").join("")
         : emp("🔔", "새 알림이 오면 여기에 모여요", "아침 리포트·장중 체결·업데이트 소식이 푸시와 함께 쌓여요.", "#/settings", "푸시 알림 설정")) + "</div>";
@@ -1127,10 +1138,10 @@
   function suggestQty(p) {
     const pl = p.plan || {}, cash = paperCash();
     if (!p.price || p.price > cash) return 0;
-    const risk = pl.stop && p.price > pl.stop ? p.price - pl.stop : p.price * 0.07;
+    const risk = (pl.stop && p.price > pl.stop ? p.price - pl.stop : p.price * 0.07) + p.price * .007;
     const byRisk = Math.floor(PAPER_START * 0.03 / risk);
     const byCap = Math.floor(cash * 0.6 / p.price);
-    return Math.max(1, Math.min(byRisk, byCap));
+    return Math.max(0, Math.min(byRisk, byCap, Math.floor(cash / (p.price * 1.0035))));
   }
   function paperAddHtml(p) {
     const cash = paperCash(), q = suggestQty(p);
@@ -1139,20 +1150,33 @@
       " (미국 " + esc(S.data.date) + " 종가) · 남은 현금 $" + fmt(cash) + "</div>" +
       (held ? '<div class="msg note">이미 모의 계좌에 담은 종목이에요. 더 담으면 따로 기록돼요.</div>' : "") +
       (q ? '<label for="pq">수량 (추천 ' + q + '주 · 한 번에 잃는 돈이 계좌의 3% 이내)</label><input id="pq" inputmode="numeric" value="' + q + '">' +
-        '<div class="small num" id="pqc"></div><button class="btn" id="pqBtn">모의 계좌에 담기</button><div id="pqMsg"></div>'
-        : '<div class="small">남은 현금보다 비싸서 담을 수 없어요.</div>') + "</div>";
+        '<label>선택한 이유<textarea id="paperReason" maxlength="500" placeholder="어떤 근거로 연습하는지 적어 주세요"></textarea></label><div class="small num" id="pqc"></div><button class="btn" id="pqBtn">모의 계좌에 담기</button><div id="pqMsg"></div>'
+        : '<div class="small">현금·비중·손절 위험금액 기준으로 정수 1주를 담기 어려워요.</div>') + "</div>";
   }
   function bindPaperAdd(p) {
     const inp = document.getElementById("pq"), btn = document.getElementById("pqBtn");
     if (!inp) return;
-    const show = () => { const q = Math.floor(Number(inp.value) || 0); document.getElementById("pqc").textContent = q > 0 ? "금액 $" + fmt(q * p.price) : ""; };
+    const show = () => {
+      const q=Number(inp.value), pl=p.plan || {}, risk=q*((p.price-(pl.stop || p.price*.93))+(p.price+(pl.stop || p.price*.93))*.0035);
+      document.getElementById('pqc').textContent = Number.isInteger(q) && q>0 ?
+        '매수 금액 $'+fmt(q*p.price)+' · 왕복 비용 추정 $'+fmt(q*p.price*.007)+' · 손절 위험(비용 포함) 약 $'+fmt(risk)+
+        (risk>PAPER_START*.03?' · 자동 모의의 3% 위험 기준 초과':'')+' · 수동 장부는 비용 전 금액으로 기록해요.' : '정수 1주 이상 입력해 주세요.';
+    };
     inp.addEventListener("input", show); show();
     btn.onclick = async () => {
       btn.disabled = true;
       const out = document.getElementById("pqMsg");
       try {
         const pl = p.plan || {};
-        const j = await api("paperAdd", { token: S.token, t: p.t, qty: Math.floor(Number(inp.value) || 0), price: p.price, date: S.data.date, stop: pl.stop, target: pl.target });
+        const qty=Number(inp.value), reason=document.getElementById('paperReason').value.trim();
+        if(!Number.isInteger(qty) || qty<1) throw new Error('정수 수량을 입력해 주세요.');
+        if(!reason) throw new Error('선택한 이유를 적어 주세요.');
+        const context=window.TradeDesk ? window.TradeDesk.snapshot(S,p.t) : {};
+        context.reason=reason;
+        const intent=JSON.stringify({qty,price:p.price,date:S.data.date,reason});
+        if(btn.dataset.intent!==intent) {btn.dataset.intent=intent;btn.dataset.requestId=crypto.randomUUID();}
+        const j = await api("paperAdd", { token: S.token, t: p.t, qty, price: p.price, date: S.data.date, stop: pl.stop, target: pl.target,
+          requestId:btn.dataset.requestId, entry_context:context });
         if (!j.ok) { out.innerHTML = '<div class="msg err">' + esc(j.error) + "</div>"; btn.disabled = false; return; }
         S.paper = j.paper || S.paper; saveCache();
         toast(p.t + " 모의 계좌에 담았어요"); go("#/score");
@@ -2116,7 +2140,7 @@
     A.draft = ""; A.pasted = "";
     $app.querySelectorAll("[data-recheck]").forEach(b => b.addEventListener("click", () => {
       const last = [...(A.hist || [])].reverse().find(h => h.role === "ai" && h.a && h.a.answer);
-      S.ask = { mode: "fact", hist: [], draft: "방금 분석을 비판적인 검토자 입장에서 재검토해줘. 숫자·인용·증감률 계산·단위·날짜·출처를 확인하고, 오류가 있으면 원래 답변·수정 내용·근거를 제시하고, 수정할 것이 없으면 '확인된 수정 사항 없음'이라고 답해줘.",
+      S.ask = { mode: "fact", hist: [], context:A.context, draft: "방금 분석을 비판적인 검토자 입장에서 재검토해줘. 숫자·인용·증감률 계산·단위·날짜·출처를 확인하고, 오류가 있으면 원래 답변·수정 내용·근거를 제시하고, 수정할 것이 없으면 '확인된 수정 사항 없음'이라고 답해줘.",
         pasted: last ? JSON.stringify(last.a.answer, null, 1).slice(0, 11000) : "" };
       viewAsk();
     }));
@@ -2129,7 +2153,7 @@
       if (!q && !pasted) { msg.innerHTML = '<div class="msg err">질문을 적어 주세요.</div>'; return; }
       msg.innerHTML = '<div class="small">찾아보고 검사하는 중… (20~40초)</div>';
       const history = (A.hist || []).map(h => ({ role: h.role === "me" ? "me" : "ai", text: h.role === "me" ? h.text : JSON.stringify((h.a || {}).answer || {}) }));
-      const j = await api("askAI", { token: S.token, mode: A.mode, q: q, pasted: pasted, history: history });
+      const j = await api("askAI", { token: S.token, mode: A.mode, q: q, pasted: pasted, history: history, context: A.context || null });
       A.hist.push({ role: "me", text: q || "(붙인 글 사실 확인)" });
       A.hist.push({ role: "ai", a: j.ok ? j : { err: j.error } });
       if (j.usage) S.aiUsage = Object.assign({}, S.aiUsage || {}, j.usage);
