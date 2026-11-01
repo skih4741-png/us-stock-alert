@@ -817,7 +817,7 @@ function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 
 
 // ---- 온디맨드 AI (무료 공급자 체인, 전부 OpenAI 호환 /chat/completions). 키는 Script Properties에.
 var AI_PROVIDERS = [
-  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'llama-3.3-70b-versatile', json: true },
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'openai/gpt-oss-20b', json: true },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
   { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false },

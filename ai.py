@@ -30,7 +30,7 @@ DEFAULT_PRICE = (1.25, 10.0)
 # small/big: 기본 모델. 환경변수 <NAME>_MODEL 또는 설정 'AI 모델 <name>'로 덮어쓸 수 있어요.
 PROVIDERS = [
     {"name": "groq", "url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY",
-     "small": "llama-3.1-8b-instant", "big": "llama-3.3-70b-versatile", "json": True, "paid": False},
+     "small": "openai/gpt-oss-20b", "big": "openai/gpt-oss-120b", "json": True, "paid": False},
     {"name": "openrouter", "url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY",
      "small": "meta-llama/llama-3.3-70b-instruct:free", "big": "meta-llama/llama-3.3-70b-instruct:free", "json": False, "paid": False},
     {"name": "nvidia", "url": "https://integrate.api.nvidia.com/v1", "key": "NVIDIA_API_KEY",
