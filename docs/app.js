@@ -744,12 +744,14 @@
     const eliteOnly = S.eliteOnly !== false;
     const q = (S.q || "").trim().toUpperCase();
     const hit = p => !q || p.t.toUpperCase().indexOf(q) >= 0 || String(p.name || "").toUpperCase().indexOf(q) >= 0;
-    // 순수종목만 (ETF 제외), 가격대 평탄화 + 총점 순
+    // 순수종목만 (ETF 제외), 구매 가능 우선 + 가격 오름차순
     const seen = {}, stocks = [];
     (d.bands || []).forEach(b => (b.picks || []).forEach(p => { if (!seen[p.t] && hit(p)) { seen[p.t] = 1; stocks.push(p); } }));
-    stocks.sort((a, b) => (b.total || 0) - (a.total || 0));
-    const elite = stocks.filter(p => p.elite).sort((a, b) =>
-      Number(suggestQty(b) >= 1) - Number(suggestQty(a) >= 1) || (b.total || 0) - (a.total || 0));
+    const priceOrder = p => Number.isFinite(p.price) && p.price > 0 ? p.price : Infinity;
+    stocks.sort((a, b) =>
+      Number(suggestQty(b) >= 1) - Number(suggestQty(a) >= 1) ||
+      priceOrder(a) - priceOrder(b) || (b.total || 0) - (a.total || 0));
+    const elite = stocks.filter(p => p.elite);
     const shown = eliteOnly ? elite : stocks;
     const toggle = '<div class="chips"><button class="chip' + (eliteOnly ? " on" : "") + '" data-elite="1">⭐ 엄선만</button>' +
       '<button class="chip' + (eliteOnly ? "" : " on") + '" data-elite="0">전체 개별주</button></div>';
@@ -764,7 +766,7 @@
         : emp("🔎", "오늘 조건에 맞는 개별주가 없어요", "내일 아침 리포트에서 다시 확인해요.", "", "");
     }
     appShell("picks", '<div class="head"><div><h1>매수 후보</h1><div class="small">순수종목만 · 미국 ' + esc(d.date) + ' 종가 기준</div></div></div>' + statusLine() +
-      toggle +
+      toggle + '<div class="small">구매 가능 종목 먼저 · 가격 낮은 순 (1주 단위)</div>' +
       '<input type="text" id="pq" class="search" placeholder="종목 코드·이름 찾기 (예: MO)" value="' + esc(S.q || "") + '" autocomplete="off">' +
       (d.market.rest_day ? '<div class="msg note">오늘은 매수 쉬는 날이에요. 아래 목록은 참고용이에요.</div>' : "") +
       body +
