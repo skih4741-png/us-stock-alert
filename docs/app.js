@@ -257,6 +257,14 @@
     const f = S.data && S.data.fin ? S.data.fin : {};
     return f[t] || f[String(t).replace(".", "-")] || null;
   }
+  // 버핏 체질 뱃지 (규칙 기반 참고 지표, 총점 미반영). 재무 자료 있을 때만 보여요.
+  function buffettBadge(t) {
+    const f = finFor(t);
+    if (!f || !Number.isFinite(f.buffett_pass) || !Number.isFinite(f.buffett_max) || !(f.buffett_max > 0)) return "";
+    const r = f.buffett_pass / f.buffett_max;
+    return ' <span class="badge ' + (r >= 0.75 ? "good" : r >= 0.5 ? "warn" : "sub") +
+      '" title="규칙 기반 참고 지표 · 총점에 미반영">버핏 체질 ' + esc(f.buffett_pass) + '/' + esc(f.buffett_max) + '</span>';
+  }
   function finHtml(f) {
     if (!f) return '<div class="card sub">이 종목의 재무제표는 다음 아침 리포트부터 나와요.</div>';
     if (!f.available) return '<div class="card sub">' + esc(f.reason || "재무 자료가 없어요") + "</div>";
@@ -560,7 +568,7 @@
     const rows = list.map(t => { const q = w[t] || {}, chg = q.chg;
       return '<div class="item" style="cursor:pointer" onclick="location.hash=\'' + detailHash(t) + '\'"><span class="tk">' + esc(t) + "</span>" +
         '<span class="grow small num">' + (q.px != null ? "$" + fmt(q.px) : "시세 준비 중") +
-        (chg != null ? ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '">' + (chg >= 0 ? "▲" : "▼") + " " + Math.abs(chg) + "%</span>" : "") + "</span>" +
+        (chg != null ? ' <span class="' + (chg >= 0 ? "good-t" : "bad-t") + '">' + (chg >= 0 ? "▲" : "▼") + " " + Math.abs(chg) + "%</span>" : "") + buffettBadge(t) + "</span>" +
         '<button class="iconbtn" data-wdel="' + esc(t) + '" aria-label="관심에서 빼기" style="min-width:38px;min-height:38px;font-size:15px">✕</button></div>';
     }).join("");
     return '<div class="card">' +
@@ -754,13 +762,11 @@
     const eliteOnly = S.eliteOnly !== false;
     const q = (S.q || "").trim().toUpperCase();
     const hit = p => !q || p.t.toUpperCase().indexOf(q) >= 0 || String(p.name || "").toUpperCase().indexOf(q) >= 0;
-    // 순수종목만 (ETF 제외), 구매 가능 우선 + 가격 오름차순
+    // 순수종목만 (ETF 제외), 가격 오름차순 (싼 종목 먼저)
     const seen = {}, stocks = [];
     (d.bands || []).forEach(b => (b.picks || []).forEach(p => { if (!seen[p.t] && hit(p)) { seen[p.t] = 1; stocks.push(p); } }));
     const priceOrder = p => Number.isFinite(p.price) && p.price > 0 ? p.price : Infinity;
-    stocks.sort((a, b) =>
-      Number(suggestQty(b) >= 1) - Number(suggestQty(a) >= 1) ||
-      priceOrder(a) - priceOrder(b) || (b.total || 0) - (a.total || 0));
+    stocks.sort((a, b) => priceOrder(a) - priceOrder(b) || (b.total || 0) - (a.total || 0));
     const elite = stocks.filter(p => p.elite);
     const shown = eliteOnly ? elite : stocks;
     const toggle = '<div class="chips"><button class="chip' + (eliteOnly ? " on" : "") + '" data-elite="1">⭐ 엄선만</button>' +

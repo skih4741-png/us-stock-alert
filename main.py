@@ -264,10 +264,14 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
                 if d <= int(cfg["실적 발표 보류 거래일"]):
                     p["tags"].append("신규 매수 보류")
 
-        # 쉬운 재무제표 (매수 후보 + 내 보유)
+        # 쉬운 재무제표 (매수 후보 + 내 보유 + 관심종목) — 버핏 체크를 관심종목에서도 보이게
         stage = "재무제표"
         fin_meta = {}
-        for t in [p["ticker"] for p in picks] + hold_t:
+        try:
+            watch_t = watch_tickers(store)
+        except Exception:
+            watch_t = []
+        for t in dict.fromkeys([p["ticker"] for p in picks] + hold_t + watch_t):
             r0 = results.get(t)
             fin_meta[t] = {"price": (r0 or {}).get("price") or (float(hist[t]["Close"].iloc[-1]) if t in hist else None),
                            "sector": (r0 or {}).get("sector"), "name": (r0 or {}).get("name"),
