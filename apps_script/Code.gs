@@ -875,8 +875,11 @@ function onlyOpenAIKey_() {
 // 성공한 곳의 파싱된 JSON(data)과 원문(text)을 돌려줘요. OpenAI를 썼을 때만 비용을 기록해요(무료는 0).
 function aiCallMsgs_(messages, wantJson, maxTok) {
   var props = PropertiesService.getScriptProperties().getProperties(), diag = [], haveAny = false;
-  for (var i = 0; i < AI_PROVIDERS.length; i++) {
-    var p = AI_PROVIDERS[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
+  var candidates = AI_PROVIDERS.map(function (p) {
+    return Object.assign({}, p, { model: props[p.name.toUpperCase() + '_MODEL'] || p.model });
+  });
+  for (var i = 0; i < candidates.length; i++) {
+    var p = candidates[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
     var isOAI = (p.name === 'openai');
     var body = { model: p.model, messages: messages, temperature: 0.3 };
@@ -900,7 +903,7 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       if (isOAI) { var u = d.usage || {}, pr = AI_PRICE[p.model] || [0.15, 0.60]; addAppSpent_((u.prompt_tokens || 0) / 1e6 * pr[0] + (u.completion_tokens || 0) / 1e6 * pr[1]); }
       var m = txt.match(/\{[\s\S]*\}/);
       var data = null; if (m) { try { data = JSON.parse(m[0]); } catch (e) {} }
-      return { ok: true, provider: p.name, text: txt, data: data };
+      return { ok: true, provider: p.name, model: p.model, text: txt, data: data };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
   }
   return { ok: false, error: haveAny ? 'AI 공급자가 모두 응답하지 않았어요 (잠시 후 다시)' : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
