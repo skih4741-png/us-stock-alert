@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import math
+import setups
 
 from terms import DISCLAIMER, REGIME
 
@@ -72,6 +73,7 @@ def pick_view(p: dict) -> dict:
         "plan": {k: (_num(v) if k != "valid_until" else v) for k, v in pl.items()},
         "desc": p.get("desc", ""), "caution": p.get("caution", ""), "warn": p.get("warn", ""),
         "setup": p.get("setup"), "edge": p.get("edge"), "elite": bool(p.get("elite")),
+        "entry_exclusion": setups.exclusion(p),
     }
 
 

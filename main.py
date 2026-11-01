@@ -202,6 +202,10 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         valid_days = int(cfg["신호 유효 거래일"])
         expired = {t for t, p in prev.items() if p["streak"] >= valid_days}
         buys = []
+        # 점수용 400일 자료는 유지. 현재 셋업이 있는 개별주만 장기 표본을 따로 받아요.
+        edge_tickers = [t for t, r in results.items() if t in base and r["verdict"] == "buy"
+                        and t not in expired and not r["etf"] and setups.detect(r["tech"])]
+        edge_hist = prices.download_history(edge_tickers, period="5y") if edge_tickers else {}
         for t, r in results.items():
             if t not in base or r["verdict"] != "buy" or t in expired:
                 continue
@@ -213,9 +217,12 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
             if not r["etf"]:
                 su = setups.detect(r["tech"])
                 r["setup"] = su
-                if su and t in hist:
+                if su and t in edge_hist:
                     try:
-                        r["edge"] = setups.edge(hist[t], mk["rr"], cfg, su)
+                        # 그 리포트 기준일 이후의 자료는 과거 재실행에도 섞지 않아요.
+                        eh = edge_hist[t]
+                        eh = eh[eh.index.strftime("%Y-%m-%d") <= bar_date]
+                        r["edge"] = setups.edge(eh, mk["rr"], cfg, su)
                     except Exception as e:
                         log.warning("엣지 계산 실패 %s: %s", t, e)
                         r["edge"] = None
@@ -897,8 +904,8 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
 def run_sim(store, app: dict, now):
     """자동 모의매매 한 걸음 + 기간이 끝났으면 실전 전환 판단 알림. 실패해도 리포트는 그대로."""
     try:
-        # 모의투자는 '엄선 순수종목'(엣지 통과)만 자동 매매해요. ETF·미검증 자리는 제외. 엄선이 없으면 쉬어요.
-        picks = [p for b in app.get("bands", []) for p in b["picks"] if p.get("elite")]
+        # 전체 목록을 넘겨 모의 엔진에서 같은 엄선 기준과 탈락 사유를 기록해요.
+        picks = [p for b in app.get("bands", []) for p in b["picks"]]
         st = simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"))
         try:
             simtrade.step(store, picks, app["date"], app["market"], now.isoformat(timespec="minutes"), key=simtrade.REF_KEY)

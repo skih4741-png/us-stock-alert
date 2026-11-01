@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 import prices
+import setups
 
 log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
@@ -277,6 +278,11 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     # 3) 다음 거래일 주문 계획
     st["pending"] = []
     in_window = bar_date < st["end"]
+    selection = {"date": bar_date, "total": len(picks), "planned": 0, "excluded": {}}
+    def reject(reason):
+        selection["excluded"][reason] = selection["excluded"].get(reason, 0) + 1
+    selection["pause"] = ("모의 기간 종료" if not in_window else "시장 매수 쉬는 날" if market.get("rest_day")
+                          else "하락장" if market.get("regime") == "bear" else "월 손실 한도" if stopped else "")
     if in_window and not market.get("rest_day") and market.get("regime") != "bear" and not stopped:
         held = {p["t"] for p in st["positions"]}
         slots = cfg["max_pos"] - len(st["positions"])
@@ -284,25 +290,32 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         equity = val
         cands = []
         for p in picks:
+            reason = setups.exclusion(p)
+            if reason:
+                reject(reason); continue
             pl = p.get("plan") or {}
             px, stop = p.get("price"), pl.get("stop")
             if not px or not stop or px < 3 or p["t"] in held or px * (1 + FEE) > cash:
+                reject("이미 보유" if p["t"] in held else "현금·가격 조건")
                 continue
             if any(a in " ".join(p.get("tags") or []) for a in AVOID) or any(t.startswith("실적 D-") and int(t[5:] or 9) <= 3 for t in (p.get("tags") or [])):
+                reject("위험 태그·실적 임박")
                 continue
             t5 = sum(1 for x in (p.get("trend5") or []) if x[1])
             cands.append((-(p.get("total") or 0), -t5, -(pl.get("rr") or 0), (px - stop) / px, p))
         cands.sort(key=lambda x: x[:4])
         for *_, p in cands:
             if slots <= 0:
-                break
+                reject("보유 종목 수 한도"); continue
             pl = p["plan"]
             limit = float(pl.get("zone_high") or p["price"])
             if not 0 < pl["stop"] < limit < pl["target"]:
+                reject("주문 가격 조건")
                 continue
             risk = max(limit - pl["stop"], limit * 0.01)
             qty = int(min(equity * cfg["risk"] / risk, equity * cfg["cap"] / limit, cash / (limit * (1 + FEE))))
             if qty < 1:
+                reject("정수 1주 위험·예산 한도")
                 continue
             t5 = sum(1 for x in (p.get("trend5") or []) if x[1])
             st["pending"].append({"t": p["t"], "qty": qty, "limit": round(limit, 2), "skip_above": float(pl.get("skip_if_open_above") or limit * 1.03),
@@ -312,6 +325,8 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             _ticket(st, o["t"], bar_date, result="대기", limit=o["limit"], qty=qty, skip_above=o["skip_above"], stop=o["stop"], target=o["target"])
             cash -= qty * limit * (1 + FEE)
             slots -= 1
+    selection["planned"] = len(st["pending"])
+    st["selection"] = selection
     st["today"] = list(dict.fromkeys([x for x in st["log"] if x[:10] == bar_date] + st["log"][n_log:]))  # 장중 체결 + 아침 확인
     st["log"] = st["log"][-200:]
     st["updated"] = now_iso
@@ -504,6 +519,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
         "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
         "risk_day": day_risk(st, max(eq[-1][0] if eq else st["start"], (st.get("intra_at") or st["start"])[:10])), "review": review(st),
+        "selection": st.get("selection"),
         "tickets": (st.get("tickets") or [])[::-1][:30], "ticket_stats": ts, "intra_at": st.get("intra_at"),
     }
 

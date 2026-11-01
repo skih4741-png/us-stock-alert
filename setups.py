@@ -18,18 +18,37 @@ EDGE_WIN = 55.0          # 이김 비율(%) 기준
 MAX_SAMPLES = 80         # 과거 표본 상한(최근 것부터)
 GAP = 5                  # 표본 사이 최소 간격(겹침 방지)
 
-# '엄선 후보' 기준 (엄격) — 과거 승률 최상위 순수종목만. 보장이 아니라 확률이 가장 좋은 것.
-ELITE_WIN = 65.0
-ELITE_N = 12
+# 모의 검증용 균형 기준. 표본이 적으므로 실제 수익 보장이나 실전 승인이 아니에요.
+ELITE_WIN = 55.0
+ELITE_N = 8
 ELITE_RR = 1.5
 
 
 def is_elite(edge: dict | None, rr: float | None) -> bool:
-    """엄선(고확신) 여부: 엣지 통과 + 이김 ≥ 65% + 표본 ≥ 12 + 평균 > 0 + 손익비 ≥ 1.5."""
+    """비용 차감 기대값을 유지한 모의 후보 여부."""
     if not edge or not edge.get("ok"):
         return False
     return bool((edge.get("win") or 0) >= ELITE_WIN and (edge.get("n") or 0) >= ELITE_N
-                and (edge.get("avg") or 0) > 0 and (rr or 0) >= ELITE_RR)
+                and (edge.get("avg") or 0) > 0 and (edge.get("avg_r") or 0) > 0
+                and (rr or 0) >= ELITE_RR)
+
+
+def exclusion(p: dict) -> str:
+    """후보별 첫 탈락 이유. 앱과 모의 주문이 같은 기준을 사용해요."""
+    e, pl = p.get("edge") or {}, p.get("plan") or {}
+    if p.get("etf"):
+        return "ETF·펀드 제외"
+    if not p.get("setup"):
+        return "셋업 없음"
+    if (e.get("n") or 0) < ELITE_N:
+        return "완료 표본 부족"
+    if (e.get("win") or 0) < ELITE_WIN:
+        return "목표 도달률 미달"
+    if (e.get("avg") or 0) <= 0 or (e.get("avg_r") or 0) <= 0:
+        return "비용 차감 기대값 미달"
+    if (pl.get("rr") or 0) < ELITE_RR:
+        return "손익비 미달"
+    return "" if is_elite(e, pl.get("rr")) else "엣지 검증 미통과"
 
 
 def detect(t: dict) -> str | None:

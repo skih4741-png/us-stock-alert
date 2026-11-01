@@ -759,7 +759,7 @@
     let body;
     if (eliteOnly) {
       body = elite.length
-        ? '<div class="small" style="margin:8px 0">⭐ 오늘 엄선 후보 <b>' + elite.length + '개</b> — 과거 승률 최상위 순수종목 (이김 ≥65%·표본 ≥12·손익비 ≥1.5). <b>보장이 아니라 확률</b>이에요.</div>' + shown.map(pickCard).join("")
+        ? '<div class="small" style="margin:8px 0">⭐ 오늘 엄선 후보 <b>' + elite.length + '개</b> — 모의 검증 기준: 목표 도달 ≥55%·완료 표본 ≥8·비용 차감 평균 수익과 평균 R 양수·손익비 ≥1.5. <b>과거 통계이며 보장 아님</b>. 표본이 적어 모의 성과를 더 확인해야 해요.</div>' + shown.map(pickCard).join("")
         : emp("🛌", "오늘은 확신 있는 자리가 없어요", "엄선 기준을 넘는 순수종목이 없어 쉬어요. '전체 개별주'로 보거나 내일 다시 확인해요. (셋업·엣지는 매일 아침 리포트 때 계산돼요)", "", "");
     } else {
       body = shown.length
@@ -770,11 +770,22 @@
       toggle + '<div class="small">구매 가능 종목 먼저 · 가격 낮은 순 (1주 단위)</div>' +
       '<input type="text" id="pq" class="search" placeholder="종목 코드·이름 찾기 (예: MO)" value="' + esc(S.q || "") + '" autocomplete="off">' +
       (d.market.rest_day ? '<div class="msg note">오늘은 매수 쉬는 날이에요. 아래 목록은 참고용이에요.</div>' : "") +
-      body +
+      candidateFilterHtml(stocks) + body +
       '<p class="foot">ETF·펀드는 후보에서 제외했어요. 모의투자는 엄선 순수종목만 자동 매매해요. · ' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll("[data-elite]").forEach(b => b.addEventListener("click", () => { S.eliteOnly = b.dataset.elite === "1"; store.set("eliteOnly", S.eliteOnly); viewPicks(); }));
     const qi = document.getElementById("pq");
     qi.addEventListener("input", () => { clearTimeout(viewPicks._t); viewPicks._t = setTimeout(() => { S.q = qi.value; viewPicks(); const n = document.getElementById("pq"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });
+  }
+
+  function candidateFilterHtml(stocks) {
+    const counts = {};
+    stocks.filter(p => !p.elite).forEach(p => {
+      const reason = p.entry_exclusion || '새 기준 재계산 대기';
+      counts[reason] = (counts[reason] || 0) + 1;
+    });
+    return '<div class="card small"><b>왜 매수 후보에서 빠졌나요?</b><div>현재 목록 ' + stocks.length + '개 · 엄선 ' + stocks.filter(p => p.elite).length + '개</div>' +
+      Object.keys(counts).map(k => '<div>' + esc(k) + ' · ' + counts[k] + '개</div>').join('') +
+      '<div>셋업이 있는 종목은 5년치로 검증해요. 각 종목의 첫 탈락 이유를 표시하며, 시장 전체 통계는 아니에요. 새 기준과 이유는 다음 아침 리포트에서 계산돼요.</div></div>';
   }
 
   function scoreBars(cats) {
@@ -1258,6 +1269,12 @@
         esc(x.day || x.signal) + " · " + (x.qty || "") + "주 지정가 $" + fmt(x.limit) + (x.fill_px ? " → $" + fmt(x.fill_px) + " (" + esc(x.at || "") + ")" : "") + '</span><span class="badge ' +
         (RES[x.result] || "") + '">' + esc(x.result) + "</span></div>").join("") + "</div>" : '<div class="small">첫 주문표 결과는 다음 거래일부터 쌓여요</div>') + "</div>";
   }
+  function simSelectionHtml(s) {
+    if (!s) return '<div class="card small">매수 탈락 사유는 다음 아침 리포트부터 표시돼요.</div>';
+    return '<div class="card small"><b>자동 모의 · 매수 선별 결과</b><div>' + esc(s.date) + ' 기준 후보 ' + s.total + '개 → 주문 계획 ' + s.planned + '개</div>' +
+      (s.pause ? '<div>새 주문 계획 중지: ' + esc(s.pause) + '</div>' : Object.keys(s.excluded || {}).map(k => '<div>' + esc(k) + ' · ' + s.excluded[k] + '개</div>').join('')) +
+      '<div>주문 계획은 체결과 달라요. 다음 거래일의 가격·현금·하루 3회·확정손실 3% 한도를 다시 확인해요.</div></div>';
+  }
   function simReviewHtml(m) {
     const d = m.risk_day, r = m.review;
     if (!d && !r) return '<div class="card small">다음 아침 리포트부터 손실 한도·복기가 표시돼요.</div>';
@@ -1281,7 +1298,7 @@
     const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
     const passN = (m.checks || []).filter(c => c[1]).length;
     // ── 맨 위: 증권사처럼 평가금액·수익률 한눈에 ──
-    return brokerCard(m, ref) + simReviewHtml(m) +
+    return brokerCard(m, ref) + simSelectionHtml(m.selection) + simReviewHtml(m) +
       '<div class="card"><div class="row between"><span class="sub">3개월 자동 모의매매</span><span class="small">' + m.day + "/" + m.days + "일째</span></div>" +
       '<div class="plbar" style="margin:6px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
       '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · 11장 규칙 그대로 자동 매매 · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +
