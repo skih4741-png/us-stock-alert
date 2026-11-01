@@ -25,6 +25,7 @@ import numpy as np
 
 import prices
 import setups
+import trade_guard
 
 log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
@@ -125,8 +126,12 @@ def review(st: dict) -> dict:
     for c in st["closed"]:
         key = c.get("trade_id") or "legacy:" + c["date"] + ":" + c["t"]
         g = groups.setdefault(key, {"id": key, "t": c["t"], "pnl": 0., "risk": 0., "known": True,
-                                    "setup": c.get("setup"), "edge": c.get("signal_edge"), "date": c["exit_date"]})
+                                    "setup": c.get("setup"), "edge": c.get("signal_edge"), "date": c["exit_date"],
+                                    "entry_context": c.get("entry_context"), "fees": 0., "exit_reasons": []})
         g["pnl"] += c["pnl"]
+        g["fees"] += c.get("qty", 0) * (c.get("entry", 0) + c.get("exit", 0)) * FEE
+        if c.get("why") not in g["exit_reasons"]:
+            g["exit_reasons"].append(c.get("why"))
         g["known"] = g["known"] and bool(c.get("risk_per_share", 0) > 0)
         g["risk"] += c["qty"] * (c.get("risk_per_share") or 0)
         g["date"] = max(g["date"], c["exit_date"])
@@ -152,7 +157,18 @@ def review(st: dict) -> dict:
         tips.append("엣지를 통과하지 않은 거래 기록이 있어요. 매수 당시 기준을 확인해요.")
     if not tips:
         tips.append("평균 R은 과거 결과예요. 금액을 늘리기 전 새로운 기간에도 유지되는지 확인해요.")
-    return {"n": len(trades), "r_n": len(measured), "avg_r": avg_r,
+    def has_current_team(g):
+        ctx = g.get("entry_context") or {}
+        team = ctx.get("team") or {}
+        return bool(team.get("views") and team.get("date") == ctx.get("date"))
+    team_trades = [g for g in trades if has_current_team(g)]
+    avoided = [g for g in team_trades if g["entry_context"].get("shadow_avoid")]
+    comparison = {"n": len(team_trades), "avoided": len(avoided), "actual_pnl": round(sum(g["pnl"] for g in team_trades), 2),
+                  "kept_pnl": round(sum(g["pnl"] for g in team_trades if not g["entry_context"].get("shadow_avoid")), 2),
+                  "missed_gains": round(sum(max(0, g["pnl"]) for g in avoided), 2),
+                  "avoided_losses": round(-sum(min(0, g["pnl"]) for g in avoided), 2),
+                  "note": "같은 날 AI 주의 의견이 있었다면 그 거래만 건너뛴 단순 비교. 현금 재투자·대체 거래·계좌 수익률은 계산하지 않음"}
+    return {"n": len(trades), "r_n": len(measured), "avg_r": avg_r, "team_comparison": comparison,
             "win": round(sum(g["pnl"] > 0 for g in trades) / len(trades) * 100, 1) if trades else None,
             "violations": st.get("violations", 0), "tips": tips, "by_setup": by_setup,
             "trades": sorted(trades, key=lambda g: g["date"], reverse=True)[:30]}
@@ -164,7 +180,7 @@ def _close(st, p, day, px, why):
     st["cash"] += proceeds
     cost = qty * p["entry"] * (1 + FEE)
     st["closed"].append({"t": p["t"], "qty": qty, "entry": p["entry"], "date": p["date"], "exit": round(px, 4), "exit_date": day,
-                         "why": why, "trade_id": p.get("trade_id"), "risk_per_share": p.get("risk_per_share"), "signal_edge": p.get("signal_edge"), "setup": p.get("setup"), "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
+                         "why": why, "trade_id": p.get("trade_id"), "risk_per_share": p.get("risk_per_share"), "signal_edge": p.get("signal_edge"), "setup": p.get("setup"), "entry_context": p.get("entry_context"), "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
     day_risk(st, day)
     st["log"].append(f"{day} 매도 {p['t']} {qty}주 @{px:.2f} · {why}")
 
@@ -237,6 +253,10 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=d, limit=o["limit"], qty=o["qty"])
         elif lo <= o["limit"] * (1 - TOUCH):
             px = min(op, o["limit"])
+            check = trade_guard.validate_buy(o, trade_guard.sim_account(st, guard), cfg, px)
+            if not check["ok"]:
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + check["reasons"][0] + ")", day=d)
+                continue
             cost = o["qty"] * px * (1 + FEE)
             if px <= o["stop"]:
                 _ticket(st, o["t"], o["signal_date"], result="안 냄 (손절선 아래 시가)", day=d)
@@ -247,7 +267,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             else:
                 st["cash"] -= cost
                 st["positions"].append({**entry_meta(o, px), "t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": d, "stop": o["stop"],
-                                        "target": o["target"], "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": "장중(일봉 확인)"})
+                                        "target": o["target"], "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "entry_context": o.get("entry_context"), "why": o["why"], "fill_time": "장중(일봉 확인)"})
                 st["log"].append(f"{d} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {o['why']}")
                 _ticket(st, o["t"], o["signal_date"], result="체결", day=d, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at="장중(일봉 확인)")
                 if lo <= o["stop"]:
@@ -312,7 +332,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if not 0 < pl["stop"] < limit < pl["target"]:
                 reject("주문 가격 조건")
                 continue
-            risk = max(limit - pl["stop"], limit * 0.01)
+            risk = max(limit - pl["stop"] + (limit + pl["stop"]) * FEE, limit * 0.01)
             qty = int(min(equity * cfg["risk"] / risk, equity * cfg["cap"] / limit, cash / (limit * (1 + FEE))))
             if qty < 1:
                 reject("정수 1주 위험·예산 한도")
@@ -435,14 +455,16 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
                 keep.append(o); continue
             px = min(float(row["Open"]), o["limit"])
             cost = o["qty"] * px * (1 + FEE)
-            if cost > st["cash"] + 1e-9:
-                _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=day)
-                events.append(f"{o['t']} 주문 안 냄 · 현금 부족")
+            check = trade_guard.validate_buy(o, trade_guard.sim_account(st, guard), st["cfg"], px)
+            if not check["ok"]:
+                reason = check["reasons"][0]
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + reason + ")", day=day)
+                events.append(f"{o['t']} 주문 안 냄 · {reason}")
                 continue
             st["cash"] -= cost
             p = {**entry_meta(o, px), "t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": day,
                  "stop": o["stop"], "target": o["target"], "peak": px, "half": False,
-                 "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"],
+                 "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "entry_context": o.get("entry_context"), "why": o["why"],
                  "fill_time": f"{stamp} ET", "seen_to": ts}
             _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{stamp} ET")
             st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {stamp} ET 체결 · {o['why']}")

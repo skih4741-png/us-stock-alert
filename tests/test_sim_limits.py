@@ -44,6 +44,7 @@ def test_daily_trade_limit_migrates_old_ledger():
 
 def test_intraday_loss_blocks_next_entry_and_replay_is_idempotent():
     store, st = state()
+    st['cfg']['risk'] = .06  # 일일 3% 차단을 따로 검증하기 위한 진입 위험 설정
     st['pending'] = [order('A'), order('B')]
     simtrade.save(store, st)
     now = datetime(2026, 10, 2, 15, tzinfo=timezone.utc)
@@ -106,6 +107,7 @@ def test_intraday_does_not_fill_unfinished_bar():
 
 def test_buy_candle_high_is_not_assumed_to_follow_entry():
     store, st = state()
+    st['cfg']['risk'] = .06  # 목표의 시간 순서를 검증하는 고정 주문
     st['pending'] = [order('A')]
     simtrade.save(store, st)
     df = candle(); df['High'] = 150.

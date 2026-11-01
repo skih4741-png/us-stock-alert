@@ -94,6 +94,7 @@ class Client:
         j = r.json() if r.content else {}
         if r.status_code != 200 or str(j.get("rt_cd")) != "0":
             raise KisError(f"{tr} 실패 ({r.status_code}) {j.get('msg_cd', '')} {str(j.get('msg1', ''))[:80]}")
+        self._more = str(r.headers.get("tr_cont", "")) in ("M", "F")
         return j
 
     def _post(self, path, tr, body):
@@ -107,10 +108,12 @@ class Client:
     # ---- 조회 ----
     def balance(self) -> dict:
         out1, out2 = [], {}
+        complete = True
         for ex in ("NASD", "NYSE", "AMEX"):
             j = self._get("/uapi/overseas-stock/v1/trading/inquire-balance", TR["balance"],
                           {"CANO": self.cano, "ACNT_PRDT_CD": self.prod, "OVRS_EXCG_CD": ex, "TR_CRCY_CD": "USD",
                            "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""})
+            complete = complete and not getattr(self, "_more", False)
             for x in j.get("output1") or []:
                 if float(x.get("ovrs_cblc_qty") or 0) > 0 and x.get("ovrs_pdno") not in [y["t"] for y in out1]:
                     out1.append({"t": x.get("ovrs_pdno"), "qty": int(float(x.get("ovrs_cblc_qty") or 0)),
@@ -120,7 +123,7 @@ class Client:
             if isinstance(o2, list):
                 o2 = o2[0] if o2 else {}
             out2 = out2 or o2
-        return {"holdings": out1, "summary": {"buy_amt": _f(out2.get("frcr_pchs_amt1")), "pnl": _f(out2.get("ovrs_tot_pfls")),
+        return {"holdings": out1, "complete": complete, "summary": {"buy_amt": _f(out2.get("frcr_pchs_amt1")), "pnl": _f(out2.get("ovrs_tot_pfls")),
                                               "ret": _f(out2.get("tot_pftrt"))}}
 
     def fills(self, day: str) -> list[dict]:
@@ -129,17 +132,36 @@ class Client:
                       {"CANO": self.cano, "ACNT_PRDT_CD": self.prod, "PDNO": "%", "ORD_STRT_DT": day, "ORD_END_DT": day,
                        "SLL_BUY_DVSN": "00", "CCLD_NCCS_DVSN": "00", "OVRS_EXCG_CD": "%", "SORT_SQN": "DS",
                        "ORD_DT": "", "ORD_GNO_BRNO": "", "ODNO": "", "CTX_AREA_NK200": "", "CTX_AREA_FK200": ""})
+        if getattr(self, "_more", False):
+            raise KisError("체결 조회가 한 페이지를 초과해 새 매수 확인을 보류해요")
         out = []
         for x in j.get("output") or []:
-            out.append({"odno": x.get("odno"), "t": x.get("pdno"), "side": "매도" if x.get("sll_buy_dvsn_cd") == "01" else "매수",
+            out.append({"odno": x.get("odno"), "order_date": x.get("ord_dt") or day, "t": x.get("pdno"), "side": "매도" if x.get("sll_buy_dvsn_cd") == "01" else "매수",
                         "qty": _f(x.get("ft_ord_qty")), "filled": _f(x.get("ft_ccld_qty")), "price": _f(x.get("ft_ccld_unpr3")),
                         "ord_price": _f(x.get("ft_ord_unpr3")), "status": x.get("prcs_stat_name") or "", "time": x.get("ord_tmd") or ""})
         return out
 
     # ---- 주문 (지정가만, 모의투자) ----
+    def buying_power(self, t: str, price: float, excg: str) -> float:
+        """외화 주문가능액. 한국투자증권 공식 v1_해외주식-014, 모의 TR."""
+        j = self._get("/uapi/overseas-stock/v1/trading/inquire-psamount", "VTTS3007R",
+                      {"CANO": self.cano, "ACNT_PRDT_CD": self.prod, "OVRS_EXCG_CD": excg,
+                       "OVRS_ORD_UNPR": f"{price:.2f}", "ITEM_CD": t.replace("-", ".")})
+        out = j.get("output") or {}
+        if isinstance(out, list):
+            out = out[0] if out else {}
+        cash = _f(out.get("ovrs_ord_psbl_amt"))
+        import math
+        if cash is None or not math.isfinite(cash) or cash < 0:
+            raise KisError("외화 주문가능액 확인 실패")
+        return cash
+
     def order(self, side: str, t: str, qty: int, price: float, excg: str) -> str:
-        if qty < 1:
-            raise KisError("수량 0")
+        import math
+        if side not in ("buy", "sell") or not isinstance(qty, (int, float)) or not math.isfinite(qty) or qty < 1 or qty != int(qty):
+            raise KisError("주문 방향·정수 수량 오류")
+        if not math.isfinite(price) or price <= 0:
+            raise KisError("주문 가격 오류")
         j = self._post("/uapi/overseas-stock/v1/trading/order", TR["buy" if side == "buy" else "sell"],
                        {"CANO": self.cano, "ACNT_PRDT_CD": self.prod, "OVRS_EXCG_CD": excg, "PDNO": t.replace("-", "."),
                         "ORD_QTY": str(int(qty)), "OVRS_ORD_UNPR": f"{price:.2f}", "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"})

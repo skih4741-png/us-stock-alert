@@ -350,7 +350,24 @@ const ACTIONS = {
     return { ok: true, daily: parse_(blobs.daily), alerts: parse_(blobs.alerts) || [],
              perf: parse_(blobs.perf), weekly: parse_(blobs.weekly), paper: paperRows_(),
              ai: aiPublic_(parse_(blobs.ai)), gap: parse_(blobs.gap), profile: profile_(), aiUsage: aiUsage_(blobs),
-             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_(), cal: parse_(blobs.cal), palerts: priceAlerts_() };
+             kis: kisPublic_(parse_(blobs.kis)), watch: parse_(blobs.watch), watchlist: watchList_(), cal: parse_(blobs.cal), palerts: priceAlerts_(), deskNotes: deskNotes_() };
+  },
+
+  deskSave: function (r) {
+    if (!full_(r.token)) return {ok:false,auth:true,error:'다시 로그인해 주세요.'};
+    const n=r.note || {}, t=String(n.t || '').trim().toUpperCase();
+    if(!/^[A-Z][A-Z.\-]{0,9}$/.test(t)) return {ok:false,error:'종목 코드가 올바르지 않아요.'};
+    const price = function(x) {const v=Number(x || 0); if(!Number.isFinite(v) || v<0 || v>1e6) throw new Error('가격 조건을 확인해 주세요.'); return v;};
+    const note={t:t,reason:String(n.reason || '').slice(0,500),wait:String(n.wait || '').slice(0,300),
+      invalid:String(n.invalid || '').slice(0,300),waitBelow:price(n.waitBelow),invalidBelow:price(n.invalidBelow),
+      next:/^\d{4}-\d{2}-\d{2}$/.test(n.next || '')?n.next:'',status:['유지','재검토','무효'].indexOf(n.status)>=0?n.status:'유지',
+      snapshot:entryContext_(n.snapshot),updated:new Date().toISOString()};
+    const sh=sheet_('투자 판단 기록',['종목','기록']), vals=sh.getDataRange().getDisplayValues();
+    let row=0;
+    for(let i=1;i<vals.length;i++) if(vals[i][0]===t) {row=i+1;break;}
+    if(!row && vals.length>100) return {ok:false,error:'판단 기록은 100종목까지 보관해요.'};
+    sh.getRange(row || sh.getLastRow()+1,1,1,2).setNumberFormat('@').setValues([[t,JSON.stringify(note)]]);
+    return {ok:true,deskNotes:deskNotes_()};
   },
 
   /* ---- 관심종목 (사지 않았지만 지켜볼 종목) ---- */
@@ -413,16 +430,22 @@ const ACTIONS = {
   paperAdd: function (r) {
     if (!full_(r.token)) return { ok: false, auth: true, error: '다시 로그인해 주세요.' };
     const t = String(r.t || '').toUpperCase();
-    const qty = Math.floor(Number(r.qty)), px = Number(r.price), day = String(r.date || '');
+    const qty = Number(r.qty), px = Number(r.price), day = String(r.date || '');
     if (!/^[A-Z][A-Z.\-]{0,9}$/.test(t)) return { ok: false, error: '종목 코드가 올바르지 않아요.' };
-    if (!(qty >= 1 && qty <= 100000)) return { ok: false, error: '수량은 1주 이상으로 넣어 주세요.' };
+    if (!(Number.isInteger(qty) && qty >= 1 && qty <= 100000)) return { ok: false, error: '수량은 1주 이상으로 넣어 주세요.' };
     if (!(px > 0 && px < 1e6) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: '가격 정보가 없어요. 새로고침 후 다시 해 주세요.' };
     const rows = paperRows_();
+    const requestId=String(r.requestId || '');
+    if(!/^[A-Za-z0-9-]{16,80}$/.test(requestId)) return {ok:false,error:'앱을 새로고침한 뒤 다시 시도해 주세요.'};
+    const duplicate=rows.filter(function(x){return x.requestId===requestId;})[0];
+    if(duplicate) return {ok:true,id:duplicate.id,paper:rows};
+    const context=entryContext_(r.entry_context);
+    if(!context.reason) return {ok:false,error:'선택한 이유를 적어 주세요.'};
     const cash = paperCash_(rows);
     if (qty * px > cash + 1e-6) return { ok: false, error: '모의 계좌 현금이 부족해요. 남은 현금 $' + cash.toFixed(2) };
     const id = rows.reduce(function (m, x) { return Math.max(m, Number(x.id) || 0); }, 0) + 1;
     const num = function (v) { const n = Number(v); return n > 0 ? String(Math.round(n * 100) / 100) : ''; };
-    paperWrite_(null, [String(id), day, t, String(qty), String(px), num(r.stop), num(r.target), '', '', '', '']);
+    paperWrite_(null, [String(id), day, t, String(qty), String(px), num(r.stop), num(r.target), '', '', '', '', requestId, JSON.stringify(context)]);
     return { ok: true, id: id, cash: Math.round((cash - qty * px) * 100) / 100, paper: paperRows_() };
   },
 
@@ -517,7 +540,7 @@ function readBlobs_() {
   return outp;
 }
 
-const PAPER_COLS = ['번호', '담은 날', '종목', '수량', '담은 가격', '손절', '1차 목표', '판 날', '판 가격', '판 이유', '회고'];
+const PAPER_COLS = ['번호', '담은 날', '종목', '수량', '담은 가격', '손절', '1차 목표', '판 날', '판 가격', '판 이유', '회고', '요청 ID', '매수 당시 근거'];
 const PAPER_START = 1000;
 function paperSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
@@ -526,6 +549,7 @@ function paperSheet_() {
     sh = ss.insertSheet('모의 거래');
     sh.getRange(1, 1, 1, PAPER_COLS.length).setValues([PAPER_COLS]);
   }
+  if(sh.getLastColumn()<PAPER_COLS.length) sh.getRange(1,12,1,2).setValues([PAPER_COLS.slice(11)]);
   return sh;
 }
 function paperRows_() {
@@ -538,7 +562,7 @@ function paperRows_() {
     if (!v[0]) continue;
     out.push({ rowNo: i + 1, values: v, id: String(v[0]), date: v[1], t: v[2], qty: Number(v[3]), price: Number(v[4]),
                stop: Number(v[5]) || null, target: Number(v[6]) || null, sold_date: v[7], sold_price: Number(v[8]) || null,
-               why: v[9], note: v[10] });
+               why: v[9], note: v[10], requestId:v[11], entry_context:parse_(v[12]) });
   }
   return out;
 }
@@ -620,7 +644,7 @@ function aiUsage_(blobs) {
 function kisPublic_(k) {
   if (!k) return null;
   return { on: k.on, why: k.why, err: k.err, at: k.at, orders: (k.orders || []).slice(-20), holdings: ((k.balance || {}).holdings) || [],
-           summary: ((k.balance || {}).summary) || {}, fills: k.fills || [] };
+           summary: ((k.balance || {}).summary) || {}, fills: k.fills || [], guard:k.guard || null, reconcile:k.reconcile || null, order_summary:k.order_summary || null };
 }
 function aiPublic_(a) {
   if (!a) return null;
@@ -689,10 +713,11 @@ function askAI_(r) {
   const known = {};
   (daily.holdings || []).forEach(function (h) { known[h.t] = { 구분: '내 보유', 결론: h.conclusion, 수익률: h.gain_pct, 손절: h.stop, 목표: h.target, 걸린규칙: h.hits }; });
   (daily.bands || []).forEach(function (b) { (b.picks || []).concat(b.etf_picks || []).forEach(function (p) { known[p.t] = known[p.t] || { 구분: '매수 후보', 총점: p.total, 주가: p.price, 계획: p.plan, 이유: p.reasons, 태그: p.tags }; }); });
-  const words = (q + ' ' + pasted).toUpperCase().match(/\b[A-Z]{1,5}(?:\.[A-Z])?\b/g) || [];
+  const selected=String((r.context || {}).t || '').toUpperCase().replace(/[^A-Z0-9.\-]/g,'');
+  const words = (selected + ' ' + q + ' ' + pasted).toUpperCase().match(/\b[A-Z]{1,5}(?:\.[A-Z])?\b/g) || [];
   const tickers = words.filter(function (w, i) { return (known[w] || ai.b4 && ai.b4[w]) && words.indexOf(w) === i; }).slice(0, 5);
-  const ctx = { 기준일: daily.date, 시장: daily.market, 내_성향: profile_(), 종목: {}, 모의계좌: perf.sim ? { 평가: perf.sim.equity, 수익률: perf.sim.ret, 보유: perf.sim.positions } : null };
-  tickers.forEach(function (t) { ctx.종목[t] = { 앱: known[t], 재무: (daily.fin || {})[t], 버핏4관점: (ai.b4 || {})[t], 쉬운리포트: (ai.rep || {})[t], 실적카드: (ai.earn || {})[t] }; });
+  const ctx = { 시작화면: selected ? {종목:selected,기준일:(r.context || {}).date,주의:"질문 시작 화면의 기준일. 최신 자료와 다를 수 있음"} : null, 기준일: daily.date, 시장: daily.market, 내_성향: profile_(), 종목: {}, 모의계좌: perf.sim ? { 평가: perf.sim.equity, 수익률: perf.sim.ret, 보유: perf.sim.positions } : null };
+  tickers.forEach(function (t) { ctx.종목[t] = { 앱: known[t], 재무: (daily.fin || {})[t], 버핏4관점: (ai.b4 || {})[t], 투자팀관찰: (ai.team || {})[t], 쉬운리포트: (ai.rep || {})[t], 실적카드: (ai.earn || {})[t] }; });
   // RAG 유사도 검색은 OpenAI 임베딩이 필요해요 — OpenAI 키가 없으면 조용히 건너뛰어요(답변은 무료 공급자로 계속).
   try { ctx.찾은_자료 = oaiKey ? ragSearch_(q || pasted.slice(0, 1000), tickers, oaiKey) : []; } catch (e) { ctx.찾은_자료 = []; }
   let task;
@@ -1034,4 +1059,19 @@ function checkAIConnection() {
                  error: r.error || null, diag: r.diag || [] };
   console.log(JSON.stringify(result));
   return result;
+}
+
+// 기록은 사용자 입력이며 주문 규칙으로 실행하지 않아요.
+function deskNotes_() {
+  const sh=sheet_('투자 판단 기록',['종목','기록']);
+  return sh.getDataRange().getDisplayValues().slice(1,101).map(function(r){return parse_(r[1]);}).filter(Boolean);
+}
+function entryContext_(input) {
+  const x=input && typeof input==='object'?input:{};
+  const n=function(v){const z=Number(v);return v!=null && Number.isFinite(z)?z:null;};
+  const tm=x.team && typeof x.team==='object'?x.team:null;
+  return {t:String(x.t || '').slice(0,12),date:String(x.date || '').slice(0,10),price:n(x.price),total:n(x.total),
+    setup:String(x.setup || '').slice(0,40),stop:n(x.stop),target:n(x.target),policy:String(x.policy || '').slice(0,40),reason:String(x.reason || '').slice(0,500),
+    team:tm?{date:String(tm.date || '').slice(0,10),version:String(tm.version || '').slice(0,30),
+      views:(Array.isArray(tm.views)?tm.views:[]).slice(0,4).map(function(v){return {name:String(v.name || '').slice(0,20),stance:String(v.stance || '').slice(0,20),reason:String(v.reason || '').slice(0,350)};})}:null};
 }

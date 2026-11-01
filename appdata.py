@@ -161,5 +161,11 @@ def add_alert(store, kind: str, title: str, body: str, at: str, tone: str = "inf
         items = json.loads(raw) if raw else []
     except Exception:
         items = []
-    items.insert(0, {"kind": kind, "title": title, "body": body, "at": at, "tone": tone})
+    previous = next((x for x in items if x.get("kind") == kind and x.get("title") == title and x.get("body") == body
+                     and x.get("at", "")[:10] == at[:10]), None)
+    if previous:
+        previous["repeats"] = previous.get("repeats", 1) + 1
+        previous["last_at"] = at
+    else:
+        items.insert(0, {"kind": kind, "title": title, "body": body, "at": at, "tone": tone})
     store.put_blob("alerts", dumps(items[:max_items]))

@@ -17,6 +17,7 @@ import pandas as pd
 
 import ai
 import rag
+import investment_team
 
 log = logging.getLogger(__name__)
 KEY = "ai"
@@ -221,6 +222,7 @@ def numeric_cards(blob: dict, app: dict, cfg: dict, sim_state: dict | None, gpt_
         blob.pop("secq_off", None)
     except Exception as e:
         log.warning("분기 공시 비교 실패: %s", e)
+    investment_team.attach(blob, app)
 
 
 def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | None:
@@ -230,6 +232,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     if not ok:
         blob["off"] = why
         numeric_cards(blob, app, cfg, sim_state, False)
+        investment_team.stamp_pending(store, blob, app)
         store.put_blob(KEY, json.dumps(blob, ensure_ascii=False, default=str))
         log.info("GPT 기능 건너뜀: %s", why)
         return blob
@@ -300,7 +303,22 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             r = ai.checked("쉬운 리포트", REP, f, "small", 2500)
             if r:
                 rep[t] = dict(r, date=today, _v=REP_VER)
+    # 비용을 제한해 상위 3종목을 주 1회 검토. 여러 관점은 동일 자료를 공유해요.
+    team = blob.setdefault("team", {})
+    pending_t = [o["t"] for o in (sim_state or {}).get("pending", [])]
+    team_focus = list(dict.fromkeys(pending_t + focus))[:3]
+    for t in team_focus:
+        previous = team.get(t) or {}
+        if previous.get("date", "") >= week_ago and previous.get("version") == investment_team.VERSION and previous.get("views"):
+            continue
+        facts = facts_all.get(t) or gather(t, deep=True)
+        facts["앱 재무 요약"] = fin.get(t)
+        facts["앱 후보·보유"] = next((p for p in app.get("holdings", []) + picks if p["t"] == t), {})
+        result = ai.checked("투자팀 네 관점 (관찰만)", investment_team.TASK, facts, "small", 2200)
+        if result:
+            team[t] = investment_team.normalize(result, facts, today)
     keep = set(focus) | set(holds)
+    blob["team"] = {t: v for t, v in team.items() if t in keep or t in pending_t}
     blob["earn"] = {k: v for k, v in earn.items() if k in keep and v.get("date", "") >= week_ago}
     blob["b4"] = {k: v for k, v in b4.items() if k in keep}
     blob["rep"] = {k: v for k, v in rep.items() if k in keep}
@@ -324,6 +342,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     blob["veto"] = veto_log[-200:]
 
     numeric_cards(blob, app, cfg, sim_state, True)
+    investment_team.stamp_pending(store, blob, app)
 
     # ---- RAG 자료 쌓기 ----
     try:

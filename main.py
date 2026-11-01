@@ -939,6 +939,10 @@ def run_sim(store, app: dict, now):
 def save_perf(store, now, notify_stops: bool = True) -> dict | None:
     """3단계: 신호 성적·모의 계좌를 계산해 앱 '성적' 탭 데이터로 저장. 실패해도 리포트는 그대로."""
     try:
+        try:
+            previous_perf = json.loads(store.get_blob("perf") or "{}")
+        except Exception:
+            previous_perf = {}
         perf = performance.update(store)
         perf["at"] = now.isoformat(timespec="minutes")
         st = simtrade.load(store)
@@ -949,9 +953,12 @@ def save_perf(store, now, notify_stops: bool = True) -> dict | None:
             perf["runs"] = (json.loads(store.get_blob("perf") or "{}") or {}).get("runs") or []   # 실행 기록은 지우지 않고 이어 가요
         except Exception:
             perf["runs"] = []
+        hit = sorted({x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")})
+        # 이전 경고와 같으면 새 알림을 보내지 않아요. 한 번 해소된 뒤 재진입하면 다시 알림.
+        new_stop = hit != previous_perf.get("stop_alert_tickers", [])
+        perf["stop_alert_tickers"] = hit if notify_stops or not hit else previous_perf.get("stop_alert_tickers", [])
         store.put_blob("perf", appdata.dumps(appdata._clean(perf)))
-        hit = [x["t"] for x in perf["paper"]["trades"] if x.get("below_stop")]
-        if hit and notify_stops:
+        if hit and notify_stops and new_stop:
             body = ", ".join(hit) + " — 모의 계좌 종목이 손절선 아래예요. 성적 탭에서 팔지 정해 주세요."
             appdata.add_alert(store, "paper", "모의 계좌 손절선 아래", body, perf["at"], "warn")
             push.send(store, "모의 계좌 손절선 아래", body, "#/score", "daily", tag="paper")
