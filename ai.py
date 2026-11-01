@@ -184,7 +184,7 @@ def _record(where: str, p: dict, model: str, pin: int, pout: int):
                    f"이번 달 OpenAI 사용액 ${total:.2f} / 한도 ${c:.2f}. 한도는 구글 시트 '설정' 탭 'AI 월 한도(달러)'에서 바꿔요.")
 
 
-def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90) -> dict | None:
+def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90, _fallback: bool = False) -> dict | None:
     key = os.environ.get(p["key"])
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if p["name"] == "openrouter":
@@ -209,6 +209,12 @@ def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90) -> dict
             err = {"message": err}
         code = str(err.get("code") or err.get("type") or "")
         msg = str(err.get("message", "") or "")
+        if r.status_code == 404 and p["name"] == "groq" and not _fallback:
+            fallback = dict(body, model="llama-3.1-8b-instant")
+            if body.get("model") == fallback["model"]:
+                return None
+            # 한 번만 재시도; 제어 플래그는 HTTP 본문에 보내지 않아요.
+            return _post(p, path, fallback, where, timeout, _fallback=True)
         if r.status_code in (401, 403):
             _S["dead"].add(p["name"])
             if p["name"] == "openai":
@@ -260,7 +266,7 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
         if not j:
             continue
         u = j.get("usage") or {}
-        _record(where, p, model, int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
+        _record(where, p, j.get("model") or model, int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0)))
         try:
             text = (j.get("choices") or [{}])[0].get("message", {}).get("content") or ""
             if not text.strip():

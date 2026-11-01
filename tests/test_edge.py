@@ -39,7 +39,7 @@ def test_edge_counts_targets_and_costs(monkeypatch):
 
 def test_closed_trade_keeps_entry_edge():
     import simtrade
-    state = dict(cash=0., closed=[], log=[])
+    state = dict(cash=0., closed=[], log=[], cfg=dict(simtrade.DEFAULT), equity=[])
     edge = dict(win=70, n=20, avg_r=.4)
     position = dict(t='TEST', qty=1, entry=10., date='2026-10-01', setup='돌파', signal_edge=edge)
     simtrade._close(state, position, '2026-10-02', 11., '목표')

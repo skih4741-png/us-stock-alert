@@ -1258,13 +1258,30 @@
         esc(x.day || x.signal) + " · " + (x.qty || "") + "주 지정가 $" + fmt(x.limit) + (x.fill_px ? " → $" + fmt(x.fill_px) + " (" + esc(x.at || "") + ")" : "") + '</span><span class="badge ' +
         (RES[x.result] || "") + '">' + esc(x.result) + "</span></div>").join("") + "</div>" : '<div class="small">첫 주문표 결과는 다음 거래일부터 쌓여요</div>') + "</div>";
   }
+  function simReviewHtml(m) {
+    const d = m.risk_day, r = m.review;
+    if (!d && !r) return '<div class="card small">다음 아침 리포트부터 손실 한도·복기가 표시돼요.</div>';
+    let h = '<h2>매수 제한 · 거래 복기</h2>';
+    if (d) h += '<div class="card"><div class="row between"><b>' + esc(d.date) + ' 미국 거래일</b><span class="badge ' + (d.blocked ? 'warn' : 'good') + '">' + (d.blocked ? '새 매수 중지' : '매수 제한 내') + '</span></div>' +
+      '<dl class="kv num"><dt>매수 체결</dt><dd>' + d.fills + ' / ' + d.max_trades + '회</dd><dt>확정 순손익 (비용 차감)</dt><dd>' + usd(d.pnl) + '</dd><dt>하루 확정손실 한도</dt><dd>$' + fmt(d.loss_limit) + '</dd></dl>' +
+      (d.reason ? '<div class="small">' + esc(d.reason) + ' 도달 · 다음 미국 거래일에 다시 확인해요.</div>' : '') +
+      '<div class="small">자동 모의에 적용 · 미실현 손익은 일일 한도에서 제외 · 손절·매도는 계속 실행 · 갭으로 한도보다 더 잃을 수 있어요.</div></div>';
+    if (!r) return h;
+    h += '<div class="card"><b>완료 거래 복기</b><dl class="kv num"><dt>완료 거래 / 수익 거래 비율</dt><dd>' + r.n + '건 / ' + (r.win == null ? '—' : fmt(r.win, 1) + '%') + '</dd><dt>평균 R (비용 차감)</dt><dd>' + (r.avg_r == null ? '—' : fmt(r.avg_r, 2) + 'R') + ' · ' + r.r_n + '건</dd><dt>기존 규칙 위반 기록</dt><dd>' + r.violations + '건</dd></dl>' +
+      '<div class="small">1R = 매수 때 정한 손절선까지의 위험금액. +2R은 그 위험금액의 두 배를 번 것. 분할매도는 전량 매도 후 한 거래로 계산해요. 옛 거래에 최초 손절선이 없으면 평균 R에서 제외해요. 손절 미준수 여부를 별도로 측정한 수치는 아니에요.</div>' +
+      '<ul class="plain small">' + (r.tips || []).map(t => '<li>' + esc(t) + '</li>').join('') + '</ul></div>';
+    if ((r.by_setup || []).length) h += '<div class="card"><b>어떤 자리에서 벌고 잃었나</b><ul class="plain small">' + r.by_setup.map(g => '<li>' + esc(g.setup) + ' · 완료 ' + g.n + '건 · 평균 ' + (g.avg_r == null ? 'R 기록 없음' : fmt(g.avg_r, 2) + 'R') + (g.r_n < 12 ? ' · 판단할 표본 부족' : '') + '</li>').join('') + '</ul></div>';
+    if ((r.trades || []).length) h += '<details class="sig"><summary><b>매수 근거와 실제 결과</b></summary><div class="list">' + r.trades.map(t =>
+      '<div class="item"><b>' + esc(t.t) + '</b><div class="grow small">' + esc(t.setup || '셋업 기록 없음') + '<br>' + (t.edge && t.edge.n ? '매수 당시 목표 도달률 ' + esc(t.edge.win) + '% · 표본 ' + esc(t.edge.n) + '건' : '매수 당시 엣지 기록 없음') + '</div><span class="num">' + usd(t.pnl) + '<br>' + (t.r == null ? 'R 기록 없음' : fmt(t.r, 2) + 'R') + '</span></div>').join('') + '</div></details>';
+    return h;
+  }
   function autoSimHtml(m, ref) {
     if (!m) return emp("🧪", "자동 모의투자를 준비하고 있어요", "다음 아침 리포트부터 가상 1,000달러로 시작해요.", "#/picks", "오늘 후보 보기");
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
     const passN = (m.checks || []).filter(c => c[1]).length;
     // ── 맨 위: 증권사처럼 평가금액·수익률 한눈에 ──
-    return brokerCard(m, ref) +
+    return brokerCard(m, ref) + simReviewHtml(m) +
       '<div class="card"><div class="row between"><span class="sub">3개월 자동 모의매매</span><span class="small">' + m.day + "/" + m.days + "일째</span></div>" +
       '<div class="plbar" style="margin:6px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
       '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · 11장 규칙 그대로 자동 매매 · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +

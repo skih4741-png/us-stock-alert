@@ -34,7 +34,7 @@ TOUCH = 0.001              # 지정가에 '딱 닿기만' 하면 못 산 것으�
 TICKET_RATE = 0.6          # 실전 기준: 리허설 주문표 체결률
 TICKET_MIN = 10
 DAYS = 90                  # 시험 기간 (달력 기준)
-DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15}
+DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15, "day_loss": 0.03, "day_trades": 3}
 AVOID = ("신규 매수 보류", "재무 주의", "급등", "출렁임", "참고용")
 
 
@@ -97,13 +97,74 @@ def ticket_stats(st: dict) -> dict:
             "intraday": sum(1 for x in filled if x.get("at") and "장중" not in str(x.get("at")))}
 
 
+def day_risk(st: dict, day: str) -> dict:
+    """미국 거래일별 확정 순손실/매수 체결 횟수. 기존 장부도 tickets에서 복구."""
+    cfg = dict(DEFAULT, **st["cfg"])
+    base = next((e[1] for e in reversed(st["equity"]) if e[0] < day), cfg["budget"])
+    pnl = sum(c["pnl"] for c in st["closed"] if c["exit_date"] == day)
+    fills = sum(t.get("result") == "체결" and t.get("day") == day for t in st.get("tickets", []))
+    loss_limit = base * cfg["day_loss"]
+    stopped = st.setdefault("day_stops", {})
+    if pnl <= -loss_limit:
+        stopped[day] = True
+    reason = "하루 확정손실 한도" if stopped.get(day) else "하루 매수 횟수 한도" if fills >= cfg["day_trades"] else ""
+    return {"date": day, "pnl": round(pnl, 2), "loss_limit": round(loss_limit, 2),
+            "fills": fills, "max_trades": cfg["day_trades"], "blocked": bool(reason), "reason": reason}
+
+
+def entry_meta(o: dict, px: float) -> dict:
+    return {"trade_id": o.get("trade_id") or o["signal_date"] + ":" + o["t"],
+            "initial_stop": o["stop"], "risk_per_share": max(0., px - o["stop"])}
+
+
+def review(st: dict) -> dict:
+    """분할 매도를 한 거래로 묶고, 매수 시점 1R로 비용 차감 손익을 평가."""
+    groups = {}
+    open_ids = {p.get("trade_id") for p in st["positions"] if p.get("trade_id")}
+    for c in st["closed"]:
+        key = c.get("trade_id") or "legacy:" + c["date"] + ":" + c["t"]
+        g = groups.setdefault(key, {"id": key, "t": c["t"], "pnl": 0., "risk": 0., "known": True,
+                                    "setup": c.get("setup"), "edge": c.get("signal_edge"), "date": c["exit_date"]})
+        g["pnl"] += c["pnl"]
+        g["known"] = g["known"] and bool(c.get("risk_per_share", 0) > 0)
+        g["risk"] += c["qty"] * (c.get("risk_per_share") or 0)
+        g["date"] = max(g["date"], c["exit_date"])
+    trades = [g for k, g in groups.items() if k not in open_ids and
+              not any(not p.get("trade_id") and k == "legacy:" + p["date"] + ":" + p["t"] for p in st["positions"])]
+    for g in trades:
+        g["r"] = round(g["pnl"] / g["risk"], 2) if g["known"] and g["risk"] > 0 else None
+        g["pnl"] = round(g["pnl"], 2)
+    measured = [g for g in trades if g["r"] is not None]
+    avg_r = round(sum(g["r"] for g in measured) / len(measured), 2) if measured else None
+    by_setup = []
+    for name in sorted({g.get("setup") or "셋업 기록 없음" for g in trades}):
+        bucket = [g for g in trades if (g.get("setup") or "셋업 기록 없음") == name]
+        known = [g for g in bucket if g["r"] is not None]
+        by_setup.append({"setup": name, "n": len(bucket), "r_n": len(known),
+                         "avg_r": round(sum(g["r"] for g in known) / len(known), 2) if known else None})
+    tips = []
+    if len(measured) < 12:
+        tips.append("1R 기록이 있는 완료 거래가 12건 미만이에요. 성과를 단정하지 말고 모의를 이어가요.")
+    if avg_r is not None and avg_r <= 0:
+        tips.append("비용을 뺀 평균 R이 0 이하예요. 매수 횟수나 금액을 늘리기 전에 셋업별 손실을 점검해요.")
+    if any(g.get("edge") and not g["edge"].get("ok") for g in trades):
+        tips.append("엣지를 통과하지 않은 거래 기록이 있어요. 매수 당시 기준을 확인해요.")
+    if not tips:
+        tips.append("평균 R은 과거 결과예요. 금액을 늘리기 전 새로운 기간에도 유지되는지 확인해요.")
+    return {"n": len(trades), "r_n": len(measured), "avg_r": avg_r,
+            "win": round(sum(g["pnl"] > 0 for g in trades) / len(trades) * 100, 1) if trades else None,
+            "violations": st.get("violations", 0), "tips": tips, "by_setup": by_setup,
+            "trades": sorted(trades, key=lambda g: g["date"], reverse=True)[:30]}
+
+
 def _close(st, p, day, px, why):
     qty = p["qty"]
     proceeds = qty * px * (1 - FEE)
     st["cash"] += proceeds
     cost = qty * p["entry"] * (1 + FEE)
     st["closed"].append({"t": p["t"], "qty": qty, "entry": p["entry"], "date": p["date"], "exit": round(px, 4), "exit_date": day,
-                         "why": why, "signal_edge": p.get("signal_edge"), "setup": p.get("setup"), "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
+                         "why": why, "trade_id": p.get("trade_id"), "risk_per_share": p.get("risk_per_share"), "signal_edge": p.get("signal_edge"), "setup": p.get("setup"), "pnl": round(proceeds - cost, 2), "ret": round((proceeds / cost - 1) * 100, 2)})
+    day_risk(st, day)
     st["log"].append(f"{day} 매도 {p['t']} {qty}주 @{px:.2f} · {why}")
 
 
@@ -117,36 +178,6 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
     hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
     H = lambda t: hist.get(t.replace(".", "-"))
-
-    # 1) 주문 체결
-    still = []
-    for o in st["pending"]:
-        df = H(o["t"])
-        if df is None:
-            still.append(o); continue
-        d, row = _bar_after(df, o["signal_date"])
-        if d is None or d > bar_date:
-            still.append(o); continue
-        op, lo = float(row["Open"]), float(row["Low"])
-        if op > o["skip_above"]:
-            st["log"].append(f"{d} 취소 {o['t']} · 시작가 {op:.2f}가 추격 금지선 {o['skip_above']:.2f} 위")
-            _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=d, limit=o["limit"], qty=o["qty"])
-        elif lo <= o["limit"] * (1 - TOUCH):
-            px = min(op, o["limit"])
-            cost = o["qty"] * px * (1 + FEE)
-            if cost > st["cash"] + 1e-9:  # 돈이 모자라면 사지 않음
-                st["log"].append(f"{d} 취소 {o['t']} · 현금 부족")
-                _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=d, limit=o["limit"], qty=o["qty"])
-            else:
-                st["cash"] -= cost
-                st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": d, "stop": o["stop"],
-                                        "target": o["target"], "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": "장중(일봉 확인)"})
-                st["log"].append(f"{d} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {o['why']}")
-                _ticket(st, o["t"], o["signal_date"], result="체결", day=d, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at="장중(일봉 확인)")
-        else:
-            st["log"].append(f"{d} 미체결 {o['t']} · 지정가 {o['limit']:.2f}보다 0.1% 넘게 안 내려옴")
-            _ticket(st, o["t"], o["signal_date"], result="미체결", day=d, limit=o["limit"], qty=o["qty"], low=round(lo, 2))
-    st["pending"] = still
 
     # 2) 매도 규칙 (날마다)
     keep = []
@@ -184,6 +215,47 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             keep.append(p)
     st["positions"] = keep
     st["checked"] = bar_date
+
+    # 1) 주문 체결
+    still = []
+    for o in st["pending"]:
+        df = H(o["t"])
+        if df is None:
+            still.append(o); continue
+        d, row = _bar_after(df, o["signal_date"])
+        if d is None or d > bar_date:
+            still.append(o); continue
+        guard = day_risk(st, d)
+        if guard["blocked"]:
+            _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + guard["reason"] + ")", day=d)
+            st["log"].append(f"{d} 취소 {o['t']} · {guard['reason']}")
+            continue
+        op, lo = float(row["Open"]), float(row["Low"])
+        if op > o["skip_above"]:
+            st["log"].append(f"{d} 취소 {o['t']} · 시작가 {op:.2f}가 추격 금지선 {o['skip_above']:.2f} 위")
+            _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=d, limit=o["limit"], qty=o["qty"])
+        elif lo <= o["limit"] * (1 - TOUCH):
+            px = min(op, o["limit"])
+            cost = o["qty"] * px * (1 + FEE)
+            if px <= o["stop"]:
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (손절선 아래 시가)", day=d)
+                continue
+            if cost > st["cash"] + 1e-9:  # 돈이 모자라면 사지 않음
+                st["log"].append(f"{d} 취소 {o['t']} · 현금 부족")
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=d, limit=o["limit"], qty=o["qty"])
+            else:
+                st["cash"] -= cost
+                st["positions"].append({**entry_meta(o, px), "t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": d, "stop": o["stop"],
+                                        "target": o["target"], "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": "장중(일봉 확인)"})
+                st["log"].append(f"{d} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {o['why']}")
+                _ticket(st, o["t"], o["signal_date"], result="체결", day=d, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at="장중(일봉 확인)")
+                if lo <= o["stop"]:
+                    new = st["positions"].pop()
+                    _close(st, new, d, o["stop"] * (1 - SLIP), "손절선 (매수일 일봉 보수적 확인)")
+        else:
+            st["log"].append(f"{d} 미체결 {o['t']} · 지정가 {o['limit']:.2f}보다 0.1% 넘게 안 내려옴")
+            _ticket(st, o["t"], o["signal_date"], result="미체결", day=d, limit=o["limit"], qty=o["qty"], low=round(lo, 2))
+    st["pending"] = still
 
     # 평가금액·SPY
     spy = H("SPY")
@@ -226,6 +298,8 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                 break
             pl = p["plan"]
             limit = float(pl.get("zone_high") or p["price"])
+            if not 0 < pl["stop"] < limit < pl["target"]:
+                continue
             risk = max(limit - pl["stop"], limit * 0.01)
             qty = int(min(equity * cfg["risk"] / risk, equity * cfg["cap"] / limit, cash / (limit * (1 + FEE))))
             if qty < 1:
@@ -286,80 +360,82 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
             if len(m):
                 today[t] = m
     events, n_log = [], len(st["log"])
-    hm = lambda i: i.strftime("%H:%M")
-    # 1) 주문 계획 → 매수
-    keep = []
-    for o in st["pending"]:
-        m = today.get(o["t"])
-        if day <= o["signal_date"] or m is None:
-            keep.append(o); continue
-        if not o.get("open_px"):
-            o["open_px"] = round(float(m["Open"].iloc[0]), 4)
-            if o["open_px"] > o["skip_above"]:
-                st["log"].append(f"{day} 취소 {o['t']} · 시작가 {o['open_px']:.2f}가 추격 금지선 {o['skip_above']:.2f} 위 (장중 확인)")
-                _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=day, limit=o["limit"], qty=o["qty"])
-                events.append(f"{o['t']} 주문 안 냄 · 시작가가 추격 금지선 위")
-                continue
-        done = False
-        for i, row in m.iterrows():
-            ts = i.strftime("%Y-%m-%d %H:%M")
-            if ts <= o.get("seen_to", ""):
-                continue
-            o["seen_to"] = ts
-            if float(row["Low"]) <= o["limit"] * (1 - TOUCH):
-                px = min(float(row["Open"]), o["limit"])
-                cost = o["qty"] * px * (1 + FEE)
-                if cost > st["cash"] + 1e-9:
-                    st["log"].append(f"{day} 취소 {o['t']} · 현금 부족")
-                    _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=day, limit=o["limit"], qty=o["qty"])
-                else:
-                    st["cash"] -= cost
-                    st["positions"].append({"t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": day, "stop": o["stop"], "target": o["target"],
-                                            "peak": px, "half": False, "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"], "fill_time": f"{hm(i)} ET", "seen_to": ts})
-                    st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {hm(i)} ET 체결 · {o['why']}")
-                    _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{hm(i)} ET")
-                    events.append(f"매수 체결 {o['t']} {o['qty']}주 @${px:.2f} ({hm(i)} ET)")
-                done = True
-                break
-        if not done:
-            keep.append(o)
-    st["pending"] = keep
-    # 2) 가진 종목 → 손절·1차 목표
-    alive = []
-    for p in st["positions"]:
-        m = today.get(p["t"])
-        if m is None:
-            alive.append(p); continue
-        closed = False
-        for i, row in m.iterrows():
-            ts = i.strftime("%Y-%m-%d %H:%M")
-            if ts <= p.get("seen_to", ""):
-                continue
+    # 시간 순서대로 기존 보유 매도 → 신규 매수. 손실 한도 도달 뒤의 매수를 막아요.
+    times = sorted({i for m in today.values() for i in m.index if i + timedelta(minutes=5) <= now_utc})
+    def exits(p, row, day, stamp, fresh=False):
+        op, hi, lo = (float(row[k]) for k in ("Open", "High", "Low"))
+        if lo <= p["stop"]:
+            px = (p["stop"] if fresh else min(op, p["stop"])) * (1 - SLIP)
+            why = ("손절선" if not p["half"] else "본전 손절") + f" ({stamp} ET)"
+            _close(st, p, day, px, why)
+            events.append(f"매도 {p['t']} {p['qty']}주 · {why}")
+            return True
+        # 매수 봉의 고가는 매수 전에 나왔을 수 있어 목표 체결로 가정하지 않아요.
+        if not fresh and not p["half"] and hi >= p["target"] * (1 + TOUCH):
+            px = max(op, p["target"])
+            if p["qty"] >= 2:
+                half = dict(p, qty=p["qty"] // 2)
+                _close(st, half, day, px, f"1차 목표 (절반, {stamp} ET)")
+                p["qty"] -= half["qty"]
+                p["half"], p["stop"] = True, p["entry"]
+                events.append(f"매도 {p['t']} {half['qty']}주 · 1차 목표 절반")
+            else:
+                _close(st, p, day, px, f"1차 목표 ({stamp} ET)")
+                events.append(f"매도 {p['t']} {p['qty']}주 · 1차 목표")
+                return True
+        return False
+
+    for i in times:
+        ts, stamp = i.strftime("%Y-%m-%d %H:%M"), i.strftime("%H:%M")
+        alive = []
+        for p in st["positions"]:
+            m = today.get(p["t"])
+            if m is None or i not in m.index or ts <= p.get("seen_to", ""):
+                alive.append(p); continue
             p["seen_to"] = ts
-            op, hi, lo = float(row["Open"]), float(row["High"]), float(row["Low"])
-            if lo <= p["stop"]:
-                px = min(op, p["stop"]) * (1 - SLIP)
-                why = ("손절선" if not p["half"] else "본전 손절") + f" ({hm(i)} ET)"
-                _close(st, p, day, px, why)
-                events.append(f"매도 {p['t']} {p['qty']}주 @${px:.2f} · {why}")
-                closed = True
-                break
-            if not p["half"] and hi >= p["target"] * (1 + TOUCH):
-                px = max(op, p["target"])
-                if p["qty"] >= 2:
-                    half = dict(p, qty=p["qty"] // 2)
-                    _close(st, half, day, px, f"1차 목표 (절반, {hm(i)} ET)")
-                    p["qty"] -= half["qty"]
-                    p["half"], p["stop"] = True, p["entry"]
-                    events.append(f"매도 {p['t']} {half['qty']}주 @${px:.2f} · 1차 목표 절반 ({hm(i)} ET)")
-                else:
-                    _close(st, p, day, px, f"1차 목표 ({hm(i)} ET)")
-                    events.append(f"매도 {p['t']} {p['qty']}주 @${px:.2f} · 1차 목표 ({hm(i)} ET)")
-                    closed = True
-                    break
-        if not closed:
-            alive.append(p)
-    st["positions"] = alive
+            if not exits(p, m.loc[i], day, stamp):
+                alive.append(p)
+        st["positions"] = alive
+        keep = []
+        for o in st["pending"]:
+            m = today.get(o["t"])
+            if day <= o["signal_date"] or m is None or i not in m.index or ts <= o.get("seen_to", ""):
+                keep.append(o); continue
+            row = m.loc[i]
+            o["seen_to"] = ts
+            guard = day_risk(st, day)
+            reason = guard["reason"]
+            if not o.get("open_px"):
+                o["open_px"] = float(row["Open"])
+            if o["open_px"] > o["skip_above"]:
+                reason = "추격 금지"
+            if float(row["Open"]) <= o["stop"]:
+                reason = "손절선 아래 시가"
+            if reason:
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + reason + ")", day=day)
+                st["log"].append(f"{day} 취소 {o['t']} · {reason}")
+                events.append(f"{o['t']} 주문 안 냄 · {reason}")
+                continue
+            if float(row["Low"]) > o["limit"] * (1 - TOUCH):
+                keep.append(o); continue
+            px = min(float(row["Open"]), o["limit"])
+            cost = o["qty"] * px * (1 + FEE)
+            if cost > st["cash"] + 1e-9:
+                _ticket(st, o["t"], o["signal_date"], result="안 냄 (현금 부족)", day=day)
+                events.append(f"{o['t']} 주문 안 냄 · 현금 부족")
+                continue
+            st["cash"] -= cost
+            p = {**entry_meta(o, px), "t": o["t"], "qty": o["qty"], "entry": round(px, 4), "date": day,
+                 "stop": o["stop"], "target": o["target"], "peak": px, "half": False,
+                 "signal_edge": o.get("signal_edge"), "setup": o.get("setup"), "why": o["why"],
+                 "fill_time": f"{stamp} ET", "seen_to": ts}
+            _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{stamp} ET")
+            st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {stamp} ET 체결 · {o['why']}")
+            events.append(f"매수 체결 {o['t']} {o['qty']}주 @${px:.2f}")
+            if not exits(p, row, day, stamp, fresh=True):
+                st["positions"].append(p)
+        st["pending"] = keep
+    day_risk(st, day)
     st["intra_at"] = now_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     if events:
         st["today"] = (st.get("today") or []) + st["log"][n_log:]
@@ -427,6 +503,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "wins": len(wins), "losses": len(losses), "fees": round(sum(c["qty"] * (c["entry"] + c["exit"]) * FEE for c in closed) + sum(p["qty"] * p["entry"] * FEE for p in st["positions"]), 2), "positions": st["positions"], "pending": st["pending"],
         "closed": closed[::-1][:50], "log": st["log"][::-1][:30], "checks": checks, "passed": all(c[1] for c in checks),
         "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
+        "risk_day": day_risk(st, max(eq[-1][0] if eq else st["start"], (st.get("intra_at") or st["start"])[:10])), "review": review(st),
         "tickets": (st.get("tickets") or [])[::-1][:30], "ticket_stats": ts, "intra_at": st.get("intra_at"),
     }
 

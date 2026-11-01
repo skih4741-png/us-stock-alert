@@ -826,20 +826,31 @@ var AI_PROVIDERS = [
 function aiCall_(sys, usr) {
   var props = PropertiesService.getScriptProperties().getProperties();
   var haveAny = false, diag = [];
-  for (var i = 0; i < AI_PROVIDERS.length; i++) {
-    var p = AI_PROVIDERS[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
+  var candidates = AI_PROVIDERS.map(function (p) {
+    return Object.assign({}, p, { model: props[p.name.toUpperCase() + '_MODEL'] || p.model });
+  });
+  for (var i = 0; i < candidates.length; i++) {
+    var p = candidates[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
     var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], max_tokens: 1200, temperature: 0.3 };
     if (p.json) body.response_format = { type: 'json_object' };
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
       var code = resp.getResponseCode();
-      if (code !== 200) { diag.push(p.name + ':' + code + ' ' + resp.getContentText().slice(0, 80)); continue; }
+      if (code !== 200) {
+        diag.push(p.name + ':' + code);
+        // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
+        if (code === 404 && p.name === 'groq' && !p.fallback) {
+          var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+          candidates.splice(i + 1, 0, Object.assign({}, p, { model: backup, fallback: true }));
+        }
+        continue;
+      }
       var d = JSON.parse(resp.getContentText());
       var txt = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
       if (!txt) { diag.push(p.name + ':빈응답'); continue; }
       var m = txt.match(/\{[\s\S]*\}/); if (!m) { diag.push(p.name + ':JSON아님'); continue; }
-      return { ok: true, provider: p.name, data: JSON.parse(m[0]) };
+      return { ok: true, provider: p.name, model: p.model, data: JSON.parse(m[0]) };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
   }
   return { ok: false, error: haveAny ? 'AI 공급자가 모두 응답하지 않았어요 (잠시 후 다시)' : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
@@ -874,7 +885,15 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
       var code = resp.getResponseCode();
-      if (code !== 200) { diag.push(p.name + ':' + code + ' ' + resp.getContentText().slice(0, 80)); continue; }
+      if (code !== 200) {
+        diag.push(p.name + ':' + code);
+        // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
+        if (code === 404 && p.name === 'groq' && !p.fallback) {
+          var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+          candidates.splice(i + 1, 0, Object.assign({}, p, { model: backup, fallback: true }));
+        }
+        continue;
+      }
       var d = JSON.parse(resp.getContentText());
       var txt = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
       if (!txt) { diag.push(p.name + ':빈응답'); continue; }
@@ -1003,4 +1022,13 @@ function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).set
 function authorize() {
   readBlobs_();
   MailApp.getRemainingDailyQuota();
+}
+
+// Apps Script 편집기에서 실행: 키를 출력하지 않고 실제 AI 연결 결과만 확인해요.
+function checkAIConnection() {
+  var r = aiCall_('연결 확인입니다. JSON 객체로만 답하세요.', '{"instruction":"answer에 ok를 넣어 답하세요"}');
+  var result = { ok: r.ok, provider: r.provider || null, model: r.model || null,
+                 error: r.error || null, diag: r.diag || [] };
+  console.log(JSON.stringify(result));
+  return result;
 }
