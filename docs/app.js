@@ -707,13 +707,22 @@
   function edgeTone(e) { return e && e.ok ? "good" : (e && e.label === "동전 던지기" ? "warn" : "info"); }
   function pickCard(p) {
     const pl = p.plan || {}, e = p.edge;
+    const cash = paperCash(), qty = suggestQty(p), f = finFor(p.t);
+    const budgetBadge = qty >= 1
+      ? '<span class="badge good">' + qty + '주 가능 ($' + fmt(cash) + ')</span>'
+      : '<span class="badge sub">1주 $' + fmt(p.price) + ' · 예산 초과</span>';
+    const hasBuffett = f && Number.isFinite(f.buffett_pass) && Number.isFinite(f.buffett_max) && f.buffett_max > 0;
+    const buffettBadge = hasBuffett
+      ? ' <span class="badge ' + (f.buffett_pass / f.buffett_max >= 0.75 ? "good" : f.buffett_pass / f.buffett_max >= 0.5 ? "warn" : "sub") +
+        '" title="규칙 기반 참고 지표 · 총점에 미반영">버핏 체질 ' + esc(f.buffett_pass) + '/' + esc(f.buffett_max) + '</span>' : "";
     const setupTag = (p.elite ? '<span class="badge good">⭐ 엄선</span> ' : "") + (p.setup ? '<span class="badge ' + edgeTone(e) + '">' + esc(p.setup) + "</span> " : "");
     const edgeLine = e ? '<div class="small' + (e.ok ? " good-t" : e.label === "동전 던지기" ? " bad-t" : "") + '">' +
       (e.n ? "엣지: 과거 " + e.n + "번 → 이김 " + e.win + "%" + (e.ok ? " ✓ 엣지 있음" : e.label === "동전 던지기" ? " · 동전 던지기(참고)" : "") : esc(e.label || "")) + "</div>" : "";
-    return '<div class="card tap' + (p.etf ? " dash" : "") + '" onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'">' +
+    return '<div class="card tap' + (p.etf ? " dash" : "") + '"' + (qty >= 1 ? "" : ' style="opacity:.6"') + ' onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'">' +
       '<div class="row between"><span>' + setupTag + "<b>" + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
       '<div class="small">' + esc((p.name || "").slice(0, 46)) + "</div>" +
       '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
+      '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + '</div>' +
       edgeLine + tags(p.tags) + "</div>";
   }
   // 후보 상세 — 엣지(과거 승률) 바
@@ -739,7 +748,8 @@
     const seen = {}, stocks = [];
     (d.bands || []).forEach(b => (b.picks || []).forEach(p => { if (!seen[p.t] && hit(p)) { seen[p.t] = 1; stocks.push(p); } }));
     stocks.sort((a, b) => (b.total || 0) - (a.total || 0));
-    const elite = stocks.filter(p => p.elite);
+    const elite = stocks.filter(p => p.elite).sort((a, b) =>
+      Number(suggestQty(b) >= 1) - Number(suggestQty(a) >= 1) || (b.total || 0) - (a.total || 0));
     const shown = eliteOnly ? elite : stocks;
     const toggle = '<div class="chips"><button class="chip' + (eliteOnly ? " on" : "") + '" data-elite="1">⭐ 엄선만</button>' +
       '<button class="chip' + (eliteOnly ? "" : " on") + '" data-elite="0">전체 개별주</button></div>';
@@ -2320,7 +2330,7 @@
   const GLOSSARY = [
     ["앱 전체", [["하단 탭바 (Tab Bar)", "홈 · 후보 · 보유 · 뉴스 · 모의투자 (5개)"], ["배지 · 인디케이터 (Badge)", "뉴스·모의투자 탭 위 빨간 점 = 안 본 새 소식"], ["세이프 에어리어 (Safe Area)", "탭바 아래 홈바 여백"], ["토스트 (Toast)", "잠깐 떴다 사라지는 검은 알림"], ["오프라인 배너", "인터넷 끊기면 맨 위 노란 줄"], ["풀 투 리프레시 (Refresher)", "맨 위에서 아래로 당기면 새로고침"], ["백 제스처 (Back Gesture)", "왼쪽 끝에서 오른쪽으로 밀면 뒤로"], ["테마 컨트롤러", "설정 → 화면 모드 (자동·밝게·어둡게)"]]],
     ["홈", [["앱바 (App Bar)", "맨 위 '오늘 · 날짜' 줄과 🔔·⚙️ 아이콘 버튼"], ["업데이트 카드", "새 버전 바뀐 점 (확인했어요 버튼)"], ["카드 · 래디얼 프로그레스", "모의투자 진행 중 카드의 동그란 진행률(○/90일)"], ["스테이터스 (Status)", "초록 깜빡이는 점 = 진행 중"], ["카드", "오늘의 경제뉴스 · 내 자산 · 밤사이 브리핑"], ["칩 (Chip)", "AI에게 묻기 · 장 전 갭 · 성향 인터뷰"], ["리스트 · 아이템 (List · Item)", "내 보유 한 줄 결론, 매수 후보 상위"]]],
-    ["후보", [["세그먼트 (Segment)", "가격대 고르기 줄"], ["검색바 (Searchbar)", "종목 찾기 칸"], ["리스트 · 배지", "종목 줄과 점수·태그"], ["종목 상세 → 세그먼트", "재무 5초 · 찬반 근거 · 차트 · 4관점 · 쉬운 리포트"]]],
+    ["후보", [["세그먼트 (Segment)", "엄선/전체 토글"], ["검색바 (Searchbar)", "종목 찾기 칸"], ["리스트 · 배지", "종목 줄과 점수·태그"], ["종목 상세 → 세그먼트", "재무 5초 · 찬반 근거 · 차트 · 4관점 · 쉬운 리포트"]]],
     ["보유", [["카드 (Stat)", "🧺 내 포트폴리오 진단 숫자 3칸"], ["프로그레스 바", "업종 비중 막대"], ["컬랩스 (Collapse)", "AI 풀이 · 주요 리스크 접기/펴기"], ["종목 상세 → 컬랩스", "차트 분석 · 분기 공시 비교 · 버핏 4관점 · 쉬운 리포트"]]],
     ["뉴스", [["세그먼트", "5초 요약 · 업종 13개 · 내 종목 · 매크로·숫자"], ["컬랩스 (아코디언)", "업종 13개 각 줄 (누르면 펼침)"], ["배지 (신호등)", "🟢🟡🔴 · 호재/악재/소음"], ["칩", "더 물어보기 질문"]]],
     ["모의투자", [["세그먼트", "자동 모의 · 내 계좌 · 실력·운 · 신호 · 주간"], ["프로그레스 바", "3개월 진행 막대, 체결률 막대"], ["버튼 (Secondary)", "주문표 복사"], ["리스트 · 배지", "주문표 채점 (체결·미체결·안 냄)"]]],
