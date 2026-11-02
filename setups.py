@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import math
+
 import backtest
 
 # 셋업 기준 (일봉)
@@ -23,14 +25,33 @@ ELITE_WIN = 55.0
 ELITE_N = 8
 ELITE_RR = 1.5
 
+# 과적합(운으로 좋아 보이는 것) 방어 — lazyowen 자기개선 루프 방법론 차용.
+HOLDOUT_FRAC = 0.30     # 최근 30% 표본은 '봉인 구간'(한 번만 검증용)
+STRESS_COST = 0.007     # 왕복 비용 2배 스트레스: 추가로 0.7%p 더 불리하게
+WILSON_Z = 1.64         # 윌슨 하한(한쪽 95%) — 표본 적으면 승률을 보수적으로 깎음
+WIN_LB_MIN = 50.0       # 승률 하한이 이보다 낮으면 '동전 던지기와 통계적으로 구분 안 됨'
+HOLDOUT_MIN = 4         # 봉인 구간 표본이 이보다 적으면 판단 보류
+HOLDOUT_WIN = 50.0      # 봉인 구간 목표 도달률이 이보다 낮으면 '무너짐'
+
+
+def _wilson_lb(wins: int, n: int, z: float = WILSON_Z) -> float:
+    """승률의 윌슨 점수 하한(%). 표본이 적을수록 더 많이 깎여요 — 디플레이티드 샤프와 같은 취지."""
+    if n <= 0:
+        return 0.0
+    p = wins / n
+    denom = 1 + z * z / n
+    center = p + z * z / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+    return round(max(0.0, (center - margin) / denom) * 100, 1)
+
 
 def is_elite(edge: dict | None, rr: float | None) -> bool:
-    """비용 차감 기대값을 유지한 모의 후보 여부."""
+    """비용 차감 기대값 + 과적합 방어(봉인 구간·비용 스트레스·표본 보정)를 통과한 모의 후보 여부."""
     if not edge or not edge.get("ok"):
         return False
     return bool((edge.get("win") or 0) >= ELITE_WIN and (edge.get("n") or 0) >= ELITE_N
                 and (edge.get("avg") or 0) > 0 and (edge.get("avg_r") or 0) > 0
-                and (rr or 0) >= ELITE_RR)
+                and (rr or 0) >= ELITE_RR and edge.get("robust"))
 
 
 def exclusion(p: dict) -> str:
@@ -48,6 +69,8 @@ def exclusion(p: dict) -> str:
         return "비용 차감 기대값 미달"
     if (pl.get("rr") or 0) < ELITE_RR:
         return "손익비 미달"
+    if not e.get("robust"):
+        return "과적합 방어 미통과(표본·비용·봉인)"
     return "" if is_elite(e, pl.get("rr")) else "엣지 검증 미통과"
 
 
@@ -120,6 +143,21 @@ def edge(df, rr: float, cfg: dict, setup: str | None) -> dict | None:
     enough = k >= MIN_SAMPLES
     ok = bool(enough and win_pct >= EDGE_WIN and avg > 0)
     label = ("엣지 있음" if ok else ("자료 부족" if not enough else "동전 던지기"))
+
+    # ---- 과적합 방어 3종 (표본은 과거→현재 순서) ----
+    # ① 표본 보정: 승률의 윌슨 하한(표본 적으면 깎임)
+    win_lb = _wilson_lb(wins, k)
+    # ② 비용 스트레스: 왕복 비용을 2배로 더 물려도 평균이 +인가
+    avg_stress = round((float(sum(rets)) / k - STRESS_COST) * 100, 1)
+    # ③ 봉인 구간: 최근 30% 표본은 따로 떼어, 거기서도 안 무너지는가
+    cut = int(k * (1 - HOLDOUT_FRAC))
+    hold_targets = targets[cut:]
+    hold_n = len(hold_targets)
+    hold_win = int(round(sum(hold_targets) / hold_n * 100)) if hold_n else None
+    holdout_ok = (hold_n < HOLDOUT_MIN) or (hold_win is not None and hold_win >= HOLDOUT_WIN)
+    robust = bool(ok and win_lb >= WIN_LB_MIN and avg_stress > 0 and holdout_ok)
+
     return {"setup": setup, "n": int(k), "win": win_pct, "loss": 100 - win_pct, "avg": avg, "ok": ok, "label": label,
             "stop": int(round(sum(stops) / k * 100)), "profit_win": int(round(sum(r > 0 for r in rets) / k * 100)),
-            "avg_r": round(sum(rs) / k, 2), "cost_included": True}
+            "avg_r": round(sum(rs) / k, 2), "cost_included": True,
+            "win_lb": win_lb, "avg_stress": avg_stress, "hold_win": hold_win, "hold_n": int(hold_n), "robust": robust}

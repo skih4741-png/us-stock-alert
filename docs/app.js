@@ -1318,6 +1318,7 @@
       '<div class="small">1R = 매수 때 정한 손절선까지의 위험금액. +2R은 그 위험금액의 두 배를 번 것. 분할매도는 전량 매도 후 한 거래로 계산해요. 옛 거래에 최초 손절선이 없으면 평균 R에서 제외해요. 손절 미준수 여부를 별도로 측정한 수치는 아니에요.</div>' +
       '<ul class="plain small">' + (r.tips || []).map(t => '<li>' + esc(t) + '</li>').join('') + '</ul></div>';
     if ((r.by_setup || []).length) h += '<div class="card"><b>어떤 자리에서 벌고 잃었나</b><ul class="plain small">' + r.by_setup.map(g => '<li>' + esc(g.setup) + ' · 완료 ' + g.n + '건 · 평균 ' + (g.avg_r == null ? 'R 기록 없음' : fmt(g.avg_r, 2) + 'R') + (g.r_n < 12 ? ' · 판단할 표본 부족' : '') + '</li>').join('') + '</ul></div>';
+    if ((r.ledger_failures || []).length) h += '<div class="card"><b>📒 실패 장부 — 다음 후보에서 자동 제외</b><div class="small" style="margin:2px 0 6px">같은 자리가 모의에서 반복 실패하면 빼서 같은 실수를 막아요 (3번 이상 시도 기준).</div><ul class="plain small">' + r.ledger_failures.map(f => '<li>' + esc(f.t) + ' · ' + esc(f.setup || '-') + ' — ' + f.n + '번 중 ' + f.win + '번만 수익 (' + (f.win_rate == null ? '—' : f.win_rate + '%') + ')</li>').join('') + '</ul></div>';
     if ((r.trades || []).length) h += '<details class="sig"><summary><b>매수 근거와 실제 결과</b></summary><div class="list">' + r.trades.map(t =>
       '<div class="item"><b>' + esc(t.t) + '</b><div class="grow small">' + esc(t.setup || '셋업 기록 없음') + '<br>' + (t.edge && t.edge.n ? '매수 당시 목표 도달률 ' + esc(t.edge.win) + '% · 표본 ' + esc(t.edge.n) + '건' : '매수 당시 엣지 기록 없음') + '</div><span class="num">' + usd(t.pnl) + '<br>' + (t.r == null ? 'R 기록 없음' : fmt(t.r, 2) + 'R') + '</span></div>').join('') + '</div></details>';
     return h;

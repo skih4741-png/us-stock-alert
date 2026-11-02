@@ -3,7 +3,20 @@ from __future__ import annotations
 
 import math
 
-POLICY = "balanced-2.19.0"
+POLICY = "balanced-2.19.1"
+
+# 잠근 안전 상한 — 설정(시트)에서 이보다 느슨하게 바꿔도 코드가 막아요.
+# lazyowen 자기개선 루프의 'chmod 444'(한도는 코드에 고정, 자동 로직이 못 느슨하게) 원칙.
+LOCKED = {"day_trades": 10, "max_pos": 10, "cap": 0.60, "risk": 0.05}
+
+
+def _cap(cfg: dict, key: str, default: float) -> float:
+    """설정값을 읽되 잠근 상한을 넘지 못하게 막아요(더 보수적인 쪽만 허용)."""
+    v = number(cfg.get(key))
+    if v is None:
+        v = default
+    ceil = LOCKED.get(key)
+    return min(v, ceil) if ceil is not None else v
 
 
 def number(x):
@@ -30,11 +43,11 @@ def validate_buy(order: dict, account: dict, cfg: dict, price=None) -> dict:
         reasons.append(account.get("unverified_reason") or "계좌 확인 대기")
     if account.get("blocked"):
         reasons.append(account.get("reason") or "일일 손실 한도")
-    if account.get("buys", 0) >= cfg.get("day_trades", 3):
+    if account.get("buys", 0) >= _cap(cfg, "day_trades", 3):
         reasons.append("하루 매수 횟수 한도")
     if order.get("t") in account.get("held", []):
         reasons.append("이미 보유·주문 중")
-    if account.get("positions", 0) >= cfg.get("max_pos", 2):
+    if account.get("positions", 0) >= _cap(cfg, "max_pos", 2):
         reasons.append("보유 종목 수 한도")
     cash, equity = number(account.get("cash")), number(account.get("equity"))
     fee = cfg.get("fee", .0035)
@@ -45,9 +58,9 @@ def validate_buy(order: dict, account: dict, cfg: dict, price=None) -> dict:
     elif cost is not None:
         if cost > cash + 1e-6:
             reasons.append("현금 부족 (비용 포함)")
-        if qty * px > equity * cfg.get("cap", .6) + 1e-6:
+        if qty * px > equity * _cap(cfg, "cap", .6) + 1e-6:
             reasons.append("한 종목 비중 한도")
-        if risk is not None and risk > equity * cfg.get("risk", .03) + 1e-6:
+        if risk is not None and risk > equity * _cap(cfg, "risk", .03) + 1e-6:
             reasons.append("손절 위험금액 한도 (비용 포함)")
     return {"ok": not reasons, "reasons": list(dict.fromkeys(reasons)), "cost": cost, "risk": risk, "policy": POLICY}
 

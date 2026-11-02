@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+import ledger
 import prices
 import setups
 import trade_guard
@@ -168,9 +169,13 @@ def review(st: dict) -> dict:
                   "missed_gains": round(sum(max(0, g["pnl"]) for g in avoided), 2),
                   "avoided_losses": round(-sum(min(0, g["pnl"]) for g in avoided), 2),
                   "note": "같은 날 AI 주의 의견이 있었다면 그 거래만 건너뛴 단순 비교. 현금 재투자·대체 거래·계좌 수익률은 계산하지 않음"}
+    led_failures = ledger.failures(ledger.from_closed(st["closed"]))
+    if led_failures:
+        tips.append(f"장부: 반복 실패한 자리 {len(led_failures)}개를 다음 후보에서 자동 제외하고 있어요 (같은 실수 방지).")
     return {"n": len(trades), "r_n": len(measured), "avg_r": avg_r, "team_comparison": comparison,
             "win": round(sum(g["pnl"] > 0 for g in trades) / len(trades) * 100, 1) if trades else None,
             "violations": st.get("violations", 0), "tips": tips, "by_setup": by_setup,
+            "ledger_failures": led_failures[:12],
             "trades": sorted(trades, key=lambda g: g["date"], reverse=True)[:30]}
 
 
@@ -308,11 +313,15 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         slots = cfg["max_pos"] - len(st["positions"])
         cash = st["cash"]
         equity = val
+        led = ledger.from_closed(st.get("closed"))   # 실패 장부 — 반복 실패한 자리 배제
         cands = []
         for p in picks:
             reason = setups.exclusion(p)
             if reason:
                 reject(reason); continue
+            led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
+            if led_blocked:
+                reject(led_why); continue
             pl = p.get("plan") or {}
             px, stop = p.get("price"), pl.get("stop")
             if not px or not stop or px < 3 or p["t"] in held or px * (1 + FEE) > cash:
