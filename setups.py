@@ -24,6 +24,9 @@ GAP = 5                  # 표본 사이 최소 간격(겹침 방지)
 ELITE_WIN = 55.0
 ELITE_N = 8
 ELITE_RR = 1.5
+# 양의 기대값 마진 — 비용 차감 후 '겨우 +'가 아니라 '뚜렷한 +'만 자동매매.
+# 손익분기(비용 포함)를 넘는 것만으로는 변동성에 먹혀요. 거래당 평균 ≥ +0.2R 요구.
+ELITE_AVG_R = 0.20
 
 # 과적합(운으로 좋아 보이는 것) 방어 — lazyowen 자기개선 루프 방법론 차용.
 HOLDOUT_FRAC = 0.30     # 최근 30% 표본은 '봉인 구간'(한 번만 검증용)
@@ -61,7 +64,7 @@ def is_elite(edge: dict | None, rr: float | None) -> bool:
     if not edge or not edge.get("ok"):
         return False
     return bool((edge.get("win") or 0) >= ELITE_WIN and (edge.get("n") or 0) >= ELITE_N
-                and (edge.get("avg") or 0) > 0 and (edge.get("avg_r") or 0) > 0
+                and (edge.get("avg") or 0) > 0 and (edge.get("avg_r") or 0) >= ELITE_AVG_R
                 and (rr or 0) >= ELITE_RR and edge.get("robust"))
 
 
@@ -76,8 +79,8 @@ def exclusion(p: dict) -> str:
         return "완료 표본 부족"
     if (e.get("win") or 0) < ELITE_WIN:
         return "목표 도달률 미달"
-    if (e.get("avg") or 0) <= 0 or (e.get("avg_r") or 0) <= 0:
-        return "비용 차감 기대값 미달"
+    if (e.get("avg") or 0) <= 0 or (e.get("avg_r") or 0) < ELITE_AVG_R:
+        return "비용 차감 기대값 부족 (평균 +0.2R 미만)"
     if (pl.get("rr") or 0) < ELITE_RR:
         return "손익비 미달"
     if not e.get("robust"):
