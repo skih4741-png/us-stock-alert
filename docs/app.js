@@ -752,6 +752,7 @@
       '<div class="small" style="margin-top:4px">같은 자리가 과거 <b>' + e.n + "번</b> 나왔을 때 · 평균 " + (e.avg >= 0 ? "+" : "") + fmt(e.avg, 1) + "%</div>" +
       '<div class="rbar" style="height:10px;margin:10px 0 6px"><span class="rfill" style="width:' + win + '%;background:var(--up);opacity:.85;border-radius:3px"></span></div>' +
       '<div class="legend small"><span><span class="sdot" style="background:var(--up)"></span>목표 먼저 ' + win + "%</span><span style=\"margin-left:12px\"><span class=\"sdot\" style=\"background:var(--line2)\"></span>목표 미달 " + loss + "%</span></div>" +
+      (e.win_lb != null && e.win_ub != null ? '<div class="small" style="margin-top:6px">🔎 현실 점검: 승률 ' + win + '% (표본 보정 범위 ' + fmt(e.win_lb, 0) + '~' + fmt(e.win_ub, 0) + '%) · 익절 먼저 ' + win + '% / 손절 먼저 ' + (e.stop != null ? e.stop : "—") + '% / 기간 만료 ' + (e.stop != null ? Math.max(0, 100 - win - e.stop) : "—") + '% <span class="sub">— 점 하나로 단정 금지</span></div>' : '') +
       (e.ok ? "" : '<div class="small" style="margin-top:6px">⚠ 이길 확률이 뚜렷하지 않아요 — 참고만 (동전 던지기면 거르는 게 원칙)</div>') +
       '<div class="small" style="margin-top:6px">일봉 기준 · 다음 날 시가 매수 · 같은 날 손절·목표 모두 닿으면 손절 우선 · 관찰 완료 표본만 · 비용 반영 (GPT 아님)</div></div>';
   }

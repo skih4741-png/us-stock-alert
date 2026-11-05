@@ -45,6 +45,17 @@ def _wilson_lb(wins: int, n: int, z: float = WILSON_Z) -> float:
     return round(max(0.0, (center - margin) / denom) * 100, 1)
 
 
+def _wilson_ub(wins: int, n: int, z: float = WILSON_Z) -> float:
+    """승률의 윌슨 점수 상한(%). 하한과 함께 '현실 점검 범위'를 만들어요(타임머신식 — 점 하나로 단정 금지)."""
+    if n <= 0:
+        return 100.0
+    p = wins / n
+    denom = 1 + z * z / n
+    center = p + z * z / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)
+    return round(min(1.0, (center + margin) / denom) * 100, 1)
+
+
 def is_elite(edge: dict | None, rr: float | None) -> bool:
     """비용 차감 기대값 + 과적합 방어(봉인 구간·비용 스트레스·표본 보정)를 통과한 모의 후보 여부."""
     if not edge or not edge.get("ok"):
@@ -145,8 +156,9 @@ def edge(df, rr: float, cfg: dict, setup: str | None) -> dict | None:
     label = ("엣지 있음" if ok else ("자료 부족" if not enough else "동전 던지기"))
 
     # ---- 과적합 방어 3종 (표본은 과거→현재 순서) ----
-    # ① 표본 보정: 승률의 윌슨 하한(표본 적으면 깎임)
+    # ① 표본 보정: 승률의 윌슨 하한·상한(표본 적으면 범위가 넓어져요 — 타임머신식 '현실 점검')
     win_lb = _wilson_lb(wins, k)
+    win_ub = _wilson_ub(wins, k)
     # ② 비용 스트레스: 왕복 비용을 2배로 더 물려도 평균이 +인가
     avg_stress = round((float(sum(rets)) / k - STRESS_COST) * 100, 1)
     # ③ 봉인 구간: 최근 30% 표본은 따로 떼어, 거기서도 안 무너지는가
@@ -160,4 +172,4 @@ def edge(df, rr: float, cfg: dict, setup: str | None) -> dict | None:
     return {"setup": setup, "n": int(k), "win": win_pct, "loss": 100 - win_pct, "avg": avg, "ok": ok, "label": label,
             "stop": int(round(sum(stops) / k * 100)), "profit_win": int(round(sum(r > 0 for r in rets) / k * 100)),
             "avg_r": round(sum(rs) / k, 2), "cost_included": True,
-            "win_lb": win_lb, "avg_stress": avg_stress, "hold_win": hold_win, "hold_n": int(hold_n), "robust": robust}
+            "win_lb": win_lb, "win_ub": win_ub, "avg_stress": avg_stress, "hold_win": hold_win, "hold_n": int(hold_n), "robust": robust}
