@@ -88,6 +88,30 @@ def exclusion(p: dict) -> str:
     return "" if is_elite(e, pl.get("rr")) else "엣지 검증 미통과"
 
 
+def paper_gate(p: dict) -> str:
+    """모의 track record 축적용 진입 게이트 — 첫 탈락 이유('' = 통과).
+
+    엄선(exclusion/is_elite)은 여기에 더해 평균 ≥0.2R + 과적합 방어 3종까지 요구해
+    작은 표본에선 거의 0건이 되고, 그러면 90일 track record가 안 쌓여 '수익이 안 나는'
+    것처럼 보여요. 그래서 '모의'는 '측정된 양의 기대값'(표본·승률·비용 차감 평균>0·손익비)만
+    요구해 계속 돌아가게 하되, 승률 55%·평균>0 아래(동전 던지기)로는 절대 안 내려갑니다.
+    엄선(⭐ 실전급)은 그대로 남겨 실제 돈 전환 판단에 씁니다."""
+    e, pl = p.get("edge") or {}, p.get("plan") or {}
+    if p.get("etf"):
+        return "ETF·펀드 제외"
+    if not p.get("setup"):
+        return "셋업 없음"
+    if (e.get("n") or 0) < ELITE_N:
+        return "완료 표본 부족"
+    if (e.get("win") or 0) < ELITE_WIN:
+        return "목표 도달률 미달"
+    if (e.get("avg") or 0) <= 0:
+        return "비용 차감 기대값 음수"
+    if (pl.get("rr") or 0) < ELITE_RR:
+        return "손익비 미달"
+    return ""
+
+
 def detect(t: dict) -> str | None:
     """최신 봉의 자리(셋업) 이름. 우선순위: 돌파 → 눌림목 → 과매도 반등."""
     if not t:

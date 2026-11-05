@@ -820,7 +820,7 @@
       '<input type="text" id="pq" class="search" placeholder="종목 코드·이름 찾기 (예: MO)" value="' + esc(S.q || "") + '" autocomplete="off">' +
       (d.market.rest_day ? '<div class="msg note">오늘은 매수 쉬는 날이에요. 아래 목록은 참고용이에요.</div>' : "") +
       candidateFilterHtml(stocks) + body +
-      '<p class="foot">ETF·펀드는 후보에서 제외했어요. 모의투자는 엄선 순수종목만 자동 매매해요. · ' + esc(DISCLAIMER) + "</p>");
+      '<p class="foot">ETF·펀드는 후보에서 제외했어요. 모의투자는 \'엣지 있음\'(표본·승률·비용 차감 평균 양수·손익비) 순수종목을 매매해 실적을 쌓고, ⭐엄선은 그중 과적합 방어까지 통과한 실전급 신호예요. · ' + esc(DISCLAIMER) + "</p>");
     $app.querySelectorAll("[data-elite]").forEach(b => b.addEventListener("click", () => { S.eliteOnly = b.dataset.elite === "1"; store.set("eliteOnly", S.eliteOnly); viewPicks(); }));
     const qi = document.getElementById("pq");
     qi.addEventListener("input", () => { clearTimeout(viewPicks._t); viewPicks._t = setTimeout(() => { S.q = qi.value; viewPicks(); const n = document.getElementById("pq"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 250); });

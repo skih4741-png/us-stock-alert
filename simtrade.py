@@ -231,6 +231,23 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             held = int(np.busday_count(date.fromisoformat(p["date"]), date.fromisoformat(d)))
             if held >= cfg["stale_days"] and cl < p["entry"] * 1.02:
                 _close(st, p, d, cl * (1 - SLIP), f"{held}거래일 제자리"); closed = True; break
+        # 일봉 백스톱 — 장중(5분봉)이 그날을 다 못 봤어도(실행 누락·수집 실패·마지막 봉 이후 급락),
+        # 최신 일봉으로 손절·목표를 반드시 재확인해 매도 누락을 막아요. 이미 닫혔으면 건너뜀(이중 매도 없음).
+        if not closed and len(df):
+            ld = df.index[-1].strftime("%Y-%m-%d")
+            if ld > p["date"]:
+                last = df.iloc[-1]
+                op_, hi_, lo_ = float(last["Open"]), float(last["High"]), float(last["Low"])
+                if lo_ <= p["stop"]:
+                    _close(st, p, ld, min(op_, p["stop"]) * (1 - SLIP), ("손절선" if not p["half"] else "본전 손절") + " · 일봉 백스톱"); closed = True
+                elif not p["half"] and hi_ >= p["target"] * (1 + TOUCH):
+                    px_ = max(op_, p["target"])
+                    if p["qty"] >= 2:
+                        half = dict(p, qty=p["qty"] // 2)
+                        _close(st, half, ld, px_, "1차 목표 (절반) · 일봉 백스톱")
+                        p["qty"] -= half["qty"]; p["half"], p["stop"] = True, p["entry"]
+                    else:
+                        _close(st, p, ld, px_, "1차 목표 · 일봉 백스톱"); closed = True
         if not closed:
             if market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
@@ -316,7 +333,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         led = ledger.from_closed(st.get("closed"))   # 실패 장부 — 반복 실패한 자리 배제
         cands = []
         for p in picks:
-            reason = setups.exclusion(p)
+            # 모의는 '측정된 양의 기대값'(paper_gate)으로 진입해 계속 돌며 track record를 쌓아요.
+            # 엄선(exclusion/is_elite)은 ⭐실전급 신호로 따로 표시 — 둘을 분리.
+            reason = setups.paper_gate(p)
             if reason:
                 reject(reason); continue
             led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
