@@ -842,7 +842,7 @@ function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 
 
 // ---- 온디맨드 AI (무료 공급자 체인, 전부 OpenAI 호환 /chat/completions). 키는 Script Properties에.
 var AI_PROVIDERS = [
-  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'openai/gpt-oss-20b', json: true },
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'llama-3.1-8b-instant', json: true },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
   { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false },
@@ -857,7 +857,7 @@ function aiCall_(sys, usr) {
   for (var i = 0; i < candidates.length; i++) {
     var p = candidates[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
     haveAny = true;
-    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], max_tokens: 1200, temperature: 0.3 };
+    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], max_tokens: 2000, temperature: 0.3 };
     if (p.json) body.response_format = { type: 'json_object' };
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
@@ -873,7 +873,14 @@ function aiCall_(sys, usr) {
       }
       var d = JSON.parse(resp.getContentText());
       var txt = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-      if (!txt) { diag.push(p.name + ':빈응답'); continue; }
+      if (!txt) {
+        diag.push(p.name + ':빈응답');
+        if (p.name === 'groq' && !p.fallback) {
+          var b2 = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+          candidates.splice(i + 1, 0, Object.assign({}, p, { model: b2, fallback: true }));
+        }
+        continue;
+      }
       var m = txt.match(/\{[\s\S]*\}/); if (!m) { diag.push(p.name + ':JSON아님'); continue; }
       return { ok: true, provider: p.name, model: p.model, data: JSON.parse(m[0]) };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
@@ -924,7 +931,14 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       }
       var d = JSON.parse(resp.getContentText());
       var txt = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-      if (!txt) { diag.push(p.name + ':빈응답'); continue; }
+      if (!txt) {
+        diag.push(p.name + ':빈응답');
+        if (p.name === 'groq' && !p.fallback) {
+          var b2 = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+          candidates.splice(i + 1, 0, Object.assign({}, p, { model: b2, fallback: true }));
+        }
+        continue;
+      }
       if (isOAI) { var u = d.usage || {}, pr = AI_PRICE[p.model] || [0.15, 0.60]; addAppSpent_((u.prompt_tokens || 0) / 1e6 * pr[0] + (u.completion_tokens || 0) / 1e6 * pr[1]); }
       var m = txt.match(/\{[\s\S]*\}/);
       var data = null; if (m) { try { data = JSON.parse(m[0]); } catch (e) {} }
