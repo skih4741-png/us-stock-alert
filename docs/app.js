@@ -856,9 +856,8 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, (p.setup ? '<span class="badge ' + edgeTone(p.edge) + '">' + esc(p.setup) + "</span> " : "") + '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + lensPanel(p) + edgeCard(p) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
-      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
-      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
+      tags(p.tags) +
+      // ── 매수 계획 (핵심 · 왜 이 화면에 왔나) ──
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
       "<dt>손절</dt><dd>" + fmt(pl.stop) + " (" + fmt(pl.risk_pct, 1) + "%)</dd>" +
@@ -866,6 +865,12 @@
       "<dt>이 위로 시작하면 추격 금지</dt><dd>" + fmt(pl.skip_if_open_above) + "</dd>" +
       "<dt>유효 기한</dt><dd>" + esc(pl.valid_until || "") + "</dd></dl></div>" +
       paperAddHtml(p) +
+      // ── 왜 사나 (엣지·관점) ──
+      edgeCard(p) + lensPanel(p) +
+      "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
+      // ── 더 깊이 보기 ──
+      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">버핏 관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
+      quoteSumCard(p.t) + statsCard(p.t) + aiCard(p.t) + priceAlertCard(p.t) +
       '<details class="sig"><summary><b>📓 이 종목 일지 (알림·모의 거래)</b></summary>' + tickerLogHtml(p.t) + "</details>" +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     bindPaperAdd(p);
@@ -932,11 +937,7 @@
       // 상단: 종목·현재가·결론 (후보 상세와 공통 머리글)
       stockHeader(h.t, h.name, h.price, '<span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span>") +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (isWatched(h.t) ? "wdel" : "wadd") + '="' + esc(h.t) + '">' + (isWatched(h.t) ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
-      quoteSumCard(h.t) +
-      aiCard(h.t) +
-      statsCard(h.t) +
-      priceAlertCard(h.t) +
-      // 내 평가손익
+      // 내 평가손익 (핵심)
       '<div class="card"><div class="sub">내 평가손익</div>' +
       '<div class="big num ' + (h.gain_pct >= 0 ? "good-t" : "bad-t") + '" style="font-size:26px">' + (h.gain_pct >= 0 ? "▲ " : "▼ ") + pct(h.gain_pct) + "</div>" +
       '<div class="small num">평단 $' + fmt(h.avg) + " → 현재 $" + fmt(h.price) + " · " + fmt(h.qty, 0) + "주 · 손절 $" + fmt(h.stop) +
@@ -951,6 +952,8 @@
           (h.reasons || []).slice(0, 3).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>" : "") +
       // 총점
       (h.total == null ? "" : "<h2>총점 " + fmt(h.total, 0) + "</h2>" + (h.cats && Object.keys(h.cats).length ? scoreBars(h.cats) : "")) +
+      // 종목 정보 (지표·AI·실적·알림)
+      quoteSumCard(h.t) + aiCard(h.t) + statsCard(h.t) + priceAlertCard(h.t) +
       // 자세히 분석
       "<h2>자세히 분석</h2>" + dtabs +
       // 접은 항목
