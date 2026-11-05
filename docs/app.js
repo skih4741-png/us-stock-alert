@@ -695,19 +695,21 @@
       '<div class="head"><div><h1>오늘 · ' + esc(d.date_label || "") + '</h1><div class="small">미국 ' + esc(d.date) + " 종가 기준 · " + esc(whenText(d.run_at)) + "</div></div>" +
       '<span><button class="iconbtn" aria-label="알림" onclick="location.hash=\'#/alerts\'">🔔' + (needN ? '<span class="cnt">' + needN + "</span>" : hasNew ? '<span class="dot"></span>' : "") + "</button>" +
       '<button class="iconbtn" aria-label="설정" onclick="location.hash=\'#/settings\'">⚙️</button></span></div>' +
-      idxBar() +
-      statusLine() + homeRunLine() + homeNeedsCard() + whatsNewCard() + homeCalCard() + homeSimCard() + watchCard() + homeNewsCard() +
-      (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
-        ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
+      idxBar() + statusLine() + freshBanner() +
+      // ── 오늘 할 일 (핵심) ──
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
       '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div>" +
       '<div class="small" style="margin-top:4px">⭐ 엄선 <b>' + allPicks().filter(p => p.elite && !p.etf).length + '개</b> · 모의투자가 엄선만 알아서 매매해요 <a class="link" href="#/picks">후보 →</a></div></div>' +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
+      homeNeedsCard() + whatsNewCard() +
+      (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
+        ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="quick"><a class="chip" href="#/search">🔍 종목 검색</a><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
         (!S.profile || !Object.keys(S.profile).length ? '<a class="chip" href="#/profile">성향 인터뷰 하기</a>' : "") + "</div>" +
-      freshBanner() + assetCard() + briefCard() + homePaperCard() + rankCard() +
+      // ── 내 자산·후보 ──
+      assetCard() +
       '<h2>내 보유 한 줄 결론</h2><div class="list">' +
       (hold.length ? hold.map(h => '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(h.t) + '\'"><span class="tk">' + esc(h.t) +
         '</span><span class="grow small num">' + pct(h.gain_pct) + '</span><span class="badge ' + esc(h.tone) + '">' + esc(h.conclusion) + "</span></div>").join("")
@@ -717,7 +719,13 @@
       (top.length ? top.map(p => '<div class="item" onclick="location.hash=\'#/pick/' + encodeURIComponent(p.t) + '\'"><span class="tk">' + esc(p.t) +
         '</span><span class="grow small">' + esc(p.band) + '</span><span class="num"><b>' + fmt(p.total, 0) + "</b>점</span></div>").join("")
         : '<div class="empty">' + (d.market.rest_day ? "매수 쉬는 날이라 후보가 없어요" : "오늘은 조건에 맞는 종목이 없어요") + "</div>") + "</div>" +
-      '<a class="link" href="#/picks">전체 후보 보기 →</a><p class="foot">' + esc(DISCLAIMER) + "</p>");
+      '<a class="link" href="#/picks">전체 후보 보기 →</a>' +
+      // ── 모의투자 ──
+      '<h2>모의투자</h2>' + homeSimCard() + homePaperCard() +
+      // ── 더 보기 (각 탭에도 있어요) ──
+      briefCard() + homeNewsCard() + homeCalCard() + rankCard() + watchCard() +
+      homeRunLine() +
+      '<p class="foot">' + esc(DISCLAIMER) + "</p>");
     bindWatch();
     mountIndices();
   }
@@ -768,9 +776,8 @@
       '<div class="row between"><span>' + setupTag + "<b>" + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
       '<div class="small">' + esc((p.name || "").slice(0, 46)) + "</div>" +
       '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
-      '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + lensBadge(p) + '</div>' +
-      (qty >= 1 && pl.stop > 0 && pl.stop < p.price ? '<div class="small num">' + qty + '주 매수 시 손절선 기준 손실 약 $' + fmt(qty * (p.price - pl.stop)) + ' · 갭·비용으로 더 커질 수 있어요</div>' : '') +
-      edgeLine + '<div class="small">근거: '+esc((p.reasons || [])[0] || p.setup || '자료 확인 필요')+'</div><div class="small">주의: '+esc((p.tags || []).find(t=>/주의|실적|위험|보류/.test(t)) || p.entry_exclusion || '주문 직전 재확인')+'</div>' + tags(p.tags) + "</div>";
+      '<div class="small" style="margin-top:6px">' + budgetBadge + lensBadge(p) + buffettBadge + '</div>' +
+      edgeLine + tags(p.tags) + "</div>";
   }
   // 후보 상세 — 엣지(과거 승률) 바
   function edgeCard(p) {
