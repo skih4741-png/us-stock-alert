@@ -701,7 +701,8 @@
         ? '<a class="card" href="#/settings" style="display:block;color:var(--ink)"><b>🔔 알림 켜기</b><div class="small">아침 리포트·장중 경고를 푸시로 받아요 →</div></a>' : "") +
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
       '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
-      '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div></div>" +
+      '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div>" +
+      '<div class="small" style="margin-top:4px">⭐ 엄선 <b>' + allPicks().filter(p => p.elite && !p.etf).length + '개</b> · 모의투자가 엄선만 알아서 매매해요 <a class="link" href="#/picks">후보 →</a></div></div>' +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
       '<div class="quick"><a class="chip" href="#/search">🔍 종목 검색</a><a class="chip" href="#/ask">💬 AI에게 묻기</a><a class="chip" href="#/gap">장 전 갭' +
         (S.gap && (S.gap.items || []).some(x => x.cond) ? ' <span class="badge warn">' + S.gap.items.filter(x => x.cond).length + "</span>" : "") + "</a>" +
@@ -722,6 +723,34 @@
   }
 
   function edgeTone(e) { return e && e.ok ? "good" : (e && e.label === "동전 던지기" ? "warn" : "info"); }
+  // 관점 패널 — 한 종목을 4가지 렌즈로 (가치·성장·추세·역발상). 이미 있는 점수로 계산, 총점엔 미반영.
+  // "한 사람 기준으로 사면 그 사람 약점까지 산다(swarm-trader)" — 의견이 갈리는 지점이 공부 포인트.
+  function lenses(p) {
+    const c = p.cats || {}, e = p.edge || {}, f = finFor(p.t) || {};
+    const bu = (Number.isFinite(f.buffett_pass) && f.buffett_max) ? f.buffett_pass / f.buffett_max : null;
+    const vote = (yes, no) => yes ? 1 : (no ? -1 : 0);
+    return [
+      { n: "가치", v: vote(c["가치"] >= 15 || (bu != null && bu >= 0.6), (c["가치"] != null && c["가치"] <= 8) && !(bu != null && bu >= 0.6)), why: "싸고 질 좋은가 (가치 점수·버핏 체질)" },
+      { n: "성장", v: vote(c["성장"] >= 15, c["성장"] != null && c["성장"] <= 8), why: "매출·이익이 자라는가 (성장 점수)" },
+      { n: "추세", v: vote(c["추세"] >= 15 || (e.ok && (p.setup === "돌파" || p.setup === "눌림목")), c["추세"] != null && c["추세"] <= 8), why: "가격 흐름·자리가 좋은가 (추세·셋업·엣지)" },
+      { n: "역발상", v: vote(p.setup === "과매도 반등", false), why: "남들 외면한 자리의 반등인가 (과매도 반등 셋업)" },
+    ];
+  }
+  function lensBadge(p) {
+    if (p.etf) return "";
+    const L = lenses(p), yes = L.filter(x => x.v > 0).length, no = L.filter(x => x.v < 0).length;
+    const tone = yes >= 3 ? "good" : yes === 2 ? "warn" : "sub";
+    return ' <span class="badge ' + tone + '" title="가치·성장·추세·역발상 4개 관점의 찬성 수 · 총점 미반영">관점 ' + yes + '/4' + (no ? " (반대 " + no + ")" : "") + '</span>';
+  }
+  function lensPanel(p) {
+    if (p.etf) return "";
+    const L = lenses(p), yes = L.filter(x => x.v > 0).length, split = L.some(x => x.v > 0) && L.some(x => x.v < 0);
+    const mark = v => v > 0 ? '<span class="good-t">찬성</span>' : v < 0 ? '<span class="bad-t">반대</span>' : '<span class="sub">중립</span>';
+    return '<div class="card"><div class="row between"><b>관점 패널 — ' + yes + '/4 찬성</b><span class="badge ' + (yes >= 3 ? "good" : yes === 2 ? "warn" : "sub") + '">여러 눈으로 보기</span></div>' +
+      '<div class="small" style="margin:2px 0 8px">한 기준으로만 사면 그 기준의 약점까지 같이 사요. 의견이 갈리는 곳이 확인 포인트예요. (총점 미반영)</div>' +
+      '<div class="list">' + L.map(x => '<div class="item"><span class="tk" style="min-width:52px">' + x.n + '</span><span class="grow small">' + esc(x.why) + '</span><span>' + mark(x.v) + '</span></div>').join("") + '</div>' +
+      (split ? '<div class="small" style="margin-top:6px">⚖ 관점이 갈려요 — 왜 갈리는지 보고 판단하세요 (예: 단기 자리는 좋지만 장기 체질은 약함).</div>' : "") + "</div>";
+  }
   function pickCard(p) {
     const pl = p.plan || {}, e = p.edge;
     const cash = paperCash(), qty = suggestQty(p), f = finFor(p.t);
@@ -739,7 +768,7 @@
       '<div class="row between"><span>' + setupTag + "<b>" + esc(p.t) + '</b> <span class="num">· ' + fmt(p.total, 0) + '점</span></span><span class="num">$' + fmt(p.price) + "</span></div>" +
       '<div class="small">' + esc((p.name || "").slice(0, 46)) + "</div>" +
       '<div class="small num">구간 ' + fmt(pl.zone_low) + "~" + fmt(pl.zone_high) + " · 손절 " + fmt(pl.stop) + " · 목표 " + fmt(pl.target) + (pl.rr ? " · 손익비 " + fmt(pl.rr, 1) : "") + "</div>" +
-      '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + '</div>' +
+      '<div class="small" style="margin-top:6px">' + budgetBadge + buffettBadge + lensBadge(p) + '</div>' +
       (qty >= 1 && pl.stop > 0 && pl.stop < p.price ? '<div class="small num">' + qty + '주 매수 시 손절선 기준 손실 약 $' + fmt(qty * (p.price - pl.stop)) + ' · 갭·비용으로 더 커질 수 있어요</div>' : '') +
       edgeLine + '<div class="small">근거: '+esc((p.reasons || [])[0] || p.setup || '자료 확인 필요')+'</div><div class="small">주의: '+esc((p.tags || []).find(t=>/주의|실적|위험|보류/.test(t)) || p.entry_exclusion || '주문 직전 재확인')+'</div>' + tags(p.tags) + "</div>";
   }
@@ -820,7 +849,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, (p.setup ? '<span class="badge ' + edgeTone(p.edge) + '">' + esc(p.setup) + "</span> " : "") + '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      tags(p.tags) + edgeCard(p) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
+      tags(p.tags) + lensPanel(p) + edgeCard(p) + quoteSumCard(p.t) + aiCard(p.t) + statsCard(p.t) + priceAlertCard(p.t) +
       '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">4관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
