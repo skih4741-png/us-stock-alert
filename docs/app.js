@@ -698,9 +698,6 @@
       idxBar() + statusLine() + freshBanner() +
       // ── 오늘 할 일 (핵심) ──
       '<div class="band' + (d.market.rest_day ? " bad" : "") + '">' + esc(d.market.label) + (d.market.rest_day ? " · 오늘은 매수 쉬는 날" : " · 매수 기준 " + esc(d.market.threshold) + "점") + "</div>" +
-      '<div class="card"><div class="sub">오늘 볼 것</div><div class="big num">매도 ' + (s.sell || 0) + " · 신규 매수 " + (s.new || 0) + "</div>" +
-      '<div class="small">매수 후보 ' + (s.buy || 0) + "개 (개별 종목 " + (s.stock || 0) + "개)</div>" +
-      '<div class="small" style="margin-top:4px">⭐ 엄선 <b>' + allPicks().filter(p => p.elite && !p.etf).length + '개</b> · 모의투자가 엄선만 알아서 매매해요 <a class="link" href="#/picks">후보 →</a></div></div>' +
       (d.warnings && d.warnings.length ? d.warnings.map(w => '<div class="msg note">' + esc(w) + "</div>").join("") : "") +
       homeNeedsCard() + whatsNewCard() +
       (pushSupported() && isStandalone() && CFG.VAPID_PUBLIC_KEY && Notification.permission === "default"
