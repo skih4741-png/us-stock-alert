@@ -13,8 +13,28 @@ log = logging.getLogger(__name__)
 FUND_CACHE = Path(__file__).parent / "data" / "fundamentals.json"
 
 
-def download_history(tickers: list[str], period: str = "400d", batch: int = 200, pause: float = 2.0) -> dict[str, pd.DataFrame]:
-    """일봉을 나눠서 천천히 받아요. 반환: {종목: 표(Open High Low Close Volume)}"""
+def _one_history(yf, t: str, period: str) -> "pd.DataFrame | None":
+    """단일 종목 조회(야후 벌크가 레이트리밋돼도 단일은 되는 경우가 많아요)."""
+    for attempt in range(2):
+        try:
+            df = yf.Ticker(t).history(period=period, interval="1d", auto_adjust=True)
+            if df is not None and len(df):
+                df = df.dropna(subset=["Close"])
+                if len(df):
+                    if getattr(df.index, "tz", None) is not None:
+                        df.index = df.index.tz_localize(None)
+                    return df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            return None
+        except Exception as e:
+            log.warning("단일 재시도 %s (%s/2): %s", t, attempt + 1, e)
+            time.sleep(5)
+    return None
+
+
+def download_history(tickers: list[str], period: str = "400d", batch: int = 200, pause: float = 2.0,
+                     fallback: bool = False) -> dict[str, pd.DataFrame]:
+    """일봉을 나눠서 천천히 받아요. 반환: {종목: 표(Open High Low Close Volume)}
+    fallback=True면 벌크에서 빠진 종목을 하나씩 단일 조회로 다시 시도해요(핵심 지수·보유처럼 적은 묶음에만 사용)."""
     import yfinance as yf
 
     out: dict[str, pd.DataFrame] = {}
@@ -40,6 +60,14 @@ def download_history(tickers: list[str], period: str = "400d", batch: int = 200,
             except KeyError:
                 pass
         time.sleep(pause)
+    # 벌크에서 빠진 종목은 단일 조회로 보강(야후 벌크가 막힐 때 아침 리포트가 통째로 죽는 걸 방지)
+    if fallback:
+        for t in tickers:
+            if t in out:
+                continue
+            df = _one_history(yf, t, period)
+            if df is not None:
+                out[t] = df
     return out
 
 

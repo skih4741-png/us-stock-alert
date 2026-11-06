@@ -102,7 +102,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
     try:
         # ---- 시장 국면 ----
         stage = "시장 국면"
-        idx = prices.download_history(["SPY", "^VIX"], period="400d", batch=2, pause=0)
+        idx = prices.download_history(["SPY", "^VIX"], period="400d", batch=2, pause=0, fallback=True)
         spy, vix = idx.get("SPY"), idx.get("^VIX")
         if spy is None or len(spy) < 200:
             raise RuntimeError("대표 지수(SPY) 가격을 받지 못했어요")
@@ -130,6 +130,10 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         stage = "가격 수집"
         tickers = list(dict.fromkeys(list(meta.index) + hold_t))
         hist = prices.download_history(tickers)
+        # 내 보유 종목은 야후 벌크에서 빠지면 단일 조회로 꼭 보강(내 포트폴리오는 항상 보이게)
+        miss_hold = [t for t in hold_t if t not in hist]
+        if miss_hold:
+            hist.update(prices.download_history(miss_hold, batch=2, pause=0, fallback=True))
         got = len(hist) / max(1, len(tickers))
         if got < 0.5:
             raise RuntimeError(f"가격 자료를 {got:.0%}만 받았어요")
