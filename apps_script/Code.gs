@@ -843,6 +843,7 @@ function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 
 // ---- 온디맨드 AI (무료 공급자 체인, 전부 OpenAI 호환 /chat/completions). 키는 Script Properties에.
 var AI_PROVIDERS = [
   { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'llama-3.1-8b-instant', json: true },
+  { name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', key: 'GEMINI_API_KEY', model: 'gemini-3.8-flash', json: false },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
   { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false },
@@ -864,6 +865,12 @@ function aiCall_(sys, usr) {
       var code = resp.getResponseCode();
       if (code !== 200) {
         diag.push(p.name + ':' + code);
+        // 레이트리밋(429)은 잠깐 쉬고 같은 공급자를 한 번 더 시도(무료 등급 분당 한도 대비).
+        if (code === 429 && !p.retried) {
+          Utilities.sleep(2500);
+          candidates.splice(i + 1, 0, Object.assign({}, p, { retried: true }));
+          continue;
+        }
         // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
         if (code === 404 && p.name === 'groq' && !p.fallback) {
           var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
@@ -885,7 +892,7 @@ function aiCall_(sys, usr) {
       return { ok: true, provider: p.name, model: p.model, data: JSON.parse(m[0]) };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
   }
-  return { ok: false, error: haveAny ? 'AI 공급자가 모두 응답하지 않았어요 (잠시 후 다시)' : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
+  return { ok: false, error: haveAny ? ('AI 응답 실패 — ' + (diag.filter(function (x) { return x.indexOf('키없음') < 0; }).join(', ') || '원인 미상') + ' · 잠시 후 다시') : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
 }
 
 // 공급자 키가 하나라도 있나 / OpenAI(유료)만 있나 — '묻기'가 무료로 돌 수 있는지 판단용.
@@ -922,6 +929,12 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       var code = resp.getResponseCode();
       if (code !== 200) {
         diag.push(p.name + ':' + code);
+        // 레이트리밋(429)은 잠깐 쉬고 같은 공급자를 한 번 더 시도(무료 등급 분당 한도 대비).
+        if (code === 429 && !p.retried) {
+          Utilities.sleep(2500);
+          candidates.splice(i + 1, 0, Object.assign({}, p, { retried: true }));
+          continue;
+        }
         // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
         if (code === 404 && p.name === 'groq' && !p.fallback) {
           var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
@@ -945,7 +958,7 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       return { ok: true, provider: p.name, model: p.model, text: txt, data: data };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
   }
-  return { ok: false, error: haveAny ? 'AI 공급자가 모두 응답하지 않았어요 (잠시 후 다시)' : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
+  return { ok: false, error: haveAny ? ('AI 응답 실패 — ' + (diag.filter(function (x) { return x.indexOf('키없음') < 0; }).join(', ') || '원인 미상') + ' · 잠시 후 다시') : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
 }
 
 // 야후 quoteSummary는 쿠키+크럼이 필요해요. 쿠키/크럼을 받아 30분 캐시.
