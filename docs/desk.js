@@ -32,13 +32,8 @@
     return S.error ? '서버 연결 실패 · 저장된 자료 표시' : !Number.isFinite(age) ? '자료 기준일 확인 대기' : age>36 ? '마지막 리포트 36시간 경과 · 휴장/실행 상태 확인' : '마지막 리포트 '+String(date).slice(0,16).replace('T',' ');
   }
   function home(S) {
-    const ps=picks(S), sim=S.perf && S.perf.sim || {}, guard=sim.risk_day || {}, sel=sim.selection || {};
-    const risk=arr(S.data && S.data.holdings).filter(h=>h.tone && h.tone!=='good');
-    return card('오늘의 판단 데스크', '<div class="desk-grid">'+
-      '<div><b>검토 후보</b><p>'+ps.filter(p=>p.elite).length+'개 / 목록 '+ps.length+'개</p>'+link('picks','근거 확인')+'</div>'+
-      '<div><b>새 매수 상태</b><p>'+E(guard.blocked ? guard.reason : sel.pause || (sim.selection ? '주문 전 재검사' : '새 리포트 대기'))+'</p>'+link('score','주문 계획 확인')+'</div>'+
-      '<div><b>보유 위험</b><p>'+risk.length+'개 종목 재검토</p>'+link('holdings','보유 확인')+'</div>'+
-      '<div><b>자료 상태</b><p>'+E(fresh(S))+'</p>'+link('alerts/runs','실행 기록')+'</div></div>');
+    // '오늘의 판단 데스크' 카드 제거 — 검토 후보가 거의 항상 0이고 홈의 다른 카드와 중복돼 사용자 요청으로 뺌.
+    return '';
   }
   function teamHtml(S,t) {
     const tm=(S.ai && S.ai.team || {})[t] || {}, p=entity(S,t), fin=(S.data && S.data.fin || {})[t] || {};
@@ -80,11 +75,9 @@
       '<p class="small">종목 상세의 내 판단 기록에서 조건·다음 확인일을 저장할 수 있어요.</p>');
   }
   function holdings(S) {
-    const hs=arr(S.data?.holdings), value=hs.reduce((s,h)=>s+(h.qty || 0)*(h.price || 0),0);
-    const sectors={};const byT={};arr(S.ai?.port?.items).forEach(x=>byT[x.t]=x.sector);
-    hs.forEach(h=>{const sec=byT[h.t] || '업종 확인 대기';sectors[sec]=(sectors[sec] || 0)+(h.qty || 0)*(h.price || 0);});
-    return card('보유 가설·쏠림 점검',table(['종목','주식 평가액 중 비중','내 가설'],hs.map(h=>[h.t,value?N(h.qty*h.price/value*100)+'%':'—',condition(noteFor(S,h.t),h.price)]))+
-      '<p class="small">업종별: '+E(Object.entries(sectors).map(([k,v])=>k+' '+(value?N(v/value*100):'—')+'%').join(' · '))+'</p><p class="small">현금을 제외한 보유 주식끼리 비교한 비중이에요. 종목을 누르면 기록 당시와 지금을 비교해요.</p>');
+    // '보유 가설·쏠림 점검' 카드 제거 — 비중·업종 쏠림은 아래 '내 포트폴리오 진단'(portHtml)과 중복,
+    // '내 가설' 열은 기록이 없으면 항상 '가설 기록 없음'만 떠서 사용자 요청으로 뺌.
+    return '';
   }
   function comparison(S) {
     const r=S.perf?.sim?.review || {}, c=r.team_comparison || {};
