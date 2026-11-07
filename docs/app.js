@@ -597,6 +597,7 @@
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       liveChartBox(t, null) +
       quoteSumCard(t) +
+      ((S.ai && S.ai.committee && S.ai.committee[t]) ? '<h2>월가 5인 위원회</h2>' + committeeHtml(t) : "") +
       aiCard(t) +
       statsCard(t) +
       priceAlertCard(t) +
@@ -866,7 +867,7 @@
       edgeCard(p) + lensPanel(p) +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
       // ── 더 깊이 보기 ──
-      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">버핏 관점</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
+      '<div class="segs"><button class="on" data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">월가 5인</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
       quoteSumCard(p.t) + statsCard(p.t) + aiCard(p.t) + priceAlertCard(p.t) +
       '<details class="sig"><summary><b>📓 이 종목 일지 (알림·모의 거래)</b></summary>' + tickerLogHtml(p.t) + "</details>" +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
@@ -877,7 +878,7 @@
         (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
         '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>",
       chart: chartHtml(p.t),
-      v4: b4Html(p.t),
+      v4: committeeHtml(p.t),
       rep: repHtml(p.t),
     };
     const seg = document.getElementById("seg");
@@ -927,7 +928,7 @@
     // 자세히 분석 — 흩어진 6개 섹션을 탭 하나로 (차트·실적·재무·가치·쉬운 리포트·분기 공시)
     // '실적' 탭 제거 — 실적은 위 '종목 정보 → 실적'(statsCard)에 분기 매출·EPS + AI 상세까지 한 곳에 모았어요.
     const panes = [["차트", chartHtml(h.t)], ["재무", finHtml(finFor(h.t))],
-                   ["가치(버핏)", b4Html(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]];
+                   ["월가 5인", committeeHtml(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]];
     const dtabs = '<div class="segs dtabs">' + panes.map((p, i) => '<button data-dt="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>").join("") + "</div>" +
       '<div class="dpanes">' + panes.map((p, i) => '<div class="dpane"' + (i ? " hidden" : "") + ">" + p[1] + "</div>").join("") + "</div>";
     appShell("holdings", '<button class="back" onclick="history.back()">← 뒤로</button>' +
@@ -1513,6 +1514,28 @@
     if (!a) return "GPT 기능은 다음 아침 리포트부터 채워져요.";
     if (a.off) return "GPT 기능이 꺼져 있어요: " + a.off + ". 매수·매도 규칙은 그대로 돌아가요.";
     return "";
+  }
+  function committeeHtml(t) {
+    const c = S.ai && S.ai.committee && S.ai.committee[t];
+    if (!c || !(c.members || []).length) return b4Html(t);  // 위원회 자료 없으면 기존 버핏 4관점을 그대로
+    const b = c.blend || {};
+    const col = s => s === "사자" ? "var(--good)" : s === "팔자" ? "var(--warn)" : "var(--line2)";
+    const mk = s => s === "사자" ? '<span class="good-t">사자</span>' : s === "팔자" ? '<span class="bad-t">팔자</span>' : '<span class="sub">' + (s === "기권" ? "기권" : "중립") + "</span>";
+    const rows = (c.members || []).map(m => {
+      const dir = m.stance === "사자" || m.stance === "팔자";
+      const w = dir ? Math.max(6, m.confidence || 0) : 6;
+      return '<div class="bar"><span class="l" style="width:64px">' + esc(m.name) + '</span>' +
+        '<span class="t"><span class="f" style="width:' + w + "%;background:" + col(m.stance) + '"></span></span>' +
+        '<span class="v" style="width:50px">' + mk(m.stance) + '</span><span class="v num" style="width:26px">' + (dir ? (m.confidence || 0) : "—") + "</span></div>" +
+        '<div class="small" style="margin:-2px 0 8px 74px;color:var(--sub)">' + esc(m.reason) + (m.market ? " · 시황: " + esc(m.market) : "") + "</div>";
+    }).join("");
+    const tone = b.score > 0.05 ? "good" : b.score < -0.05 ? "warn" : "sub";
+    return '<div class="card"><div class="row between"><b>월가 5인 위원회</b><span class="badge ' + tone + '">종합 ' + (b.score == null ? "—" : fmt(b.score, 2)) + "</span></div>" +
+      '<div class="small" style="margin:2px 0 10px">버핏·멍거·그레이엄·린치·드러켄밀러가 각자 보는 눈 · 전략 <b>' + esc(b.strategy || "") + '</b> 가중 · <b>참고용</b>(실제 주문·비중은 규칙이 정해요)</div>' +
+      rows +
+      (c.conflict && c.conflict !== "확인 못 함" ? '<div class="small" style="margin-top:4px">⚖ 갈리는 쟁점: ' + esc(c.conflict) + "</div>" : "") +
+      '<div class="small" style="margin-top:6px">' + esc(c.date || "") + " · AI 관찰 · 투자 권유 아님 · 판단은 100% 본인 몫</div></div>" +
+      '<details class="sig"><summary><b>버핏 4관점 상세</b></summary>' + b4Html(t) + "</details>";
   }
   function b4Html(t) {
     const x = S.ai && S.ai.b4 && S.ai.b4[t];

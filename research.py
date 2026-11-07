@@ -18,6 +18,7 @@ import pandas as pd
 import ai
 import rag
 import investment_team
+import committee
 
 log = logging.getLogger(__name__)
 KEY = "ai"
@@ -322,6 +323,29 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     blob["earn"] = {k: v for k, v in earn.items() if k in keep and v.get("date", "") >= week_ago}
     blob["b4"] = {k: v for k, v in b4.items() if k in keep}
     blob["rep"] = {k: v for k, v in rep.items() if k in keep}
+
+    # ---- 월가 5인 위원회 (committee) : 후보·보유·관심, 주 1회, 관찰·비교용 ----
+    comm = blob.setdefault("committee", {})
+    try:
+        watch_t = list((json.loads(store.get_blob("watch") or "{}").get("items") or {}).keys())
+    except Exception:
+        watch_t = []
+    comm_focus = list(dict.fromkeys(pending_t + holds + focus + watch_t))[:10]
+    for t in comm_focus:
+        previous = comm.get(t) or {}
+        if previous.get("date", "") >= week_ago and previous.get("version") == committee.VERSION and previous.get("members"):
+            continue
+        facts = facts_all.get(t) or gather(t, deep=True)
+        facts["앱 재무 요약"] = fin.get(t)
+        facts["앱 후보·보유"] = next((p for p in app.get("holdings", []) + picks if p["t"] == t), {})
+        facts["시황 카드"] = app.get("market")
+        result = ai.checked("월가 5인 위원회 (관찰)", committee.TASK, facts, "small", 2800)
+        if result:
+            norm = committee.normalize(result, facts, today)
+            norm["blend"] = committee.blend(norm["members"], committee.DEFAULT_STRATEGY)
+            comm[t] = norm
+    keep2 = set(focus) | set(holds) | set(watch_t)
+    blob["committee"] = {t: v for t, v in comm.items() if t in keep2 or t in pending_t}
 
     # ---- 사전 부검 + 거부권 섀도 (자동 모의 주문 계획) ----
     pm = blob.get("pm", {})
