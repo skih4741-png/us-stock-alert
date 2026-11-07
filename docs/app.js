@@ -1519,13 +1519,13 @@
     const c = S.ai && S.ai.committee && S.ai.committee[t];
     if (!c || !(c.members || []).length) return b4Html(t);  // 위원회 자료 없으면 기존 버핏 4관점을 그대로
     const b = c.blend || {};
-    const col = s => s === "사자" ? "var(--good)" : s === "팔자" ? "var(--warn)" : "var(--line2)";
+    const col = s => s === "사자" ? "var(--up)" : s === "팔자" ? "var(--down)" : "var(--line2)";
     const mk = s => s === "사자" ? '<span class="good-t">사자</span>' : s === "팔자" ? '<span class="bad-t">팔자</span>' : '<span class="sub">' + (s === "기권" ? "기권" : "중립") + "</span>";
     const rows = (c.members || []).map(m => {
       const dir = m.stance === "사자" || m.stance === "팔자";
       const w = dir ? Math.max(6, m.confidence || 0) : 6;
       return '<div class="bar"><span class="l" style="width:64px">' + esc(m.name) + '</span>' +
-        '<span class="t"><span class="f" style="width:' + w + "%;background:" + col(m.stance) + '"></span></span>' +
+        '<span class="t"><span class="f" style="width:' + w + "%;display:block;background:" + col(m.stance) + '"></span></span>' +
         '<span class="v" style="width:50px">' + mk(m.stance) + '</span><span class="v num" style="width:26px">' + (dir ? (m.confidence || 0) : "—") + "</span></div>" +
         '<div class="small" style="margin:-2px 0 8px 74px;color:var(--sub)">' + esc(m.reason) + (m.market ? " · 시황: " + esc(m.market) : "") + "</div>";
     }).join("");
