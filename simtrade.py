@@ -23,10 +23,19 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+import committee
 import ledger
 import prices
 import setups
 import trade_guard
+
+
+def _committee(store) -> dict:
+    """최신 아침 리포트(ai 블롭)의 월가 5인 위원회 결과. 모의 진입·청산에 '더 조심'으로만 반영."""
+    try:
+        return (json.loads(store.get_blob("ai") or "{}") or {}).get("committee") or {}
+    except Exception:
+        return {}
 
 log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
@@ -197,6 +206,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         return None
     cfg = st["cfg"]
     n_log = len(st["log"])
+    comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
     hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
     H = lambda t: hist.get(t.replace(".", "-"))
@@ -248,6 +258,11 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                         p["qty"] -= half["qty"]; p["half"], p["stop"] = True, p["entry"]
                     else:
                         _close(st, p, ld, px_, "1차 목표 · 일봉 백스톱"); closed = True
+        # 위원회 매도 신호 — 아직 안 닫혔는데 5인 위원회가 강한 반대로 돌면 다음 날 시가에 정리(보호적, 손절·목표가 먼저).
+        if not closed and len(df):
+            cv = committee.verdict(comm.get(p["t"]))
+            if cv.get("sell_hold"):
+                _close(st, p, df.index[-1].strftime("%Y-%m-%d"), float(df["Close"].iloc[-1]) * (1 - SLIP), "위원회 매도 신호 · " + cv.get("why", "")); closed = True
         if not closed:
             if market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
@@ -341,6 +356,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
             if led_blocked:
                 reject(led_why); continue
+            cv = committee.verdict(comm.get(p["t"]))   # 위원회 강한 반대면 매수 거르기(더 조심)
+            if cv.get("veto_buy"):
+                reject("위원회 반대"); continue
             pl = p.get("plan") or {}
             px, stop = p.get("price"), pl.get("stop")
             if not px or not stop or px < 3 or p["t"] in held or px * (1 + FEE) > cash:
