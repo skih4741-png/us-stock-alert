@@ -8,7 +8,7 @@ ai-hedge-fund 저장소(virattt/ai-hedge-fund, MIT) 아이디어를 옮긴 거�
 """
 from __future__ import annotations
 
-VERSION = "committee-1"
+VERSION = "committee-2"
 
 # 5인 (순서 고정)
 NAMES = ("버핏", "멍거", "그레이엄", "린치", "드러켄밀러")
