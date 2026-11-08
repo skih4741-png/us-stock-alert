@@ -330,7 +330,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         watch_t = list((json.loads(store.get_blob("watch") or "{}").get("items") or {}).keys())
     except Exception:
         watch_t = []
-    comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + focus))[:12]
+    comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + focus))[:16]
     for t in comm_focus:
         previous = comm.get(t) or {}
         if previous.get("date", "") >= week_ago and previous.get("version") == committee.VERSION and previous.get("members"):
@@ -339,8 +339,8 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         facts["앱 재무 요약"] = fin.get(t)
         facts["앱 후보·보유"] = next((p for p in app.get("holdings", []) + picks if p["t"] == t), {})
         facts["시황 카드"] = app.get("market")
-        # 관찰용이라 검사관(2차 AI)을 건너뛰어 답을 살려요 — 복잡한 5인 구조가 검사 단계에서 통째로 버려지던 문제 해결.
-        result = ai.checked("월가 5인 위원회 (관찰)", committee.TASK, facts, "small", 2200, keep_unchecked=True)
+        # 관찰용이라 검사관(2차 AI) 없이 단일 호출로 가볍게 — AI 부담을 반으로 줄여 더 많은 종목(관심 포함)을 커버.
+        result = ai.chat_json("월가 5인 위원회 (관찰)", committee.TASK, facts, "small", 2200)
         if result:
             norm = committee.normalize(result, facts, today)
             norm["blend"] = committee.blend(norm["members"], committee.DEFAULT_STRATEGY)
