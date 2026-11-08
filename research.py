@@ -330,7 +330,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         watch_t = list((json.loads(store.get_blob("watch") or "{}").get("items") or {}).keys())
     except Exception:
         watch_t = []
-    comm_focus = list(dict.fromkeys(pending_t + holds + focus + watch_t))[:6]
+    comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + focus))[:12]
     for t in comm_focus:
         previous = comm.get(t) or {}
         if previous.get("date", "") >= week_ago and previous.get("version") == committee.VERSION and previous.get("members"):
