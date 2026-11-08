@@ -1,5 +1,5 @@
 // 앱 화면 틀만 저장해요(오프라인에서도 열리게). 주식 데이터는 저장하지 않아요.
-const CACHE = "stock-app-v76";
+const CACHE = "stock-app-v77";
 // 버전 박힌 js/css는 프리캐시하지 않아요 — 네트워크 우선(runtime)으로 받아 캐시해서 버전 어긋남을 없앴어요.
 const SHELL = ["./", "index.html", "manifest.webmanifest",
   "icons/icon-192.png", "icons/apple-touch-icon.png", "icons/favicon.png"];

@@ -1361,13 +1361,32 @@
       '<div class="item"><b>' + esc(t.t) + '</b><div class="grow small">' + esc(t.setup || '셋업 기록 없음') + '<br>' + (t.edge && t.edge.n ? '매수 당시 목표 도달률 ' + esc(t.edge.win) + '% · 표본 ' + esc(t.edge.n) + '건' : '매수 당시 엣지 기록 없음') + '</div><span class="num">' + usd(t.pnl) + '<br>' + (t.r == null ? 'R 기록 없음' : fmt(t.r, 2) + 'R') + '</span></div>').join('') + '</div></details>';
     return h;
   }
+  function simCommitteeCard(m) {
+    if (!m) return "";
+    const C = (S.ai && S.ai.committee) || {};
+    const ts = [...new Set([...(m.positions || []).map(p => p.t), ...(m.pending || []).map(o => o.t)])];
+    if (!ts.length) return "";
+    const rows = ts.map(t => {
+      const c = C[t];
+      if (!c || !(c.members || []).length)
+        return '<div class="item" style="cursor:default"><span class="tk">' + esc(t) + '</span><span class="grow small sub">위원회 자료 없음</span></div>';
+      const b = c.blend || {}, buy = c.members.filter(x => x.stance === "사자").length, sell = c.members.filter(x => x.stance === "팔자").length;
+      const tone = b.score > 0.05 ? "good" : b.score < -0.05 ? "warn" : "sub", veto = b.score != null && b.score <= -0.30;
+      return '<div class="item" onclick="location.hash=\'#/hold/' + encodeURIComponent(t) + '\'"><span class="tk">' + esc(t) + "</span>" +
+        '<span class="grow small">사자 ' + buy + " · 팔자 " + sell + (veto ? ' · <span class="bad-t">위원회 반대</span>' : "") + "</span>" +
+        '<span class="badge ' + tone + '">' + (b.score == null ? "—" : fmt(b.score, 2)) + "</span></div>";
+    }).join("");
+    return '<div class="card"><div class="row between"><b>🏦 모의 종목 · 월가 5인</b><a class="small link" href="#/picks">후보 →</a></div>' +
+      '<div class="small" style="margin:2px 0 8px">위원회가 이 종목들을 어떻게 보는지 · 종합 ≤ -0.30이면 모의 매수를 거르고(위원회 반대), 보유는 매도 신호로 작용해요(규칙이 우선).</div>' +
+      '<div class="list">' + rows + "</div></div>";
+  }
   function autoSimHtml(m, ref) {
     if (!m) return emp("🧪", "자동 모의투자를 준비하고 있어요", "다음 아침 리포트부터 가상 1,000달러로 시작해요.", "#/picks", "오늘 후보 보기");
     const prog = Math.max(0, Math.min(100, m.day / m.days * 100));
     const net = m.gain + m.loss, w = Math.abs(m.gain) + Math.abs(m.loss) || 1;
     const passN = (m.checks || []).filter(c => c[1]).length;
     // ── 맨 위: 증권사처럼 평가금액·수익률 한눈에 ──
-    return brokerCard(m, ref) + simSelectionHtml(m.selection) + simReviewHtml(m) +
+    return brokerCard(m, ref) + simSelectionHtml(m.selection) + simReviewHtml(m) + simCommitteeCard(m) +
       '<div class="card"><div class="row between"><span class="sub">3개월 자동 모의매매</span><span class="small">' + m.day + "/" + m.days + "일째</span></div>" +
       '<div class="plbar" style="margin:6px 0"><span class="g" style="width:' + prog + '%;background:var(--accent)"></span></div>' +
       '<div class="small">' + esc(m.start) + " ~ " + esc(m.end) + " · 11장 규칙 그대로 자동 매매 · 최대 낙폭 " + fmt(m.mdd, 1) + "%</div></div>" +
