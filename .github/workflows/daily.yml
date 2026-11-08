@@ -8,6 +8,11 @@ on:
         description: "시험용: 거래대금 상위 몇 개만 (비우면 전체)"
         required: false
         default: ""
+      force:
+        description: "휴장일에도 강제 전체 실행 (AI·위원회까지)"
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -47,10 +52,12 @@ jobs:
       - run: pip install -r requirements.txt
       - name: 아침 분석
         run: |
+          FORCE=""
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then FORCE="--force"; fi
           if [ -n "${{ github.event.inputs.limit }}" ]; then
-            python main.py daily --limit ${{ github.event.inputs.limit }}
+            python main.py daily --limit ${{ github.event.inputs.limit }} $FORCE
           else
-            python main.py daily
+            python main.py daily $FORCE
           fi
       - name: 기록 저장 (저장소 활동 유지)
         if: always()

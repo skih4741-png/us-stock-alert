@@ -87,7 +87,7 @@ def label_reasons(keys: list[str]) -> list[str]:
 # 아침 리포트
 # ======================================================================
 
-def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
+def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool = False) -> dict:
     """app_only: 보내거나 기록하지 않고 앱 데이터만 시트에 저장 (앱 첫 설치·시험용)."""
     dry = dry or app_only
     t0 = time.time()
@@ -107,7 +107,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False) -> dict:
         if spy is None or len(spy) < 200:
             raise RuntimeError("대표 지수(SPY) 가격을 받지 못했어요")
         bar_date = spy.index[-1].strftime("%Y-%m-%d")
-        if state.get("last_bar_date") == bar_date and not dry:
+        if state.get("last_bar_date") == bar_date and not dry and not force:
             log.info("새 거래일 자료가 없어요(미국 휴장) → 종료")
             store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                       "성공/실패": "건너뜀", "메모": "미국 휴장"}])
@@ -1102,9 +1102,10 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--app-only", action="store_true", help="보내지 않고 앱 데이터만 저장")
+    ap.add_argument("--force", action="store_true", help="새 거래일 자료가 없어도(휴장) 강제로 전체 실행")
     a = ap.parse_args()
     if a.mode == "daily":
-        run_daily(a.limit, a.dry, a.app_only)
+        run_daily(a.limit, a.dry, a.app_only, a.force)
     elif a.mode in ("premarket", "intraday"):
         run_watch(a.mode, a.dry)
     elif a.mode == "weekly":
