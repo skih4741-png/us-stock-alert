@@ -16,8 +16,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
@@ -25,7 +25,7 @@ jobs:
         run: python -m validation.research_pipeline --tickers 20 --years 2 --folds 3 --months 12
       - name: Archive research report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: research-portfolio
           path: |
