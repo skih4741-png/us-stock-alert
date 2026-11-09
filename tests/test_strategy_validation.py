@@ -328,5 +328,54 @@ class TestSignedPromotion(unittest.TestCase):
             )
 
 
+class TestSafeRecoveryAndWeeklyStatistics(unittest.TestCase):
+    def test_weekly_success_rate_and_duration(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 9, 9, tzinfo=timezone.utc)
+        runs = [
+            {"kind": "daily", "at": "2026-11-09T07:00:00+00:00", "ok": True, "took": 40},
+            {"kind": "daily", "at": "2026-11-08T07:00:00+00:00", "ok": "warn", "took": 100},
+            {"kind": "daily", "at": "2026-11-07T07:00:00+00:00", "ok": False, "took": 160},
+            {"kind": "intraday", "at": "2026-11-09T08:00:00+00:00", "ok": True, "took": 4},
+            {"kind": "daily", "at": "2026-10-20T07:00:00+00:00", "ok": True, "took": 99},
+        ]
+        m = operations_health.weekly_metrics(runs, now)
+        self.assertEqual(m["total"], 3)
+        self.assertEqual(m["success"], 1)
+        self.assertEqual(m["failed"], 1)
+        self.assertEqual(m["partial"], 1)
+        self.assertEqual(m["success_rate_pct"], 33.3)
+        self.assertEqual(m["mean_seconds"], 100.0)
+
+    def test_missing_timestamps_do_not_count_as_success(self):
+        from datetime import datetime, timezone
+        m = operations_health.weekly_metrics(
+            [{"kind": "daily", "at": "2026-11-09T07:00", "ok": True, "took": 8}],
+            datetime(2026, 11, 9, 9, tzinfo=timezone.utc))
+        self.assertIsNone(m["success_rate_pct"])
+
+    def test_restore_daily_snapshot_without_trading_or_notification(self):
+        store = _MemoryStore()
+        source = json.dumps({"date": "2026-11-09", "summary": {"buy": 1}})
+        out = operations_health.repair_daily_blob(store, "2026-11-09", source)
+        self.assertEqual(out["status"], "repaired")
+        self.assertEqual(store.get_blob("daily"), source)
+        self.assertEqual(operations_health.repair_daily_blob(store, "2026-11-09", source)["status"], "verified")
+
+    def test_newer_data_cannot_be_overwritten(self):
+        store = _MemoryStore()
+        store.put_blob("daily", json.dumps({"date": "2026-11-10", "summary": {}}))
+        source = json.dumps({"date": "2026-11-09", "summary": {}})
+        self.assertEqual(operations_health.repair_daily_blob(store, "2026-11-09", source)["status"], "blocked")
+
+    def test_unsafe_steps_cannot_be_automatically_replayed(self):
+        p = operations_health.recovery_plan([
+            {"n": "자동 모의투자", "ok": False},
+            {"n": "메일·슬랙 발송", "ok": False},
+            {"n": "앱 데이터 읽기 검증", "ok": False},
+        ])
+        self.assertEqual([x["mode"] for x in p], ["manual", "manual", "auto_safe"])
+
+
 if __name__ == "__main__":
     unittest.main()
