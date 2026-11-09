@@ -2272,12 +2272,36 @@
       '<a class="btn ghost" href="#/ask">AI에게 묻기</a><a class="btn ghost" href="#/profile">투자 성향 인터뷰' + (S.profile && Object.keys(S.profile).length ? " (다시 하기)" : "") + "</a>";
   }
 
+  function viewOperations() {
+    const runs = runsOf();
+    const r = runs.find(x => x.kind === "daily");
+    const late = staleInfo();
+    const state = !r ? "기록 없음" : late ? "실행 지연/미확인" : r.ok === true ? "정상" : r.ok === false ? "실패" : "점검 필요";
+    const tone = !r || late ? "warn" : r.ok === true ? "good" : r.ok === false ? "bad" : "warn";
+    const required = ["메일·슬랙 발송", "앱 데이터 저장", "앱 데이터 읽기 검증", "자동 모의투자", "모의매매 저장 상태"];
+    const checks = r && Array.isArray(r.checks) ? r.checks : [];
+    const audit = required.map(n => checks.find(c => c.n === n) || { n: n, ok: null, d: "기록이 없어 미확인" });
+    const link = r && /^https:\/\/github\.com\/[^ ]+\/actions\/runs\/[0-9]+$/.test(r.run_url || "") ? r.run_url : "https://github.com/skih4741-png/us-stock-alert/actions";
+    const body = '<button class="back" onclick="history.back()">← 뒤로</button><h1>🩺 관리자 운영 점검</h1>' +
+      '<div class="card"><div class="row between"><b>마지막 아침 실행</b><span class="badge ' + tone + '">' + esc(state) + '</span></div>' +
+      '<div class="small">실행 시각: ' + esc(r ? whenText(r.at) : "기록 없음") + '</div>' +
+      (late ? '<div class="msg note">예정된 실행 시각 이후 새로운 기록이 없습니다.</div>' : "") +
+      '<div class="small">발송 요청 처리와 수신 기기 도착은 서로 다른 검증입니다.</div></div>' +
+      '<h2>핵심 기능 점검</h2><div class="card"><ul class="checks">' + audit.map(checkLine).join("") + '</ul></div>' +
+      '<a class="btn ghost" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">GitHub 실행 로그 확인</a>' +
+      '<h2>최근 실행 기록</h2>' + (runs.length ? runs.slice(0, 8).map((x, i) => runCard(x, i === 0)).join("") :
+      emp("🧾", "아직 실행 기록이 없어요", "첫 예약 실행 이후 증거가 저장됩니다.", "#/home", "홈으로")) +
+      '<p class="foot">운영 상태 정상과 투자 전략의 수익성 검증은 별개입니다.</p>';
+    appShell("settings", body);
+  }
+
   function viewSettings() {
     appShell("settings", '<button class="back" onclick="history.back()">← 뒤로</button><h1>설정</h1>' +
       themeHtml() + '<a class="btn ghost" href="#/glossary">🏷️ 화면 이름표 (앱 UI 용어 지도)</a>' +
       '<div class="card"><div class="row between"><span>앱 버전</span><span class="sub">' + esc(CFG.VERSION || "") + '</span></div>' +
       '<div class="row between"><span>이 기기</span><span class="sub">' + esc(deviceLabel()) + "</span></div></div>" +
       '<h2>알림</h2><div id="pushBox"><div class="small">확인 중…</div></div>' +
+      '<a class="btn ghost" href="#/operations">🩺 관리자 운영 점검 · 단계별 상태</a>' +
       systemStatusHtml() + aiSettingsHtml() + changesHtml() +
       '<h2>계정</h2><a class="btn ghost" href="#/password">비밀번호 바꾸기</a>' +
       '<button class="btn ghost" id="hist">최근 로그인 기록</button><div id="histOut"></div>' +
@@ -2364,6 +2388,7 @@
       case "news": return viewNews();
       case "glossary": return viewGlossary();
       case "profile": return viewProfile();
+      case "operations": return viewOperations();
       case "settings": return viewSettings();
       case "password": return viewPassword();
       default: return viewHome();
