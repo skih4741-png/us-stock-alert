@@ -87,3 +87,18 @@ and not a basis to turn on strategy policy.
 4. True purged/embargoed walk-forward tuning/test separation and adequate sample.
 5. A verified, immutable OOS performance record with an independent audit.
 6. Risk parity/capacity/concentration analysis and sustained forward paper results.
+
+## Latest corrected research sample (same date; after cash-order temporal fix)
+
+The improved model freezes capital/slots at the preceding close, so today's
+exit proceeds are not used to finance orders at today's open. Its subsequent
+20-current-ticker, ~2-year run reported:
+- Breakout: +8.55% total, CAGR +4.19%, MDD -14.78%, PF 1.275, 64 closed trades.
+- Pullback: +0.27% total, CAGR +0.13%, MDD -11.04%, PF 1.020, 112 closed trades.
+- Oversold: -15.14% total, CAGR -7.88%, MDD -22.64%, PF 0.488, 51 closed trades.
+- SPY: +27.28% total over the same price history.
+
+Rolling 3x12-month research windows: breakout beat SPY in 1 window;
+pullback in 0; oversold in 0. All strategy promotions remain denied.
+
+See GitHub Actions: https://github.com/skih4741-png/us-stock-alert/actions/runs/42576462168
