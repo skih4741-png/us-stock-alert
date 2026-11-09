@@ -10,6 +10,7 @@ import config
 import prices
 import universe
 from validation.data_quality import clean_history
+from validation.diagnostics import trade_attribution, cost_sensitivity
 from validation.portfolio import simulate_portfolio
 from validation.compare_strategies import STRATEGIES
 
@@ -49,6 +50,8 @@ def main():
                      "starting_cash": 10000, "max_positions": 5},
         "results": results,
         "cost_stress": cost_stress,
+        "cost_sensitivity": cost_sensitivity(results, cost_stress),
+        "trade_attribution": {name: trade_attribution(p["closed"]) for name, p in results.items()},
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
