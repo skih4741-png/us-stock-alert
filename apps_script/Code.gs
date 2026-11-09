@@ -699,7 +699,7 @@ function f16_(b64) {
 }
 function askAI_(r) {
   if (!anyAIKey_()) return { ok: false, error: '앱에서 묻기를 쓰려면 Apps Script → 프로젝트 설정 → 스크립트 속성에 무료 AI 키(GROQ_API_KEY 등) 중 하나를 넣어 주세요.' };
-  const oaiKey = PROPS.getProperty('OPENAI_API_KEY');
+  const oaiKey = null;  // 유료 OpenAI 임베딩 차단(비용 0). RAG 유사도 검색은 날짜순으로 대체돼요.
   const use = aiUsage_();
   // 무료 공급자는 비용 0. OpenAI(유료) 키만 있을 때에만 월 한도로 막아요.
   if (onlyOpenAIKey_() && use.total >= use.cap) return { ok: false, error: '이번 달 GPT 한도($' + use.cap + ')에 닿았어요. 무료 AI 키(Groq 등)를 넣으면 계속 쓸 수 있어요.' };
@@ -846,8 +846,8 @@ var AI_PROVIDERS = [
   { name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', key: 'GEMINI_API_KEY', model: 'gemini-3.8-flash', json: false },
   { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
-  { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false },
-  { name: 'openai', url: 'https://api.openai.com/v1/chat/completions', key: 'OPENAI_API_KEY', model: 'gpt-4o-mini', json: true }
+  { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false }
+  // OpenAI(유료)는 비용 발생으로 체인에서 제거했어요. 무료 공급자만 사용(비용 0).
 ];
 function aiCall_(sys, usr) {
   var props = PropertiesService.getScriptProperties().getProperties();

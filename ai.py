@@ -106,7 +106,18 @@ def _ai_on() -> bool:
     return str(_S["cfg"].get("AI 설명 사용", "예")).strip() in ("예", "y", "Y", "yes", "true", "1")
 
 
+def _paid_off() -> bool:
+    """유료 AI(OpenAI 등) 완전 차단 스위치. 기본: 차단(무료 공급자만 사용 → 비용 0).
+    다시 켜려면 환경변수 AI_ALLOW_PAID=1 또는 구글 시트 '설정' 탭 '유료 AI 사용'='예'."""
+    env = os.environ.get("AI_ALLOW_PAID")
+    if env is not None:
+        return str(env).strip().lower() not in ("1", "on", "yes", "y", "true", "예")
+    return str(_S["cfg"].get("유료 AI 사용", "아니오")).strip() not in ("예", "y", "Y", "yes", "true", "1", "on")
+
+
 def _have(p: dict) -> bool:
+    if p.get("paid") and _paid_off():
+        return False
     return bool(os.environ.get(p["key"])) and p["name"] not in _S["dead"]
 
 
@@ -355,9 +366,9 @@ def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 
 
 
 def embed(texts: list[str], where: str = "임베딩") -> list[list[float]] | None:
-    """임베딩은 OpenAI만 지원해요(뉴스 유사도용). 키 없으면 None → 앱은 그 기능만 건너뛰어요."""
+    """임베딩은 OpenAI만 지원해요(뉴스 유사도용·유료). 유료 차단 중이거나 키 없으면 None → 앱은 그 기능만 건너뛰어요(RAG는 날짜순으로 대체)."""
     oai = _BY["openai"]
-    if not os.environ.get(oai["key"]) or not texts:
+    if _paid_off() or not os.environ.get(oai["key"]) or not texts:
         return None
     model = str(_S["cfg"].get("AI 임베딩 모델") or "text-embedding-3-small")
     out = []
