@@ -262,8 +262,10 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
         # Default is NO, preserving all existing scheduled stock/ETF reporting.
         if str(cfg.get("검증 전략만 표시", "아니오")).strip().lower() in ("예", "yes", "true", "1"):
             approved = []
+            verified_policy = store.get_blob("validated_strategy_policy") or None
             for b in stock_buys:
-                ok, why = strategy_policy.allowed(b.get("setup"), enabled=True)
+                ok, why = strategy_policy.allowed(b.get("setup"), enabled=True,
+                                                      policy_text=verified_policy)
                 if ok:
                     approved.append(b)
                 else:
