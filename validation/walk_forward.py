@@ -15,7 +15,7 @@ from validation.promotion import rank_candidates
 
 def rolling_evaluation(history, spy, cfg, *,
                        fold_months: int = 12, folds: int = 3,
-                       initial_cash: float = 10000.0) -> dict:
+                       initial_cash: float = 10000.0, membership=None) -> dict:
     if folds < 1 or fold_months < 1:
         raise ValueError("folds and fold_months must be positive")
     end = pd.Timestamp(spy.index[-1]).tz_localize(None)
@@ -30,6 +30,7 @@ def rolling_evaluation(history, spy, cfg, *,
             p = simulate_portfolio(
                 history, spy, name, cfg,
                 initial_cash=initial_cash,
+                membership=membership,
                 start_date=start.strftime("%Y-%m-%d"),
                 end_date=finish.strftime("%Y-%m-%d"),
             )
