@@ -5,7 +5,6 @@ acknowledgment, paper state change and app blob read-back are distinct checks.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 
 CRITICAL = ("메일·슬랙 발송", "앱 데이터 저장", "자동 모의투자")
@@ -60,7 +59,7 @@ def verify_daily_artifacts(store, expected_date: str, *, require_paper: bool = T
         actual_date = str(daily.get("date") or "")
         # The daily report's date is the market-data bar date, NOT execution day.
         result.append({"n": "앱 데이터 읽기 검증",
-                       "ok": bool(actual_date and actual_date <= expected_date and daily.get("summary") is not None),
+                       "ok": bool(actual_date and actual_date == expected_date and daily.get("summary") is not None),
                        "d": f"기준일={actual_date or '없음'}"})
     except (ValueError, TypeError, OSError) as e:
         result.append({"n": "앱 데이터 읽기 검증", "ok": False, "d": str(e)[:200]})
