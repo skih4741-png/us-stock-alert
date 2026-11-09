@@ -31,4 +31,5 @@ jobs:
           path: |
             data/portfolio_comparison.json
             data/rolling_comparison.json
+            data/strategy_diagnostics.md
           if-no-files-found: warn
