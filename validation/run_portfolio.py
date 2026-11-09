@@ -31,6 +31,15 @@ def main():
         raise SystemExit("SPY history unavailable. No statistics produced.")
     results = {name: simulate_portfolio(history, spy, name, cfg, years=args.years)
                for name in STRATEGIES}
+    # Trading costs can dominate apparent edge. Run stress scenarios independently.
+    cost_stress = {
+        str(mult): {
+            name: simulate_portfolio(history, spy, name, cfg, years=args.years,
+                                     fee=0.0035 * mult)["metrics"]
+            for name in STRATEGIES
+        }
+        for mult in (1.5, 2.0)
+    }
     report = {
         "source": "Yahoo Finance via yfinance (as served at execution time)",
         "universe": "current top dollar-volume listed shares: SURVIVORSHIP BIAS",
@@ -39,6 +48,7 @@ def main():
                      "years": args.years, "cost_each_side": 0.0035,
                      "starting_cash": 10000, "max_positions": 5},
         "results": results,
+        "cost_stress": cost_stress,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
