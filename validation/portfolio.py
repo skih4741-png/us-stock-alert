@@ -201,6 +201,8 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 if not (np.isfinite(prev.ma50) and np.isfinite(prev.low20)):
                     continue
                 close = float(prev.close)
+                if close < 1.0 or pd.isna(prev.dv20) or float(prev.dv20) < float(cfg["최소 거래대금(달러)"]):
+                    continue
                 stop = max(float(prev.ma50), float(prev.low20), close * (1 - float(cfg["최대 손실(%)"]) / 100))
                 if stop > close * (1-float(cfg["최소 위험폭(%)"])/100):
                     stop = close * 0.97
