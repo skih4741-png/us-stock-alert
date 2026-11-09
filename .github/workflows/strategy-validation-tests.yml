@@ -1,0 +1,29 @@
+name: Strategy validation regression tests
+
+on:
+  pull_request:
+    paths:
+      - "performance.py"
+      - "setups.py"
+      - "backtest.py"
+      - "validation/**"
+      - "tests/test_strategy_validation.py"
+      - ".github/workflows/strategy-validation-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile validation modules
+        run: python -m compileall -q performance.py setups.py validation tests/test_strategy_validation.py
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -p 'test_strategy_validation.py' -v
