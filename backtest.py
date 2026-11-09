@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 import config
+import execution_rules
 import market
 import prices
 import universe
@@ -68,43 +69,60 @@ def score_frame(o: pd.DataFrame, rs_pct: pd.Series, spy_ret63: pd.Series, mvol: 
 
 
 def simulate(o: pd.DataFrame, i: int, rr: float, cfg: dict, max_hold: int = 60) -> dict | None:
-    """신호일 i의 다음 날 시가에 사서 규칙대로 팔아요."""
+    """One research trade using the SAME OHLC entry/exit rules as paper trading.
+
+    Daily bars do not establish intrabar sequencing. Target on the entry bar
+    is ignored; stop on that bar is pessimistically assumed after entry.
+    """
     if i + 1 >= len(o):
         return None
     r = o.iloc[i]
-    close = r.close
+    close = float(r.close)
     upper = close * 1.01
     skip = upper * (1 + float(cfg["추격 금지 기준(%)"]) / 100)
-    stop = max(r.ma50, r.low20)
+    stop = max(float(r.ma50), float(r.low20))
     stop = max(stop, close * (1 - float(cfg["최대 손실(%)"]) / 100))
     if stop > close * (1 - float(cfg["최소 위험폭(%)"]) / 100):
         stop = close * 0.97
     nxt = o.iloc[i + 1]
-    if nxt.open > skip:
+    fill = execution_rules.entry_fill(float(nxt.open), float(nxt.low), upper, skip, stop)
+    if fill is None:
         return {"skipped": True}
-    entry = float(nxt.open)
-    if entry <= stop:
-        return {"skipped": True}
+    entry = fill.price
     risk = entry - stop
-    target = entry + risk * rr
+    if risk <= 0:
+        return {"skipped": True}
+    target = close + (close - stop) * rr  # same signal-based target as timing.buy_plan
+    if target <= entry:
+        return {"skipped": True}
     half_done, peak, realized = False, entry, 0.0
-    first3_low = float(o["close"].iloc[i + 1:i + 4].min()) if i + 4 <= len(o) else float(o["close"].iloc[i + 1:].min())
+    first3_low = float(o["close"].iloc[i + 1:min(len(o), i + 4)].min())
     for j in range(i + 1, min(len(o), i + 1 + max_hold)):
         bar = o.iloc[j]
-        if bar.low <= stop:
-            px = min(bar.open, stop) if j > i + 1 else stop
-            rest = (px / entry - 1)
-            ret = realized + (0.5 if half_done else 1.0) * rest
-            return {"ret": ret, "days": j - i, "exit": "손절" if not half_done else "본전 손절", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": True}
-        if not half_done and bar.high >= target:
-            realized += 0.5 * (target / entry - 1)
+        decision = execution_rules.exit_fill(
+            float(bar.open), float(bar.high), float(bar.low),
+            stop, target, half=half_done, fresh=(j == i + 1),
+        )
+        if decision and decision.reason == "stop":
+            ret = realized + (0.5 if half_done else 1.0) * (decision.price / entry - 1)
+            return {"ret": ret, "days": j - i, "exit": "손절" if not half_done else "본전 손절",
+                    "first3": first3_low / entry - 1, "target_hit": half_done,
+                    "risk": risk / entry, "complete": True}
+        if decision and decision.reason == "target":
+            realized += 0.5 * (decision.price / entry - 1)
             half_done, stop = True, entry
-        peak = max(peak, bar.close)
-        if half_done and (bar.close <= peak * (1 - float(cfg["추적 매도 하락률(%)"]) / 100) or bar.close < bar.ma20):
-            return {"ret": realized + 0.5 * (bar.close / entry - 1), "days": j - i, "exit": "추적 매도", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": True}
-    last = o.iloc[min(len(o) - 1, i + max_hold)]
-    ret = realized + (0.5 if half_done else 1.0) * (last.close / entry - 1)
-    return {"ret": ret, "days": max_hold, "exit": "기간 만료", "first3": first3_low / entry - 1, "target_hit": half_done, "risk": risk / entry, "complete": i + max_hold < len(o)}
+        peak = max(peak, float(bar.close))
+        if half_done and (bar.close <= peak * (1 - float(cfg["추적 매도 하락률(%)"]) / 100)
+                          or bar.close < bar.ma20):
+            return {"ret": realized + 0.5 * (float(bar.close) * 0.9985 / entry - 1),
+                    "days": j - i, "exit": "추적 매도", "first3": first3_low / entry - 1,
+                    "target_hit": half_done, "risk": risk / entry, "complete": True}
+    last_i = min(len(o) - 1, i + max_hold)
+    last = o.iloc[last_i]
+    ret = realized + (0.5 if half_done else 1.0) * (float(last.close) / entry - 1)
+    return {"ret": ret, "days": last_i - i, "exit": "기간 만료",
+            "first3": first3_low / entry - 1, "target_hit": half_done,
+            "risk": risk / entry, "complete": i + max_hold < len(o)}
 
 
 def run(n_tickers: int, years: int, send: bool):

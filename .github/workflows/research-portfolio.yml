@@ -1,0 +1,35 @@
+name: Research-only historical portfolio sample
+
+on:
+  pull_request:
+    paths:
+      - "validation/**"
+      - "execution_rules.py"
+      - "backtest.py"
+      - ".github/workflows/research-portfolio.yml"
+  workflow_dispatch:
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run both comparisons from the same vetted history snapshot
+        run: python -m validation.research_pipeline --tickers 20 --years 2 --folds 3 --months 12
+      - name: Archive research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-portfolio
+          path: |
+            data/portfolio_comparison.json
+            data/rolling_comparison.json
+            data/strategy_diagnostics.md
+          if-no-files-found: warn

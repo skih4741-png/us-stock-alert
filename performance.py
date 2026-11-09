@@ -70,7 +70,7 @@ def _stats(vals: list[float]) -> dict:
     wins = [x for x in v if x > 0]
     losses = [-x for x in v if x <= 0]
     return {"n": len(v), "avg": round(sum(v) / len(v), 2), "win": round(len(wins) / len(v) * 100),
-            "pf": round((sum(wins) / len(wins)) / (sum(losses) / len(losses)), 2) if wins and losses and sum(losses) > 0 else None}
+            "pf": round(sum(wins) / sum(losses), 2) if losses and sum(losses) > 0 else None}
 
 
 def update(store, period: str = "250d") -> dict:

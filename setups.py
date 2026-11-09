@@ -193,7 +193,8 @@ def edge(df, rr: float, cfg: dict, setup: str | None) -> dict | None:
     hold_targets = targets[cut:]
     hold_n = len(hold_targets)
     hold_win = int(round(sum(hold_targets) / hold_n * 100)) if hold_n else None
-    holdout_ok = (hold_n < HOLDOUT_MIN) or (hold_win is not None and hold_win >= HOLDOUT_WIN)
+    # An undersized validation partition is insufficient evidence, not a pass.
+    holdout_ok = hold_n >= HOLDOUT_MIN and hold_win is not None and hold_win >= HOLDOUT_WIN
     robust = bool(ok and win_lb >= WIN_LB_MIN and avg_stress > 0 and holdout_ok)
 
     return {"setup": setup, "n": int(k), "win": win_pct, "loss": 100 - win_pct, "avg": avg, "ok": ok, "label": label,

@@ -37,6 +37,7 @@ import research
 import scoring
 import setups
 import simtrade
+import strategy_policy
 import timing
 import universe
 from explain import explain
@@ -242,6 +243,18 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             buys_for_list = buys
         # 개별 종목과 ETF·펀드는 따로 순위를 매겨요 (ETF는 재무 점수 없이 추세·안전만으로 점수가 높게 나오기 쉬워서)
         stock_buys = [b for b in buys_for_list if not b["etf"]]
+        # Opt-in only: independently approved policy can restrict STOCK alerts.
+        # Default is NO, preserving all existing scheduled stock/ETF reporting.
+        if str(cfg.get("검증 전략만 표시", "아니오")).strip().lower() in ("예", "yes", "true", "1"):
+            approved = []
+            for b in stock_buys:
+                ok, why = strategy_policy.allowed(b.get("setup"), enabled=True)
+                if ok:
+                    approved.append(b)
+                else:
+                    b.setdefault("tags", []).append("검증 정책 제외: " + why)
+            stock_buys = approved
+
         fund_buys = [b for b in buys_for_list if b["etf"]]
         for b in fund_buys:
             b["tags"].insert(0, "ETF·펀드")
