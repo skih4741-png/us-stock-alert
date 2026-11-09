@@ -21,6 +21,7 @@ from validation.compare_strategies import STRATEGIES, COST_EACH_SIDE
 from validation.portfolio import simulate_portfolio
 from validation.walk_forward import rolling_evaluation
 from validation.historical_universe import read_membership_csv
+from validation.diagnostic_report import render
 
 
 def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
@@ -108,6 +109,8 @@ def main():
         json.dumps(portfolio, ensure_ascii=False, indent=2), encoding="utf-8")
     (args.output_dir/"rolling_comparison.json").write_text(
         json.dumps(rolling, ensure_ascii=False, indent=2), encoding="utf-8")
+    (args.output_dir/"strategy_diagnostics.md").write_text(
+        render(portfolio, rolling), encoding="utf-8")
     print(json.dumps({k:v["metrics"] for k,v in portfolio["strategies"].items()},
                      ensure_ascii=False, indent=2))
     print("Rolling summary:", json.dumps(rolling["summary"], ensure_ascii=False))
