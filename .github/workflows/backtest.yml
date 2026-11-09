@@ -19,14 +19,14 @@ jobs:
       MAIL_TO: ${{ secrets.MAIL_TO }}
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
       - run: pip install yfinance pandas numpy requests
       - run: python backtest.py --tickers ${{ github.event.inputs.tickers }} --years ${{ github.event.inputs.years }} --send
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: backtest-report
           path: data/backtest_report.md
