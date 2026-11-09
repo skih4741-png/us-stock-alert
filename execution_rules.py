@@ -41,3 +41,13 @@ def exit_fill(open_price: float, high: float, low: float, stop: float,
     if not fresh and not half and high >= target * (1.0 + touch):
         return Fill(max(open_price, target), "target")
     return None
+
+
+def next_open_market_exit(open_price: float, slip: float = 0.0015) -> Fill | None:
+    """Exit for a decision made *after* the prior close, not at that close."""
+    import math
+    if not math.isfinite(open_price) or open_price <= 0:
+        return None
+    if not math.isfinite(slip) or not 0 <= slip < 1:
+        return None
+    return Fill(open_price * (1.0 - slip), "next_open")
