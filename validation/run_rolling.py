@@ -6,6 +6,7 @@ from pathlib import Path
 import config
 import prices
 import universe
+from validation.data_quality import clean_history
 from validation.walk_forward import rolling_evaluation
 
 
@@ -21,12 +22,14 @@ def main():
     u = u.assign(dv=u["price"].fillna(0)*u["volume"].fillna(0))
     names = list(u.sort_values("dv",ascending=False).head(args.tickers)["yf_ticker"])
     hist = prices.download_history(["SPY"]+names,period="5y")
+    hist, rejected = clean_history(hist, min_bars=260)
     spy = hist.pop("SPY",None)
     if spy is None or len(spy)<500:
         raise SystemExit("Insufficient SPY history")
     out = rolling_evaluation(hist,spy,cfg,fold_months=args.months,folds=args.folds)
     out["universe"]="CURRENT selected listed shares; survivorship bias"
     out["tickers_received"]=len(hist)
+    out["data_rejected"]=rejected
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
     print(json.dumps(out["summary"],ensure_ascii=False,indent=2))
