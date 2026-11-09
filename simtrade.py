@@ -144,7 +144,9 @@ def review(st: dict) -> dict:
         g["fees"] += c.get("qty", 0) * (c.get("entry", 0) + c.get("exit", 0)) * FEE
         if c.get("why") not in g["exit_reasons"]:
             g["exit_reasons"].append(c.get("why"))
-        g["known"] = g["known"] and bool(c.get("risk_per_share", 0) > 0)
+        # Legacy closed trades can contain risk_per_share=None. Unknown R stays unknown.
+        risk_value = c.get("risk_per_share")
+        g["known"] = g["known"] and isinstance(risk_value, (int, float)) and risk_value > 0
         g["risk"] += c["qty"] * (c.get("risk_per_share") or 0)
         g["date"] = max(g["date"], c["exit_date"])
     trades = [g for k, g in groups.items() if k not in open_ids and
