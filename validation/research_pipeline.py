@@ -24,6 +24,7 @@ from validation.portfolio import simulate_portfolio
 from validation.walk_forward import rolling_evaluation
 from validation.historical_universe import read_membership_csv
 from validation.diagnostic_report import render
+from validation.offline_dataset import read_historical_dataset
 
 
 def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
@@ -125,13 +126,26 @@ def main():
     p.add_argument("--folds", type=int, default=3)
     p.add_argument("--months", type=int, default=12)
     p.add_argument("--universe-csv", type=Path, default=None)
+    p.add_argument("--offline-data-dir", type=Path, default=None,
+                   help="Externally supplied historical membership.csv and prices/*.csv")
     p.add_argument("--output-dir", type=Path, default=Path("data"))
     args = p.parse_args()
     if min(args.tickers, args.years, args.folds, args.months) < 1:
         p.error("all integer arguments must be positive")
     cfg, _ = config.merge_settings({})
-    history, spy, membership, meta = acquire(cfg, args.tickers, max(args.years,
-                                                   args.folds*args.months//12), args.universe_csv)
+    if args.offline_data_dir is not None:
+        history, spy, membership, meta = read_historical_dataset(args.offline_data_dir)
+        digest = hashlib.sha256()
+        for ticker in sorted(history):
+            digest.update(ticker.encode())
+            digest.update(history[ticker].to_csv().encode())
+        digest.update(spy.to_csv().encode())
+        meta["price_snapshot_sha256"] = digest.hexdigest()
+        meta["selected_tickers"] = sorted(history)
+        meta["downloaded_tickers"] = len(history)
+    else:
+        history, spy, membership, meta = acquire(cfg, args.tickers, max(args.years,
+                                                       args.folds*args.months//12), args.universe_csv)
     portfolio, rolling = build_reports(history, spy, cfg, membership, meta,
                                        years=args.years, folds=args.folds,
                                        fold_months=args.months)
