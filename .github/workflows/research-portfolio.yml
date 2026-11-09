@@ -23,10 +23,14 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Download historical daily prices and compare three portfolios
         run: python -m validation.run_portfolio --tickers 20 --years 2
+      - name: Rolling chronological strategy validation
+        run: python -m validation.run_rolling --tickers 20 --folds 3 --months 12
       - name: Archive research report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: research-portfolio
-          path: data/portfolio_comparison.json
+          path: |
+            data/portfolio_comparison.json
+            data/rolling_comparison.json
           if-no-files-found: warn
