@@ -68,6 +68,11 @@ def _risk_metrics(equity: list[dict], spy: pd.DataFrame, initial_cash: float,
     }
 
 
+def opening_regimes(spy: pd.DataFrame) -> pd.Series:
+    """At today's open only the regime confirmed at yesterday's close is known."""
+    return market.regime_series(spy).shift(1)
+
+
 def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                        strategy: str, cfg: dict, *, years: int = 3,
                        initial_cash: float = 10000.0, max_positions: int = 5,
@@ -88,7 +93,7 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
     if len(dates) == 0:
         raise ValueError("empty portfolio window")
     # At an opening auction the current daily close and VIX close are UNKNOWN.
-    regimes = market.regime_series(spy).shift(1)
+    regimes = opening_regimes(spy)
     prepared = {}
     for ticker, df in history.items():
         if len(df) < 260:
