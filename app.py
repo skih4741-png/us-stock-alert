@@ -233,4 +233,28 @@ with tabs[6]:
             st.code((report.get("error") or "기록된 오류 없음")[-1000:])
             st.json(report.get("previous_run") or {})
         st.caption("세부 실패 원인은 GitHub Actions 실행 로그와 교차 확인하세요.")
+
+    st.divider()
+    st.subheader("최근 7일 운영 통계")
+    try:
+        from operations_health import weekly_metrics
+        perf_blob = json.loads(Store().get_blob("perf") or "{}")
+        week = weekly_metrics(perf_blob.get("runs") or [], config.now_kst())
+        a, b, c = st.columns(3)
+        a.metric("아침 실행 성공률", f'{week["success_rate_pct"]:.1f}%' if week["success_rate_pct"] is not None else "기록 없음")
+        b.metric("평균 실행 시간", f'{week["mean_seconds"]:.0f}초' if week["mean_seconds"] is not None else "기록 없음")
+        c.metric("실패·점검 건수", week["failed"] + week["partial"])
+        st.caption(f'기록된 아침 실행 {week["total"]}회 (성공 {week["success"]}회 · 경고 {week["partial"]}회 · 실패 {week["failed"]}회). 예약 자체가 시작되지 않은 건 포함하지 않음.')
+    except (ValueError, TypeError, OSError) as exc:
+        st.warning("주간 통계 조회 실패: " + str(exc)[:160])
+    if report:
+        plans = report.get("recovery") or []
+        if plans:
+            st.subheader("복구 안내")
+            st.dataframe(pd.DataFrame([
+                {"실패 단계": p.get("step"), "복구 방식": "안전 복구 가능" if p.get("mode") == "auto_safe" else "수동 점검", "설명": p.get("message")}
+                for p in plans
+            ]), use_container_width=True, hide_index=True)
+            st.caption("알림 재발송·모의매매 재실행은 중복 위험으로 자동 수행하지 않습니다.")
+
     st.link_button("GitHub 예약 실행 로그", "https://github.com/skih4741-png/us-stock-alert/actions")
