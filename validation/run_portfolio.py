@@ -23,7 +23,7 @@ def main():
     u, _ = universe.load_universe(cfg, include_etf=False)
     u = u.assign(dv=u["price"].fillna(0) * u["volume"].fillna(0))
     names = list(u.sort_values("dv", ascending=False).head(args.tickers)["yf_ticker"])
-    history = prices.download_history(["SPY"] + names, period=f"{args.years+2}y")
+    history = prices.download_history(["SPY"] + names, period=("5y" if args.years <= 3 else "10y" if args.years <= 8 else "max"))
     spy = history.pop("SPY", None)
     if spy is None or len(spy) < 260:
         raise SystemExit("SPY history unavailable. No statistics produced.")
