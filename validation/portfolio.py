@@ -29,6 +29,10 @@ class Position:
     peak: float
     half: bool = False
     realized: float = 0.0
+    exit_next_open: bool = False
+    exit_reason: str = ""
+    regime: str = ""
+    signal_date: str = ""
 
 
 def _risk_metrics(equity: list[dict], spy: pd.DataFrame, initial_cash: float,
@@ -81,7 +85,8 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
     dates = spy.index[(spy.index >= window_start) & (spy.index <= window_end)]
     if len(dates) == 0:
         raise ValueError("empty portfolio window")
-    regimes = market.regime_series(spy)
+    # At an opening auction the current daily close and VIX close are UNKNOWN.
+    regimes = market.regime_series(spy).shift(1)
     prepared = {}
     for ticker, df in history.items():
         if len(df) < 260:
@@ -109,13 +114,26 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
             row = o.loc[day]
             op, hi, lo, cl = (float(row[k]) for k in ("open", "high", "low", "close"))
             last_prices[ticker] = cl
+            if p.exit_next_open:
+                # Time/trailing signal was observed at the preceding CLOSE.
+                # Exit at the next trading OPEN, not the already-observed close.
+                px = op * (1 - 0.0015)
+                cash += p.qty * px * (1-fee)
+                closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
+                               "pnl": p.realized + p.qty * (px * (1-fee) - p.entry * (1+fee)),
+                               "reason": p.exit_reason, "regime": p.regime,
+                               "signal_date": p.signal_date})
+                del positions[ticker]
+                exited_today.add(ticker)
+                continue
             d = execution_rules.exit_fill(op, hi, lo, p.stop, p.target,
                                           half=p.half, slip=0.0015)
             if d is not None:
                 if d.reason == "stop":
                     cash += p.qty * d.price * (1 - fee)
                     closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
-                                   "pnl": p.realized + p.qty * (d.price * (1-fee) - p.entry * (1+fee))})
+                                   "pnl": p.realized + p.qty * (d.price * (1-fee) - p.entry * (1+fee)),
+                                   "reason": "stop", "regime": p.regime, "signal_date": p.signal_date})
                     del positions[ticker]
                     exited_today.add(ticker)
                     continue
@@ -128,21 +146,19 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 else:
                     cash += p.qty * d.price * (1-fee)
                     closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
-                                   "pnl": p.realized + p.qty * (d.price * (1-fee) - p.entry * (1+fee))})
+                                   "pnl": p.realized + p.qty * (d.price * (1-fee) - p.entry * (1+fee)),
+                                   "reason": "target", "regime": p.regime, "signal_date": p.signal_date})
                     del positions[ticker]
                     continue
             p.peak = max(p.peak, cl)
             age = int(o.index.get_loc(day)) - p.entry_idx
             trailing = p.half and (cl < p.peak * 0.92 or cl < float(row["ma20"]))
             if trailing or age >= max_hold:
-                px = cl * (1 - 0.0015)
-                cash += p.qty * px * (1-fee)
-                closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
-                               "pnl": p.realized + p.qty * (px * (1-fee) - p.entry * (1+fee))})
-                del positions[ticker]
-                exited_today.add(ticker)
+                p.exit_next_open = True
+                p.exit_reason = "trailing" if trailing else "max_hold"
         # New positions use yesterday's confirmed signal, never same day's close.
-        if regimes.loc[day] != "bear":
+        opening_regime = regimes.loc[day]
+        if pd.notna(opening_regime) and opening_regime != "bear":
             for ticker in sorted(prepared):
                 if ticker in positions or ticker in exited_today or remaining_new_slots <= 0:
                     continue
@@ -165,7 +181,7 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 if fill is None:
                     continue
                 entry = fill.price
-                rr = float(cfg["상승장 손익비"] if regimes.loc[day] == "bull" else cfg["횡보장 손익비"])
+                rr = float(cfg["상승장 손익비"] if opening_regime == "bull" else cfg["횡보장 손익비"])
                 target = close + (close-stop) * rr
                 if target <= entry:
                     continue
@@ -178,14 +194,18 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 cash -= qty*entry*(1+fee)
                 entry_cash_budget -= qty*entry*(1+fee)
                 remaining_new_slots -= 1
-                p = Position(ticker, qty, entry, stop, target, pos_idx, entry)
+                p = Position(ticker, qty, entry, stop, target, pos_idx, entry,
+                             regime=str(opening_regime),
+                             signal_date=o.index[pos_idx-1].strftime("%Y-%m-%d"))
                 # Conservative same-bar stop, consistent with live paper policy.
                 same_bar = execution_rules.exit_fill(float(row.open), float(row.high), float(row.low),
                                                      stop, target, fresh=True)
                 if same_bar is not None and same_bar.reason == "stop":
                     cash += qty*same_bar.price*(1-fee)
                     closed.append({"ticker":ticker,"date":day.strftime("%Y-%m-%d"),
-                                   "pnl":qty*(same_bar.price*(1-fee)-entry*(1+fee))})
+                                   "pnl":qty*(same_bar.price*(1-fee)-entry*(1+fee)),
+                                   "reason":"entry_bar_stop", "regime":str(opening_regime),
+                                   "signal_date":p.signal_date})
                 else:
                     positions[ticker] = p
                     last_prices[ticker] = float(row.close)
