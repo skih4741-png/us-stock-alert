@@ -28,6 +28,7 @@ import execution_rules
 import ledger
 import prices
 import setups
+import strategy_policy
 import trade_guard
 
 
@@ -47,7 +48,7 @@ TOUCH = 0.001              # 지정가에 '딱 닿기만' 하면 못 산 것으�
 TICKET_RATE = 0.6          # 실전 기준: 리허설 주문표 체결률
 TICKET_MIN = 10
 DAYS = 90                  # 시험 기간 (달력 기준)
-DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15, "day_loss": 0.03, "day_trades": 3}
+DEFAULT = {"budget": 100.0, "max_pos": 2, "risk": 0.03, "cap": 0.6, "month_loss": 0.10, "stale_days": 15, "day_loss": 0.03, "day_trades": 3, "validated_strategy_mode": False}
 AVOID = ("신규 매수 보류", "재무 주의", "급등", "출렁임", "참고용")
 
 
@@ -356,6 +357,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             reason = setups.paper_gate(p)
             if reason:
                 reject(reason); continue
+            policy_ok, policy_why = strategy_policy.allowed(p.get("setup"), enabled=bool(cfg.get("validated_strategy_mode", False)))
+            if not policy_ok:
+                reject(policy_why); continue
             led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
             if led_blocked:
                 reject(led_why); continue
