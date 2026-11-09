@@ -6,6 +6,7 @@ acknowledgment, paper state change and app blob read-back are distinct checks.
 from __future__ import annotations
 
 import json
+import os
 
 CRITICAL = ("메일·슬랙 발송", "앱 데이터 저장", "자동 모의투자")
 
@@ -20,7 +21,11 @@ def build_health(*, kind: str, at: str, checks: list[dict], success: bool,
     state = "failed" if not success or failing else "incomplete" if missing or optional else "ok"
     if kind != "daily" and state == "ok":
         state = "ok"
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_url = f"https://github.com/{repo}/actions/runs/{run_id}" if repo and run_id.isdigit() else ""
     result = {
+        "workflow_url": run_url,
         "kind": kind, "at": at, "state": state, "stage": stage,
         "failed": failing, "missing": missing, "not_checked": optional,
         "checks": entries, "error": str(error)[-1000:],
