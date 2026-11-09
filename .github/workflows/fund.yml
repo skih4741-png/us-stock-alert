@@ -19,8 +19,8 @@ jobs:
       SHEET_ID: ${{ secrets.SHEET_ID }}
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -39,8 +39,8 @@ jobs:
       KRONOS_DIR: /tmp/Kronos
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Kronos 받기 (고정 커밋)
@@ -55,7 +55,7 @@ jobs:
           pip install einops==0.8.1 huggingface_hub==0.33.1 safetensors==0.6.2 tqdm "pandas>=2.2" numpy yfinance
       - name: 다음 5거래일 종가 예측
         run: python fund_kronos.py ${{ needs.universe.outputs.tickers }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: fund-forecast
           path: data/fund_forecast.json
@@ -77,14 +77,14 @@ jobs:
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
       PYTHONIOENCODING: utf-8
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt skfolio==1.9.7 nautilus_trader==1.231.0
       - name: Kronos 예측 파일 (없으면 과거 평균으로 배분)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           name: fund-forecast
