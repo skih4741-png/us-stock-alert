@@ -95,6 +95,12 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
     equity, closed = [], []
     last_prices: dict[str, float] = {}
     for day in dates:
+        # Freeze prior-session capital and position slots for this day's opens.
+        # Intraday exits must not retroactively finance an opening fill.
+        order_nav = float(equity[-1]["equity"]) if equity else initial_cash
+        entry_cash_budget = cash
+        remaining_new_slots = max_positions - len(positions)
+        exited_today: set[str] = set()
         # On each day execute exits from available day's OHLC.
         for ticker, p in list(positions.items()):
             o, _ = prepared[ticker]
@@ -111,6 +117,7 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                     closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
                                    "pnl": p.realized + p.qty * (d.price * (1-fee) - p.entry * (1+fee))})
                     del positions[ticker]
+                    exited_today.add(ticker)
                     continue
                 if p.qty >= 2:
                     sold = p.qty // 2
@@ -133,10 +140,11 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
                                "pnl": p.realized + p.qty * (px * (1-fee) - p.entry * (1+fee))})
                 del positions[ticker]
+                exited_today.add(ticker)
         # New positions use yesterday's confirmed signal, never same day's close.
         if regimes.loc[day] != "bear":
             for ticker in sorted(prepared):
-                if ticker in positions or len(positions) >= max_positions:
+                if ticker in positions or ticker in exited_today or remaining_new_slots <= 0:
                     continue
                 o, pending = prepared[ticker]
                 if day not in o.index or not bool(pending.loc[day]):
@@ -161,13 +169,15 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 target = close + (close-stop) * rr
                 if target <= entry:
                     continue
-                nav = cash + sum(p.qty * last_prices.get(t,p.entry) for t,p in positions.items())
+                nav = order_nav
                 unit_risk = (entry-stop) + (entry+stop)*fee
                 qty = math.floor(min(nav*risk_fraction/max(unit_risk, .01),
-                                     nav*max_weight/entry, cash/(entry*(1+fee))))
+                                     nav*max_weight/entry, entry_cash_budget/(entry*(1+fee))))
                 if qty < 1:
                     continue
                 cash -= qty*entry*(1+fee)
+                entry_cash_budget -= qty*entry*(1+fee)
+                remaining_new_slots -= 1
                 p = Position(ticker, qty, entry, stop, target, pos_idx, entry)
                 # Conservative same-bar stop, consistent with live paper policy.
                 same_bar = execution_rules.exit_fill(float(row.open), float(row.high), float(row.low),
