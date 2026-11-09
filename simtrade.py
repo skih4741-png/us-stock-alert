@@ -598,7 +598,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
     checks = [
         ["모의 거래 12번 이상", len(closed) >= 12, f"{len(closed)}번"],
         ["아침 후보 기록 100개 이상, 5일 뒤 평균이 SPY보다 나음",
-         d5.get("n", 0) >= 100 and d5.get("excess") is not None and d5["excess"] > 0,
+         (d5.get("n") or 0) >= 100 and isinstance(d5.get("excess"), (int, float)) and d5["excess"] > 0,
          f"{d5.get('n', 0)}개 · SPY 대비 {d5['excess']:+.2f}%p" if d5.get("excess") is not None else f"{d5.get('n', 0)}개"],
         ["SPY보다 수익률이 높거나 비슷하고 최대 낙폭은 더 작음",
          spy_ret is not None and ret >= spy_ret - 1 and (spy_mdd is None or mdd >= spy_mdd),
@@ -607,7 +607,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         ["평균 이익 ÷ 평균 손실 1.5 이상", bool(aw and al and aw / al >= 1.5) or bool(aw and not losses and len(closed) >= 5),
          f"{aw / al:.2f}" if aw and al else "—"],
         ["처음 절반보다 최근 절반이 나빠지지 않음, 규칙 위반 0번",
-         len(closed) >= 12 and avg(lastn) is not None and avg(lastn) >= avg(first) - 0.5 and st["violations"] == 0,
+         len(closed) >= 12 and avg(lastn) is not None and avg(first) is not None and avg(lastn) >= avg(first) - 0.5 and st["violations"] == 0,
          f"처음 {avg(first):+.1f}% · 최근 {avg(lastn):+.1f}%" if closed else "—"],
         ["수수료·환전 비용을 빼고도 플러스", last > budget, f"${last - budget:+.2f}"],
         [f"리허설 주문표 {TICKET_MIN}건 이상 · 체결률 {TICKET_RATE:.0%} 이상", ts["n"] >= TICKET_MIN and (ts["rate"] or 0) >= TICKET_RATE,
