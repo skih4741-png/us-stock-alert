@@ -38,6 +38,7 @@ import scoring
 import setups
 import simtrade
 import strategy_policy
+import operations_health
 import timing
 import universe
 from explain import explain
@@ -58,11 +59,25 @@ def chk(name: str, ok, detail: str = ""):
     CHECKS.append({"n": name, "ok": ok, "d": str(detail)[:200]})
 
 
-def record_run(store, kind: str, t0: float, ok, changed: list, err: str = ""):
+def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", stage: str = ""):
+    at = config.now_kst().isoformat(timespec="minutes")
     try:
-        appdata.add_run(store, kind, config.now_kst().isoformat(timespec="minutes"), ok, int(time.time() - t0), changed, list(CHECKS), err)
+        appdata.add_run(store, kind, at, ok, int(time.time() - t0), changed, list(CHECKS), err)
     except Exception as e:
         log.warning("실행 기록 실패: %s", e)
+    try:
+        previous = operations_health.read_health(store)
+        report = operations_health.build_health(kind=kind, at=at, checks=list(CHECKS),
+                                                 success=bool(ok), error=err, stage=stage, previous=previous)
+        operations_health.save_health(store, report)
+        if ok and kind == "daily" and report["state"] == "failed":
+            failures = " / ".join(report["failed"])[:250]
+            log.error("운영 점검 실패: %s", failures)
+            notify.send_slack("⚠ 아침 분석 일부 단계 실패 · " + failures +
+                              "\nGitHub Actions 로그와 관리자 점검 화면을 확인하세요.")
+    except Exception as e:
+        log.error("운영 상태 저장/경고 실패: %s", e)
+
 STATE = Path(__file__).parent / "data" / "state.json"
 import re as _re
 FUND_NAME = _re.compile(r"\bETF\b|\bFund\b|Term Trust|Income Trust|Premium Income|Municipal|\bETN\b|Closed[- ]End|Opportunities Trust|Strategies Trust|Equity Trust|Technology Trust|Sciences Trust|Growth Trust", _re.I)
@@ -461,6 +476,8 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             chk("보유 종목 가격", (not miss) if app.get("holdings") else None,
                 (f"{len(app['holdings'])}개 모두 받음" if not miss else "못 받음: " + ", ".join(miss[:6])) if app.get("holdings") else "보유 종목이 없어요")
             chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")), f"메일 {'O' if sent.get('mail') else 'X'} · 슬랙 {'O' if sent.get('slack') else 'X'}")
+            for audit in operations_health.verify_daily_artifacts(store, today_iso):
+                chk(audit["n"], audit["ok"], audit["d"])
             s = app["summary"]
             changed = [f"매수 후보 {s['buy']}개 (신규 {s['new']})", f"매도 신호 {s['sell']}개", f"시장 국면 {REGIME[mk['regime']]}"
                        + (f" (어제 {REGIME[prev_regime]})" if prev_regime and prev_regime != mk["regime"] else "")]
@@ -485,7 +502,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
         except Exception:
             pass
         if not dry:
-            record_run(store, "daily", t0, False, [f"'{stage}' 단계에서 멈춤"], traceback.format_exc())
+            record_run(store, "daily", t0, False, [f"'{stage}' 단계에서 멈춤"], traceback.format_exc(), stage=stage)
             notify_fail(msg)
         raise
 
