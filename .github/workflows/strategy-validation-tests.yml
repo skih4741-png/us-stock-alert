@@ -5,6 +5,11 @@ on:
     paths:
       - "performance.py"
       - "main.py"
+      - "app.py"
+      - "appdata.py"
+      - "docs/**"
+      - ".github/workflows/daily.yml"
+      - "operations_health.py"
       - "config.py"
       - "strategy_policy.py"
       - "trade_guard.py"
@@ -30,8 +35,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile validation modules
-        run: python -m compileall -q main.py config.py performance.py setups.py execution_rules.py backtest.py simtrade.py strategy_policy.py validation tests/test_strategy_validation.py
+        run: python -m compileall -q app.py operations_health.py main.py config.py performance.py setups.py execution_rules.py backtest.py simtrade.py strategy_policy.py validation tests/test_strategy_validation.py
       - name: Run regression tests
         run: python -m unittest discover -s tests -p 'test_strategy_validation.py' -v
+      - name: Browser application JavaScript syntax check
+        run: node --check docs/app.js && node --check docs/config.js
       - name: App-import smoke test
         run: python -c "import main, simtrade, strategy_policy; print('imports OK')"

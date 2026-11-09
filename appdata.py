@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 import math
 import setups
 
@@ -146,7 +147,9 @@ def add_run(store, kind: str, at: str, ok, took: int, changed: list, checks: lis
     if ok is True and bad:
         ok = "warn"   # 끝까지 돌았지만 점검 하나 이상 실패
     runs.insert(0, {"kind": kind, "label": RUN_LABEL.get(kind, kind), "at": at, "ok": ok, "took": took,
-                    "changed": [str(x)[:160] for x in changed][:8], "checks": checks[:12], "err": str(err)[-600:]})
+                    "changed": [str(x)[:160] for x in changed][:8], "checks": checks[-30:], "err": str(err)[-350:],
+                    "run_url": ("https://github.com/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"])
+                    if os.environ.get("GITHUB_REPOSITORY") and os.environ.get("GITHUB_RUN_ID", "").isdigit() else ""})
     perf["runs"] = runs[:keep]
     try:
         store.put_blob("perf", dumps(_clean(perf)))

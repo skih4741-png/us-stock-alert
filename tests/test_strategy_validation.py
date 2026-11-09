@@ -1,5 +1,6 @@
 """Regression tests for trading-performance corrections and comparison engine."""
 import unittest
+import json
 from unittest.mock import patch
 
 import pandas as pd
@@ -11,7 +12,12 @@ from validation.promotion import assess_strategy
 from execution_rules import entry_fill, exit_fill, next_open_market_exit
 import simtrade
 import config
-from strategy_policy import allowed
+import operations_health
+from validation.oos_review import holdout_review
+from validation.policy_publisher import compose_policy
+from datetime import date
+from unittest.mock import patch
+from strategy_policy import allowed, sign_policy
 from validation.diagnostics import trade_attribution
 from validation.historical_universe import read_membership_csv
 from validation.research_pipeline import acquire
@@ -233,6 +239,93 @@ class TestProductionDefaults(unittest.TestCase):
         from strategy_policy import allowed
         ok, _ = allowed("돌파", enabled=True, policy_path=Path("/nonexistent-policy-for-test.json"))
         self.assertFalse(ok)
+
+
+class TestOperationsHealth(unittest.TestCase):
+    def test_failed_step_overrides_successful_process(self):
+        r = operations_health.build_health(
+            kind="daily", at="2026-11-09T07:00:00",
+            success=True, checks=[
+                {"n": "메일·슬랙 발송", "ok": False, "d": "not sent"},
+                {"n": "앱 데이터 저장", "ok": True, "d": "saved"},
+                {"n": "자동 모의투자", "ok": True, "d": "updated"},
+            ])
+        self.assertEqual(r["state"], "failed")
+        self.assertIn("메일·슬랙 발송", r["failed"])
+
+    def test_missing_evidence_cannot_be_reported_as_ok(self):
+        r = operations_health.build_health(
+            kind="daily", at="2026-11-09T07:00",
+            success=True, checks=[{"n": "앱 데이터 저장", "ok": True}])
+        self.assertEqual(r["state"], "incomplete")
+        self.assertIn("자동 모의투자", r["missing"])
+
+    def test_persisted_status_is_read_back(self):
+        store = _MemoryStore()
+        r = operations_health.build_health(
+            kind="daily", at="2026-11-09T07:00",
+            success=True, checks=[{"n": name, "ok": True} for name in operations_health.CRITICAL])
+        operations_health.save_health(store, r)
+        self.assertEqual(operations_health.read_health(store)["state"], "ok")
+
+    def test_saved_daily_bar_date_must_match(self):
+        store = _MemoryStore()
+        store.put_blob("daily", json.dumps({"date": "2026-11-08", "summary": {"buy": 1}}))
+        result = operations_health.verify_daily_artifacts(store, "2026-11-09")
+        self.assertFalse(result[0]["ok"])
+
+
+class TestOOSReview(unittest.TestCase):
+    def test_positive_metrics_cannot_be_auto_approved_without_provenance(self):
+        ix = pd.bdate_range("2020-01-01", periods=450)
+        spy = pd.DataFrame({"Close": [100 + i * 0.1 for i in range(len(ix))]}, index=ix)
+        with patch("validation.oos_review.simulate_portfolio",
+                   return_value={"metrics": {"closed_trades": 300,
+                                             "profit_factor": 2.5,
+                                             "mdd_pct": -3,
+                                             "excess_return_pct": 20}}):
+            review = holdout_review({}, spy, {}, None)
+        self.assertEqual(review["eligible_for_paper_review"], [])
+        self.assertTrue(all(not v["eligible"] for v in review["decisions"].values()))
+
+
+class TestSignedPromotion(unittest.TestCase):
+    def test_unsigned_or_tampered_policy_fails_closed(self):
+        payload = {
+            "policy_version": 1, "issued_on": "2026-11-09", "valid_until": "2026-11-23",
+            "independent_oos_verified": True, "historical_universe_verified": True,
+            "forward_paper_verified": True, "source_dataset_sha256": "a"*64,
+            "approved_strategies": ["breakout"],
+        }
+        secret = "a-long-32-character-test-secret-key-12345"
+        signed = sign_policy(payload, secret)
+        with patch.dict("os.environ", {"STRATEGY_POLICY_HMAC_KEY": secret}):
+            self.assertTrue(allowed("돌파", enabled=True, today=date(2026, 11, 10),
+                                    policy_text=json.dumps(signed))[0])
+            signed["approved_strategies"] = ["breakout", "pullback"]
+            self.assertFalse(allowed("눌림목", enabled=True, today=date(2026, 11, 10),
+                                     policy_text=json.dumps(signed))[0])
+
+    def test_old_or_expired_policy_fails_closed(self):
+        secret = "another-long-32-character-secret-key-123"
+        base = {
+            "policy_version": 1, "issued_on": "2026-10-01", "valid_until": "2026-10-15",
+            "independent_oos_verified": True, "historical_universe_verified": True,
+            "forward_paper_verified": True, "source_dataset_sha256": "b"*64,
+            "approved_strategies": ["breakout"]
+        }
+        with patch.dict("os.environ", {"STRATEGY_POLICY_HMAC_KEY": secret}):
+            self.assertFalse(allowed("돌파", enabled=True, today=date(2026, 11, 9),
+                                     policy_text=json.dumps(sign_policy(base, secret)))[0])
+
+    def test_no_approved_strategy_from_unverified_inputs(self):
+        with self.assertRaises(ValueError):
+            compose_policy(
+                {"independent_oos_verified": False},
+                {"metrics": {}}, {"verified": True, "days": 100},
+                today=date(2026, 11, 9),
+                secret="very-long-32-character-valid-secret-123",
+            )
 
 
 if __name__ == "__main__":

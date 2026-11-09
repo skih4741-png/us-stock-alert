@@ -29,6 +29,7 @@ jobs:
       NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
       MAIL_TO: ${{ secrets.MAIL_TO }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      STRATEGY_POLICY_HMAC_KEY: ${{ secrets.STRATEGY_POLICY_HMAC_KEY }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -58,6 +59,16 @@ jobs:
             python main.py daily --limit ${{ github.event.inputs.limit }} $FORCE
           else
             python main.py daily $FORCE
+          fi
+      - name: 실패 시 GitHub 실행 로그 링크 알림
+        if: failure()
+        shell: bash
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            printf '{"text":"🚨 미국주식 아침 예약 실행 실패 · 실패 단계와 로그: <%s|GitHub Actions 실행 기록>"}' "$RUN_URL" | curl -fsS --max-time 15 -X POST -H "Content-Type: application/json" --data-binary @- "$SLACK_WEBHOOK_URL" || true
+          else
+            echo "::warning::SLACK_WEBHOOK_URL is empty; no delivery channel for workflow failure"
           fi
       - name: 기록 저장 (저장소 활동 유지)
         if: always()

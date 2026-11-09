@@ -63,7 +63,7 @@ surge = today[today["판정"] == "급등 · 추격 주의"].copy()
 mine = today[today["가격대"] == "내 보유"].copy()
 ref = today[today["판정"] == "참고"].copy()
 
-tabs = st.tabs(["오늘", "가격대별", "예산 계산기", "내 보유", "종목 상세", "성적표"])
+tabs = st.tabs(["오늘", "가격대별", "예산 계산기", "내 보유", "종목 상세", "성적표", "운영 점검"])
 
 # 1 오늘
 with tabs[0]:
@@ -174,3 +174,41 @@ with tabs[5]:
             st.dataframe(done.groupby(col)["r5"].agg(건수="count", 평균="mean").round(2))
 
 st.caption("규칙에 따른 검토 후보이며 투자 판단과 책임은 본인에게 있습니다.")
+
+# 7 운영 상태
+with tabs[6]:
+    st.subheader("운영 상태 · 마지막 실행 점검")
+    st.caption("GitHub Actions 실제 실행 결과가 아니라, 앱 데이터에 저장된 단계별 증거입니다.")
+    try:
+        from operations_health import read_health
+        report = read_health(Store())
+    except Exception as exc:
+        report = {}
+        st.error("운영 기록 조회 실패: " + str(exc)[:160])
+    if not report:
+        st.warning("운영 점검 데이터 없음 · 개선 코드 반영 후 정기 실행이 필요합니다.")
+    else:
+        state = report.get("state")
+        label = {"ok": "정상", "failed": "일부/전체 실패", "incomplete": "검증 미완료"}.get(state, "확인 필요")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("마지막 실행 상태", label)
+        c2.metric("실행 구분", report.get("kind") or "—")
+        c3.metric("실행 기록 시각", (report.get("at") or "—")[-16:])
+        if state == "failed":
+            st.error("실패 단계: " + ", ".join(report.get("failed") or [report.get("stage") or "미상"]))
+        elif state == "incomplete":
+            st.warning("검증 누락: " + ", ".join(report.get("missing") or report.get("not_checked") or []))
+        elif state == "ok":
+            st.success("수집된 실행 단계 점검을 통과했습니다. 실제 기기 수신까지 증명하는 것은 아닙니다.")
+        rows = [
+            {"단계": name, "결과": "통과" if part.get("ok") is True else "실패" if part.get("ok") is False else "미확인",
+             "설명": part.get("detail", "")}
+            for name, part in report.get("checks", {}).items()
+        ]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        with st.expander("오류 상세 및 이전 실행"):
+            st.code((report.get("error") or "기록된 오류 없음")[-1000:])
+            st.json(report.get("previous_run") or {})
+        st.caption("세부 실패 원인은 GitHub Actions 실행 로그와 교차 확인하세요.")
+    st.link_button("GitHub 예약 실행 로그", "https://github.com/skih4741-png/us-stock-alert/actions")
