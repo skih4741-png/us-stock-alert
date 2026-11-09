@@ -9,6 +9,7 @@ from pathlib import Path
 import config
 import prices
 import universe
+from validation.data_quality import clean_history
 from validation.portfolio import simulate_portfolio
 from validation.compare_strategies import STRATEGIES
 
@@ -24,6 +25,7 @@ def main():
     u = u.assign(dv=u["price"].fillna(0) * u["volume"].fillna(0))
     names = list(u.sort_values("dv", ascending=False).head(args.tickers)["yf_ticker"])
     history = prices.download_history(["SPY"] + names, period=("5y" if args.years <= 3 else "10y" if args.years <= 8 else "max"))
+    history, rejected = clean_history(history, min_bars=260)
     spy = history.pop("SPY", None)
     if spy is None or len(spy) < 260:
         raise SystemExit("SPY history unavailable. No statistics produced.")
@@ -33,7 +35,7 @@ def main():
         "source": "Yahoo Finance via yfinance (as served at execution time)",
         "universe": "current top dollar-volume listed shares: SURVIVORSHIP BIAS",
         "verified_oos": False,
-        "settings": {"tickers_requested": len(names), "tickers_received": len(history),
+        "settings": {"tickers_requested": len(names), "tickers_received": len(history), "data_rejected": rejected,
                      "years": args.years, "cost_each_side": 0.0035,
                      "starting_cash": 10000, "max_positions": 5},
         "results": results,
