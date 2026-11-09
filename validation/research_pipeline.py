@@ -27,20 +27,30 @@ from validation.diagnostic_report import render
 def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
     membership = read_membership_csv(universe_csv) if universe_csv else None
     if membership is not None:
-        names = membership.tickers
+        candidates = membership.tickers
     else:
         u, _ = universe.load_universe(cfg, include_etf=False)
         u = u.assign(dv=u["price"].fillna(0) * u["volume"].fillna(0))
-        names = list(u.sort_values("dv", ascending=False).head(tickers)["yf_ticker"])
-    if not names:
+        # Oversample active names, then choose the first N with usable
+        # bars in the documented, deterministic current-liquidity order.
+        # This does NOT fix survivorship bias.
+        candidates = list(u.sort_values("dv", ascending=False).head(max(tickers * 3, tickers))["yf_ticker"])
+    if not candidates:
         raise ValueError("Empty research ticker selection")
     period = "5y" if years <= 3 else "10y" if years <= 8 else "max"
-    history = prices.download_history(["SPY"] + names, period=period, fallback=True)
-    history, rejected = clean_history(history, min_bars=260)
-    spy = history.pop("SPY", None)
-    missing = sorted(set(names) - set(history))
-    if spy is None or missing or rejected:
+    raw = prices.download_history(["SPY"] + candidates, period=period, fallback=True)
+    valid, rejected = clean_history(raw, min_bars=260)
+    spy = valid.pop("SPY", None)
+    if membership is None:
+        names = [t for t in candidates if t in valid][:tickers]
+    else:
+        names = candidates
+    missing = sorted(set(names) - set(valid))
+    if spy is None or missing or len(names) < (tickers if membership is None else len(candidates)):
         raise ValueError(f"Data coverage incomplete: missing={missing}, rejected={rejected}, SPY={spy is not None}")
+    history = {t: valid[t] for t in names}
+    excluded_candidates = {t: rejected.get(t, ["download_unavailable"])
+                           for t in candidates if t not in valid}
     digest = hashlib.sha256()
     for ticker in sorted(history):
         digest.update(ticker.encode())
@@ -49,10 +59,13 @@ def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
     return history, spy, membership, {
         "source": "Yahoo Finance via yfinance",
         "selected_tickers": names,
+        "excluded_candidate_tickers": excluded_candidates,
+        "candidate_pool_size": len(candidates),
         "downloaded_tickers": len(history),
         "price_snapshot_sha256": digest.hexdigest(),
         "historical_universe_verified": False,
         "coverage_complete_for_requested_tickers": True,
+        "selected_after_history_availability_filter": membership is None,
         "membership_csv_used": membership is not None,
         "limitations": [
             "Current listed ticker selection has survivorship bias when no as-of membership is supplied",
