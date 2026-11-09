@@ -7,6 +7,8 @@ on:
       - "setups.py"
       - "backtest.py"
       - "validation/**"
+      - "execution_rules.py"
+      - "simtrade.py"
       - "tests/test_strategy_validation.py"
       - ".github/workflows/strategy-validation-tests.yml"
   workflow_dispatch:
@@ -24,6 +26,6 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Compile validation modules
-        run: python -m compileall -q performance.py setups.py validation tests/test_strategy_validation.py
+        run: python -m compileall -q performance.py setups.py execution_rules.py backtest.py simtrade.py validation tests/test_strategy_validation.py
       - name: Run regression tests
         run: python -m unittest discover -s tests -p 'test_strategy_validation.py' -v
