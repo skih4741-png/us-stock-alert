@@ -207,6 +207,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     if not st:
         return None
     cfg = st["cfg"]
+    verified_policy = store.get_blob("validated_strategy_policy") or None
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
@@ -371,7 +372,8 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             reason = setups.paper_gate(p)
             if reason:
                 reject(reason); continue
-            policy_ok, policy_why = strategy_policy.allowed(p.get("setup"), enabled=(cfg.get("validated_strategy_mode") is True))
+            policy_ok, policy_why = strategy_policy.allowed(p.get("setup"), enabled=(cfg.get("validated_strategy_mode") is True),
+                                                      policy_text=verified_policy)
             if not policy_ok:
                 reject(policy_why); continue
             led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
