@@ -2272,10 +2272,24 @@
       '<a class="btn ghost" href="#/ask">AI에게 묻기</a><a class="btn ghost" href="#/profile">투자 성향 인터뷰' + (S.profile && Object.keys(S.profile).length ? " (다시 하기)" : "") + "</a>";
   }
 
+  function weeklyOperations(runs) {
+    const now = Date.now(), after = now - 7 * 864e5;
+    const recent = runs.filter(r => r.kind === "daily" && Number.isFinite(Date.parse(r.at || "")) &&
+      Date.parse(r.at) >= after && Date.parse(r.at) <= now);
+    const successes = recent.filter(r => r.ok === true).length;
+    const warnings = recent.filter(r => r.ok === "warn").length;
+    const fails = recent.filter(r => r.ok === false).length;
+    const took = recent.map(r => Number(r.took)).filter(x => Number.isFinite(x) && x >= 0 && x <= 86400);
+    return { total: recent.length, successes, warnings, fails,
+      rate: recent.length ? Math.round(successes / recent.length * 1000) / 10 : null,
+      average: took.length ? Math.round(took.reduce((a, b) => a + b, 0) / took.length) : null };
+  }
+
   function viewOperations() {
     const runs = runsOf();
     const r = runs.find(x => x.kind === "daily");
     const late = staleInfo();
+    const week = weeklyOperations(runs);
     const state = !r ? "기록 없음" : late ? "실행 지연/미확인" : r.ok === true ? "정상" : r.ok === false ? "실패" : "점검 필요";
     const tone = !r || late ? "warn" : r.ok === true ? "good" : r.ok === false ? "bad" : "warn";
     const required = ["메일·슬랙 발송", "앱 데이터 저장", "앱 데이터 읽기 검증", "자동 모의투자", "모의매매 저장 상태"];
@@ -2287,7 +2301,20 @@
       '<div class="small">실행 시각: ' + esc(r ? whenText(r.at) : "기록 없음") + '</div>' +
       (late ? '<div class="msg note">예정된 실행 시각 이후 새로운 기록이 없습니다.</div>' : "") +
       '<div class="small">발송 요청 처리와 수신 기기 도착은 서로 다른 검증입니다.</div></div>' +
+      '<h2>최근 7일 운영 지표</h2><div class="card"><div class="row between"><b>실행 성공률</b><b>' +
+      (week.rate == null ? "자료 없음" : week.rate.toFixed(1) + "%") + '</b></div>' +
+      '<div class="row between"><span>평균 실행 시간</span><b>' +
+      (week.average == null ? "자료 없음" : week.average + "초") + '</b></div>' +
+      '<div class="small">실행 ' + week.total + '회 · 정상 ' + week.successes + '회 · 경고 ' +
+      week.warnings + '회 · 실패 ' + week.fails + '회</div>' +
+      '<div class="small">기록된 아침 실행 기준 · 예약됐지만 시작하지 않은 실행은 제외</div></div>' +
       '<h2>핵심 기능 점검</h2><div class="card"><ul class="checks">' + audit.map(checkLine).join("") + '</ul></div>' +
+      '<h2>실패 단계 및 복구 안내</h2><div class="card">' +
+      (audit.filter(x => x.ok !== true).length ?
+        audit.filter(x => x.ok !== true).map(x => '<div class="small"><b>' + esc(x.n) + '</b> · ' +
+          esc(x.n === "앱 데이터 읽기 검증" ? "안전한 앱 데이터 재검증·복구 대상" :
+            "자동 재실행 금지 · 로그 확인 후 수동 점검") + '</div>').join("") :
+        '<div class="small">현재 미통과 핵심 단계 없음</div>') + '</div>' +
       '<a class="btn ghost" href="' + esc(link) + '" target="_blank" rel="noopener noreferrer">GitHub 실행 로그 확인</a>' +
       '<h2>최근 실행 기록</h2>' + (runs.length ? runs.slice(0, 8).map((x, i) => runCard(x, i === 0)).join("") :
       emp("🧾", "아직 실행 기록이 없어요", "첫 예약 실행 이후 증거가 저장됩니다.", "#/home", "홈으로")) +

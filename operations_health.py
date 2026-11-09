@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta, timezone
 
 CRITICAL = ("메일·슬랙 발송", "앱 데이터 저장", "자동 모의투자")
 
@@ -77,3 +78,90 @@ def verify_daily_artifacts(store, expected_date: str, *, require_paper: bool = T
     except (ValueError, TypeError, OSError) as e:
         result.append({"n": "모의매매 저장 상태", "ok": False, "d": str(e)[:200]})
     return result
+
+
+SAFE_RETRY_STEPS = {"앱 데이터 읽기 검증"}
+MANUAL_ONLY_STEPS = {"메일·슬랙 발송", "자동 모의투자", "모의매매 저장 상태"}
+
+
+def recovery_plan(checks: list[dict]) -> list[dict]:
+    """Classify failed checks. Never replay notifications, trading or paper state."""
+    out = []
+    for item in checks:
+        if item.get("ok") is not False:
+            continue
+        name = str(item.get("n") or "")
+        safe = name in SAFE_RETRY_STEPS
+        out.append({
+            "step": name,
+            "mode": "auto_safe" if safe else "manual",
+            "message": ("앱 데이터 원본으로만 재저장·읽기 확인" if safe
+                        else "자동 재실행 차단: 중복 알림·중복 체결 방지"),
+        })
+    return out
+
+
+def repair_daily_blob(store, expected_date: str, canonical_payload: str) -> dict:
+    """One idempotent repair of today's saved app blob, never a strategy re-run.
+
+    Do not overwrite a newer report; do not re-run notification or paper trade.
+    A failed readback or a conflicting newer date requires manual intervention.
+    """
+    try:
+        canonical = json.loads(canonical_payload)
+        if canonical.get("date") != expected_date or "summary" not in canonical:
+            return {"status": "blocked", "reason": "검증되지 않은 앱 데이터 원본"}
+        old = store.get_blob("daily")
+        if old:
+            try:
+                previous = json.loads(old)
+                date = str(previous.get("date") or "")
+                if date > expected_date:
+                    return {"status": "blocked", "reason": "더 최신 앱 데이터를 덮어쓸 수 없음"}
+            except (ValueError, TypeError, AttributeError):
+                return {"status": "blocked", "reason": "기존 앱 데이터가 손상되어 수동 확인 필요"}
+        if old == canonical_payload:
+            return {"status": "verified", "reason": "기존 저장 내용 동일"}
+        store.put_blob("daily", canonical_payload)
+        if store.get_blob("daily") == canonical_payload:
+            return {"status": "repaired", "reason": "동일 기준일 앱 데이터만 복구"}
+        return {"status": "failed", "reason": "재저장 후 읽기 검증 실패"}
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
+        return {"status": "failed", "reason": str(exc)[:200]}
+
+
+def weekly_metrics(runs: list[dict], now: datetime | None = None,
+                   *, days: int = 7, kind: str = "daily") -> dict:
+    """Rolling 7-day executions, not scheduled-day uptime (missed runs unknown)."""
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    start = now - timedelta(days=days)
+    selected = []
+    for r in runs:
+        if r.get("kind") != kind:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(r.get("at", "")).replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                continue
+        except ValueError:
+            continue
+        if start <= timestamp <= now:
+            selected.append(r)
+    success = sum(r.get("ok") is True for r in selected)
+    partial = sum(r.get("ok") == "warn" for r in selected)
+    failed = sum(r.get("ok") is False for r in selected)
+    durations = [float(r["took"]) for r in selected
+                 if isinstance(r.get("took"), (int, float))
+                 and not isinstance(r.get("took"), bool)
+                 and 0 <= r["took"] <= 86400]
+    total = len(selected)
+    return {
+        "period_days": days, "total": total, "success": success,
+        "partial": partial, "failed": failed,
+        "success_rate_pct": round(100*success/total, 1) if total else None,
+        "mean_seconds": round(sum(durations)/len(durations), 1) if durations else None,
+        "timed_runs": len(durations),
+        "note": "기록된 실행 기준. 예약됐지만 시작되지 않은 실행은 이 통계에 포함되지 않음",
+    }

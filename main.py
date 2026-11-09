@@ -69,6 +69,12 @@ def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", st
         previous = operations_health.read_health(store)
         report = operations_health.build_health(kind=kind, at=at, checks=list(CHECKS),
                                                  success=bool(ok), error=err, stage=stage, previous=previous)
+        try:
+            recent = json.loads(store.get_blob("perf") or "{}").get("runs") or []
+            report["weekly"] = operations_health.weekly_metrics(recent, config.now_kst())
+        except (ValueError, TypeError, OSError) as metrics_error:
+            report["weekly_error"] = str(metrics_error)[:160]
+        report["recovery"] = operations_health.recovery_plan(list(CHECKS))
         operations_health.save_health(store, report)
         if ok and kind == "daily" and report["state"] == "failed":
             failures = " / ".join(report["failed"])[:250]
@@ -478,7 +484,16 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             chk("보유 종목 가격", (not miss) if app.get("holdings") else None,
                 (f"{len(app['holdings'])}개 모두 받음" if not miss else "못 받음: " + ", ".join(miss[:6])) if app.get("holdings") else "보유 종목이 없어요")
             chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")), f"메일 {'O' if sent.get('mail') else 'X'} · 슬랙 {'O' if sent.get('slack') else 'X'}")
-            for audit in operations_health.verify_daily_artifacts(store, today_iso):
+            audited = operations_health.verify_daily_artifacts(store, today_iso)
+            app_audit = next((x for x in audited if x["n"] == "앱 데이터 읽기 검증"), None)
+            if app_audit is not None and app_audit["ok"] is False:
+                repair = operations_health.repair_daily_blob(
+                    store, today_iso, appdata.dumps(app))
+                chk("앱 데이터 안전 복구", repair["status"] in ("repaired", "verified"),
+                    repair["status"] + " · " + repair["reason"])
+                if repair["status"] in ("repaired", "verified"):
+                    audited = operations_health.verify_daily_artifacts(store, today_iso)
+            for audit in audited:
                 chk(audit["n"], audit["ok"], audit["d"])
             s = app["summary"]
             changed = [f"매수 후보 {s['buy']}개 (신규 {s['new']})", f"매도 신호 {s['sell']}개", f"시장 국면 {REGIME[mk['regime']]}"

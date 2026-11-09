@@ -200,6 +200,28 @@ with tabs[6]:
             st.warning("검증 누락: " + ", ".join(report.get("missing") or report.get("not_checked") or []))
         elif state == "ok":
             st.success("수집된 실행 단계 점검을 통과했습니다. 실제 기기 수신까지 증명하는 것은 아닙니다.")
+        try:
+            from operations_health import weekly_metrics
+            perf_raw = Store().get_blob("perf")
+            recent_runs = json.loads(perf_raw or "{}").get("runs") or []
+            weekly = weekly_metrics(recent_runs)
+            st.markdown("#### 최근 7일 운영 성과")
+            a, b, c = st.columns(3)
+            a.metric("실행 성공률", "자료 없음" if weekly["success_rate_pct"] is None else str(weekly["success_rate_pct"]) + "%")
+            b.metric("평균 실행 시간", "자료 없음" if weekly["mean_seconds"] is None else str(weekly["mean_seconds"]) + "초")
+            c.metric("경고·실패", str(weekly["partial"] + weekly["failed"]) + "회")
+            st.caption("기록된 아침 실행 " + str(weekly["total"]) + "회 기준. 시작하지 못한 예약 실행은 제외됩니다.")
+        except (ValueError, TypeError, OSError) as exc:
+            st.warning("주간 운영 통계 조회 실패: " + str(exc)[:160])
+        st.markdown("#### 자동 복구 및 점검 안내")
+        recovery = report.get("recovery") or []
+        if recovery:
+            st.dataframe(pd.DataFrame([
+                {"단계": item.get("step"), "처리": "자동 안전 복구 대상" if item.get("mode") == "auto_safe" else "수동 확인",
+                 "설명": item.get("message")} for item in recovery
+            ]), hide_index=True, use_container_width=True)
+        else:
+            st.caption("현재 기록된 복구 대상이 없습니다.")
         rows = [
             {"단계": name, "결과": "통과" if part.get("ok") is True else "실패" if part.get("ok") is False else "미확인",
              "설명": part.get("detail", "")}

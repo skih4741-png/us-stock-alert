@@ -328,5 +328,117 @@ class TestSignedPromotion(unittest.TestCase):
             )
 
 
+class TestSafeRecoveryAndWeeklyStatistics(unittest.TestCase):
+    def test_weekly_success_rate_and_duration(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 9, 9, tzinfo=timezone.utc)
+        runs = [
+            {"kind": "daily", "at": "2026-11-09T07:00:00+00:00", "ok": True, "took": 40},
+            {"kind": "daily", "at": "2026-11-08T07:00:00+00:00", "ok": "warn", "took": 100},
+            {"kind": "daily", "at": "2026-11-07T07:00:00+00:00", "ok": False, "took": 160},
+            {"kind": "intraday", "at": "2026-11-09T08:00:00+00:00", "ok": True, "took": 4},
+            {"kind": "daily", "at": "2026-10-20T07:00:00+00:00", "ok": True, "took": 99},
+        ]
+        m = operations_health.weekly_metrics(runs, now)
+        self.assertEqual(m["total"], 3)
+        self.assertEqual(m["success"], 1)
+        self.assertEqual(m["failed"], 1)
+        self.assertEqual(m["partial"], 1)
+        self.assertEqual(m["success_rate_pct"], 33.3)
+        self.assertEqual(m["mean_seconds"], 100.0)
+
+    def test_missing_timestamps_do_not_count_as_success(self):
+        from datetime import datetime, timezone
+        m = operations_health.weekly_metrics(
+            [{"kind": "daily", "at": "2026-11-09T07:00", "ok": True, "took": 8}],
+            datetime(2026, 11, 9, 9, tzinfo=timezone.utc))
+        self.assertIsNone(m["success_rate_pct"])
+
+    def test_restore_daily_snapshot_without_trading_or_notification(self):
+        store = _MemoryStore()
+        source = json.dumps({"date": "2026-11-09", "summary": {"buy": 1}})
+        out = operations_health.repair_daily_blob(store, "2026-11-09", source)
+        self.assertEqual(out["status"], "repaired")
+        self.assertEqual(store.get_blob("daily"), source)
+        self.assertEqual(operations_health.repair_daily_blob(store, "2026-11-09", source)["status"], "verified")
+
+    def test_newer_data_cannot_be_overwritten(self):
+        store = _MemoryStore()
+        store.put_blob("daily", json.dumps({"date": "2026-11-10", "summary": {}}))
+        source = json.dumps({"date": "2026-11-09", "summary": {}})
+        self.assertEqual(operations_health.repair_daily_blob(store, "2026-11-09", source)["status"], "blocked")
+
+    def test_unsafe_steps_cannot_be_automatically_replayed(self):
+        p = operations_health.recovery_plan([
+            {"n": "자동 모의투자", "ok": False},
+            {"n": "메일·슬랙 발송", "ok": False},
+            {"n": "앱 데이터 읽기 검증", "ok": False},
+        ])
+        self.assertEqual([x["mode"] for x in p], ["manual", "manual", "auto_safe"])
+
+
+class TestLegacyPaperRecords(unittest.TestCase):
+    def test_review_supports_null_risk_per_share_without_deleting_trade(self):
+        store = _MemoryStore()
+        st = simtrade.start(store, "2026-10-01", budget=1000)
+        st["closed"] = [{
+            "t": "AAA", "qty": 1, "entry": 100.0, "date": "2026-10-10",
+            "exit": 105.0, "exit_date": "2026-10-15",
+            "pnl": 4.0, "ret": 4.0, "why": "legacy",
+            "risk_per_share": None, "setup": None,
+        }]
+        result = simtrade.review(st)
+        self.assertEqual(result["n"], 1)
+        self.assertEqual(result["r_n"], 0)
+        self.assertIsNone(result["avg_r"])
+        self.assertEqual(result["trades"][0]["pnl"], 4.0)
+
+    def test_summary_supports_null_signal_count(self):
+        store = _MemoryStore()
+        st = simtrade.start(store, "2026-10-01", budget=1000)
+        st["closed"] = [{
+            "t": "AAA", "qty": 1, "entry": 100.0, "date": "2026-10-10",
+            "exit": 105.0, "exit_date": "2026-10-15",
+            "pnl": 4.0, "ret": 4.0, "why": "legacy",
+            "risk_per_share": None,
+        }]
+        result = simtrade.summary(st, {"d5": {"n": None, "excess": None}})
+        self.assertEqual(result["review"]["r_n"], 0)
+        self.assertFalse(result["passed"])
+
+
+class TestWeeklyOpsStats(unittest.TestCase):
+    def test_weekly_rate_excludes_warn_and_unknown_duration(self):
+        from datetime import datetime, timezone
+        now = datetime.fromisoformat("2026-11-09T08:00:00+00:00")
+        records = [
+            {"kind": "daily", "at": "2026-11-08T00:00:00+00:00", "ok": True, "took": 100},
+            {"kind": "daily", "at": "2026-11-07T00:00:00+00:00", "ok": "warn", "took": 200},
+            {"kind": "daily", "at": "2026-11-06T00:00:00+00:00", "ok": False, "took": 300},
+            {"kind": "weekly", "at": "2026-11-05T00:00:00+00:00", "ok": True, "took": 500},
+            {"kind": "daily", "at": "2026-10-01T00:00:00+00:00", "ok": True, "took": 50},
+        ]
+        result = operations_health.weekly_metrics(records, now)
+        self.assertEqual(result["total"], 3)
+        self.assertEqual(result["success_rate_pct"], 33.3)
+        self.assertEqual(result["mean_seconds"], 200)
+        self.assertEqual(result["partial"], 1)
+        self.assertEqual(result["failed"], 1)
+
+    def test_safe_repair_rejects_newer_snapshot_and_never_runs_trading(self):
+        store = _MemoryStore()
+        store.put_blob("daily", json.dumps({"date": "2026-11-10", "summary": {"buy": 2}}))
+        desired = json.dumps({"date": "2026-11-09", "summary": {"buy": 1}})
+        result = operations_health.repair_daily_blob(store, "2026-11-09", desired)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(json.loads(store.get_blob("daily"))["date"], "2026-11-10")
+        recovery = operations_health.recovery_plan([
+            {"n": "자동 모의투자", "ok": False},
+            {"n": "앱 데이터 읽기 검증", "ok": False},
+        ])
+        self.assertEqual(recovery[0]["mode"], "manual")
+        self.assertEqual(recovery[1]["mode"], "auto_safe")
+
+
 if __name__ == "__main__":
     unittest.main()
