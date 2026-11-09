@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 import committee
+import execution_rules
 import ledger
 import prices
 import setups
@@ -223,11 +224,12 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if d <= p["date"]:
                 continue
             op, hi, lo, cl = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
-            seen = p.get("seen_to", "")[:10] >= d   # 장중에 5분봉으로 이미 확인한 날은 손절·목표를 다시 보지 않아요 (순서를 모르니까)
-            if not seen and lo <= p["stop"]:
-                _close(st, p, d, min(op, p["stop"]) * (1 - SLIP), "손절선" if not p["half"] else "본전 손절"); closed = True; break
-            if not seen and not p["half"] and hi >= p["target"] * (1 + TOUCH):
-                px = max(op, p["target"])
+            seen = p.get("seen_to", "")[:10] >= d   # 장중에 이미 확인한 날
+            exit_decision = execution_rules.exit_fill(op, hi, lo, p["stop"], p["target"], half=p["half"], slip=SLIP, touch=TOUCH)
+            if not seen and (exit_decision is not None and exit_decision.reason == "stop"):
+                _close(st, p, d, exit_decision.price, "손절선" if not p["half"] else "본전 손절"); closed = True; break
+            if not seen and exit_decision is not None and exit_decision.reason == "target":
+                px = exit_decision.price
                 if p["qty"] >= 2:
                     half = dict(p, qty=p["qty"] // 2)
                     _close(st, half, d, px, "1차 목표 (절반)")
@@ -248,10 +250,11 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if ld > p["date"]:
                 last = df.iloc[-1]
                 op_, hi_, lo_ = float(last["Open"]), float(last["High"]), float(last["Low"])
-                if lo_ <= p["stop"]:
-                    _close(st, p, ld, min(op_, p["stop"]) * (1 - SLIP), ("손절선" if not p["half"] else "본전 손절") + " · 일봉 백스톱"); closed = True
-                elif not p["half"] and hi_ >= p["target"] * (1 + TOUCH):
-                    px_ = max(op_, p["target"])
+                decision_ = execution_rules.exit_fill(op_, hi_, lo_, p["stop"], p["target"], half=p["half"], slip=SLIP, touch=TOUCH)
+                if decision_ is not None and decision_.reason == "stop":
+                    _close(st, p, ld, decision_.price, ("손절선" if not p["half"] else "본전 손절") + " · 일봉 백스톱"); closed = True
+                elif decision_ is not None and decision_.reason == "target":
+                    px_ = decision_.price
                     if p["qty"] >= 2:
                         half = dict(p, qty=p["qty"] // 2)
                         _close(st, half, ld, px_, "1차 목표 (절반) · 일봉 백스톱")
@@ -288,8 +291,8 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         if op > o["skip_above"]:
             st["log"].append(f"{d} 취소 {o['t']} · 시작가 {op:.2f}가 추격 금지선 {o['skip_above']:.2f} 위")
             _ticket(st, o["t"], o["signal_date"], result="안 냄 (추격 금지)", day=d, limit=o["limit"], qty=o["qty"])
-        elif lo <= o["limit"] * (1 - TOUCH):
-            px = min(op, o["limit"])
+        elif execution_rules.entry_fill(op, lo, o["limit"], o["skip_above"], o["stop"], TOUCH) is not None:
+            px = execution_rules.entry_fill(op, lo, o["limit"], o["skip_above"], o["stop"], TOUCH).price
             check = trade_guard.validate_buy(o, trade_guard.sim_account(st, guard), cfg, px)
             if not check["ok"]:
                 _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + check["reasons"][0] + ")", day=d)
@@ -445,26 +448,28 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
     times = sorted({i for m in today.values() for i in m.index if i + timedelta(minutes=5) <= now_utc})
     def exits(p, row, day, stamp, fresh=False):
         op, hi, lo = (float(row[k]) for k in ("Open", "High", "Low"))
-        if lo <= p["stop"]:
-            px = (p["stop"] if fresh else min(op, p["stop"])) * (1 - SLIP)
+        decision = execution_rules.exit_fill(
+            op, hi, lo, p["stop"], p["target"],
+            half=p["half"], fresh=fresh, slip=SLIP, touch=TOUCH,
+        )
+        if decision is None:
+            return False
+        if decision.reason == "stop":
             why = ("손절선" if not p["half"] else "본전 손절") + f" ({stamp} ET)"
-            _close(st, p, day, px, why)
+            _close(st, p, day, decision.price, why)
             events.append(f"매도 {p['t']} {p['qty']}주 · {why}")
             return True
-        # 매수 봉의 고가는 매수 전에 나왔을 수 있어 목표 체결로 가정하지 않아요.
-        if not fresh and not p["half"] and hi >= p["target"] * (1 + TOUCH):
-            px = max(op, p["target"])
-            if p["qty"] >= 2:
-                half = dict(p, qty=p["qty"] // 2)
-                _close(st, half, day, px, f"1차 목표 (절반, {stamp} ET)")
-                p["qty"] -= half["qty"]
-                p["half"], p["stop"] = True, p["entry"]
-                events.append(f"매도 {p['t']} {half['qty']}주 · 1차 목표 절반")
-            else:
-                _close(st, p, day, px, f"1차 목표 ({stamp} ET)")
-                events.append(f"매도 {p['t']} {p['qty']}주 · 1차 목표")
-                return True
-        return False
+        px = decision.price
+        if p["qty"] >= 2:
+            half = dict(p, qty=p["qty"] // 2)
+            _close(st, half, day, px, f"1차 목표 (절반, {stamp} ET)")
+            p["qty"] -= half["qty"]
+            p["half"], p["stop"] = True, p["entry"]
+            events.append(f"매도 {p['t']} {half['qty']}주 · 1차 목표 절반")
+            return False
+        _close(st, p, day, px, f"1차 목표 ({stamp} ET)")
+        events.append(f"매도 {p['t']} {p['qty']}주 · 1차 목표")
+        return True
 
     for i in times:
         ts, stamp = i.strftime("%Y-%m-%d %H:%M"), i.strftime("%H:%M")
@@ -497,9 +502,10 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
                 st["log"].append(f"{day} 취소 {o['t']} · {reason}")
                 events.append(f"{o['t']} 주문 안 냄 · {reason}")
                 continue
-            if float(row["Low"]) > o["limit"] * (1 - TOUCH):
+            fill = execution_rules.entry_fill(float(row["Open"]), float(row["Low"]), o["limit"], o["skip_above"], o["stop"], TOUCH)
+            if fill is None:
                 keep.append(o); continue
-            px = min(float(row["Open"]), o["limit"])
+            px = fill.price
             cost = o["qty"] * px * (1 + FEE)
             check = trade_guard.validate_buy(o, trade_guard.sim_account(st, guard), st["cfg"], px)
             if not check["ok"]:
