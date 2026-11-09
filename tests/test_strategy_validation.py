@@ -14,7 +14,10 @@ import simtrade
 import config
 import operations_health
 from validation.oos_review import holdout_review
-from strategy_policy import allowed
+from validation.policy_publisher import compose_policy
+from datetime import date
+from unittest.mock import patch
+from strategy_policy import allowed, sign_policy
 from validation.diagnostics import trade_attribution
 from validation.historical_universe import read_membership_csv
 from validation.research_pipeline import acquire
@@ -284,6 +287,45 @@ class TestOOSReview(unittest.TestCase):
             review = holdout_review({}, spy, {}, None)
         self.assertEqual(review["eligible_for_paper_review"], [])
         self.assertTrue(all(not v["eligible"] for v in review["decisions"].values()))
+
+
+class TestSignedPromotion(unittest.TestCase):
+    def test_unsigned_or_tampered_policy_fails_closed(self):
+        payload = {
+            "policy_version": 1, "issued_on": "2026-11-09", "valid_until": "2026-11-23",
+            "independent_oos_verified": True, "historical_universe_verified": True,
+            "forward_paper_verified": True, "source_dataset_sha256": "a"*64,
+            "approved_strategies": ["breakout"],
+        }
+        secret = "a-long-32-character-test-secret-key-12345"
+        signed = sign_policy(payload, secret)
+        with patch.dict("os.environ", {"STRATEGY_POLICY_HMAC_KEY": secret}):
+            self.assertTrue(allowed("돌파", enabled=True, today=date(2026, 11, 10),
+                                    policy_text=json.dumps(signed))[0])
+            signed["approved_strategies"] = ["breakout", "pullback"]
+            self.assertFalse(allowed("눌림목", enabled=True, today=date(2026, 11, 10),
+                                     policy_text=json.dumps(signed))[0])
+
+    def test_old_or_expired_policy_fails_closed(self):
+        secret = "another-long-32-character-secret-key-123"
+        base = {
+            "policy_version": 1, "issued_on": "2026-10-01", "valid_until": "2026-10-15",
+            "independent_oos_verified": True, "historical_universe_verified": True,
+            "forward_paper_verified": True, "source_dataset_sha256": "b"*64,
+            "approved_strategies": ["breakout"]
+        }
+        with patch.dict("os.environ", {"STRATEGY_POLICY_HMAC_KEY": secret}):
+            self.assertFalse(allowed("돌파", enabled=True, today=date(2026, 11, 9),
+                                     policy_text=json.dumps(sign_policy(base, secret)))[0])
+
+    def test_no_approved_strategy_from_unverified_inputs(self):
+        with self.assertRaises(ValueError):
+            compose_policy(
+                {"independent_oos_verified": False},
+                {"metrics": {}}, {"verified": True, "days": 100},
+                today=date(2026, 11, 9),
+                secret="very-long-32-character-valid-secret-123",
+            )
 
 
 if __name__ == "__main__":
