@@ -6,10 +6,14 @@ import pandas as pd
 
 import performance
 from validation.compare_strategies import metrics, net_return, signals
-from validation.portfolio import _risk_metrics
+from validation.portfolio import _risk_metrics, opening_regimes
 from validation.promotion import assess_strategy
 from execution_rules import entry_fill, exit_fill
 from strategy_policy import allowed
+from validation.diagnostics import trade_attribution
+from validation.historical_universe import read_membership_csv
+from pathlib import Path
+import tempfile
 
 
 class TestMetrics(unittest.TestCase):
@@ -92,6 +96,48 @@ class TestFailClosedGate(unittest.TestCase):
     def test_missing_metrics_fail_closed(self):
         self.assertFalse(assess_strategy({}, independent_oos=True,
                                          verified_universe=True)["eligible"])
+
+
+class TestCausalMarketFilter(unittest.TestCase):
+    def test_current_close_cannot_change_current_open_regime(self):
+        idx = pd.bdate_range("2023-01-01", periods=280)
+        spy = pd.DataFrame({"Close": [100 + i * 0.2 for i in range(len(idx))]}, index=idx)
+        baseline = opening_regimes(spy)
+        altered = spy.copy()
+        altered.iloc[-1, 0] = 1
+        changed = opening_regimes(altered)
+        self.assertEqual(baseline.iloc[-1], changed.iloc[-1])
+
+    def test_no_current_regime_at_first_observation(self):
+        idx = pd.bdate_range("2023-01-01", periods=3)
+        spy = pd.DataFrame({"Close": [100, 101, 102]}, index=idx)
+        self.assertTrue(pd.isna(opening_regimes(spy).iloc[0]))
+
+
+class TestAttribution(unittest.TestCase):
+    def test_exit_and_regime_diagnostics_use_closed_pnl(self):
+        d = trade_attribution([
+            {"ticker": "AAA", "reason": "stop", "regime": "bull", "pnl": -20},
+            {"ticker": "AAA", "reason": "target", "regime": "bull", "pnl": 30},
+        ])
+        self.assertEqual(d["regime"]["bull"]["trades"], 2)
+        self.assertEqual(d["regime"]["bull"]["profit_factor"], 1.5)
+        self.assertEqual(d["reason"]["stop"]["realized_pnl_usd"], -20)
+
+
+class TestHistoricalMembership(unittest.TestCase):
+    def test_membership_boundaries(self):
+        with tempfile.TemporaryDirectory() as td:
+            file = Path(td) / "membership.csv"
+            file.write_text(
+                "ticker,start_date,end_date\\nAAA,2020-01-01,2021-12-31\\n"
+                "BBB,2021-02-03,\\n", encoding="utf-8"
+            )
+            member = read_membership_csv(file)
+            self.assertTrue(member.includes("AAA", "2021-12-31"))
+            self.assertFalse(member.includes("AAA", "2022-01-01"))
+            self.assertTrue(member.includes("BBB", "2024-01-01"))
+            self.assertFalse(member.includes("CCC", "2024-01-01"))
 
 
 if __name__ == "__main__":
