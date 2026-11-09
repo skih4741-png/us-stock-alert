@@ -8,7 +8,9 @@ import performance
 from validation.compare_strategies import metrics, net_return, signals
 from validation.portfolio import _risk_metrics, opening_regimes, rank_signal_candidates
 from validation.promotion import assess_strategy
-from execution_rules import entry_fill, exit_fill
+from execution_rules import entry_fill, exit_fill, next_open_market_exit
+import simtrade
+import config
 from strategy_policy import allowed
 from validation.diagnostics import trade_attribution
 from validation.historical_universe import read_membership_csv
@@ -166,6 +168,71 @@ class TestReproducibleResearch(unittest.TestCase):
                    return_value={"SPY": frame, "AAA": frame}):
             with self.assertRaisesRegex(ValueError, "Data coverage incomplete"):
                 acquire({}, 2, 2, None)
+
+
+class _MemoryStore:
+    def __init__(self):
+        self.data = {}
+
+    def get_blob(self, key):
+        return self.data.get(key)
+
+    def put_blob(self, key, value):
+        self.data[key] = value
+
+
+class TestPaperExecutionCompatibility(unittest.TestCase):
+    def test_prior_close_exit_uses_next_open_and_no_future_prices(self):
+        dates = pd.bdate_range("2024-01-15", "2024-03-06")
+        prices_ = pd.DataFrame({
+            "Open": 110.0, "High": 112.0, "Low": 98.0,
+            "Close": 110.0, "Volume": 100000,
+        }, index=dates)
+        prices_.loc["2024-03-04", ["Open", "High", "Low", "Close"]] = [100, 110, 97, 100]
+        prices_.loc["2024-03-05", ["Open", "High", "Low", "Close"]] = [104, 110, 100, 105]
+        prices_.loc["2024-03-06", ["Open", "High", "Low", "Close"]] = [1, 2, 0.5, 1]
+        store = _MemoryStore()
+        st = simtrade.start(store, "2024-02-10", budget=1000)
+        st["checked"] = "2024-03-01"
+        st["cfg"]["stale_days"] = 100
+        st["cash"] = 900.0
+        st["positions"] = [{
+            "t": "AAA", "qty": 1, "entry": 100.0, "date": "2024-02-28",
+            "stop": 90.0, "target": 150.0, "peak": 150.0, "half": True,
+        }]
+        simtrade.save(store, st)
+        with patch("simtrade.prices.download_history", return_value={
+            "AAA": prices_, "SPY": prices_,
+        }):
+            first = simtrade.step(
+                store, [], "2024-03-04",
+                {"regime": "sideways", "rest_day": True}, "2024-03-04T20:00"
+            )
+            self.assertEqual(len(first["closed"]), 0)
+            self.assertEqual(len(first["positions"]), 1)
+            self.assertEqual(first["positions"][0]["scheduled_at"], "2024-03-04")
+            second = simtrade.step(
+                store, [], "2024-03-05",
+                {"regime": "sideways", "rest_day": True}, "2024-03-05T20:00"
+            )
+            self.assertEqual(len(second["closed"]), 1)
+            self.assertAlmostEqual(second["closed"][0]["exit"], 104 * (1-0.0015), places=3)
+            self.assertEqual(len(second["positions"]), 0)
+
+    def test_shared_market_exit_is_not_prior_close(self):
+        self.assertAlmostEqual(next_open_market_exit(120).price, 120 * 0.9985)
+
+
+class TestProductionDefaults(unittest.TestCase):
+    def test_verified_stock_alert_filter_is_off(self):
+        merged, warnings = config.merge_settings({})
+        self.assertEqual(merged["검증 전략만 표시"], "아니오")
+        self.assertEqual(warnings, [])
+
+    def test_verified_policy_missing_rejects_candidate(self):
+        from strategy_policy import allowed
+        ok, _ = allowed("돌파", enabled=True, policy_path=Path("/nonexistent-policy-for-test.json"))
+        self.assertFalse(ok)
 
 
 if __name__ == "__main__":
