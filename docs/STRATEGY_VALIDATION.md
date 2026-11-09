@@ -102,3 +102,46 @@ Rolling 3x12-month research windows: breakout beat SPY in 1 window;
 pullback in 0; oversold in 0. All strategy promotions remain denied.
 
 See GitHub Actions: https://github.com/skih4741-png/us-stock-alert/actions/runs/42576462168
+
+## Phase 3: causality, price provenance, and P&L diagnostics (2026-11-09)
+
+- Portfolio opening orders use the *prior close's* confirmed SPY market
+  regime, never the close of the current order date.
+- A close-based trailing/time exit is scheduled for the *next session open*.
+- Candidate ranking uses the *prior close's* 63-day momentum and dollar volume
+  instead of alphabetical ticker order.
+- Entries enforce the prevailing minimum historical dollar-liquidity filter.
+- Research acquisition uses one Yahoo OHLCV snapshot for both portfolio and
+  chronological windows and computes a SHA256 digest and the selected symbols.
+- Active-listing sampling chooses a fixed N after verifying enough signal
+  warmup and full evaluation-window history. The skipped candidate symbols and
+  reasons are recorded. This is still **survivorship-biased**.
+- Missing coverage for the final set fails the research job rather than
+  silently altering the comparison. Supplied as-of CSV membership
+  `ticker,start_date,end_date` is enforced at each signal date, but
+  completeness and delisted stock OHLCV must be externally verified.
+- `data/strategy_diagnostics.md` explains realized exit reasons, market
+  regime profit/loss, ticker attribution and cost stress.
+- Automatic strategy promotion remains disabled unless independent OOS
+  and historical-universe integrity are verified.
+
+Run the single-snapshot workflow:
+```bash
+python -m validation.research_pipeline --tickers 20 --years 2 --folds 3 --months 12
+```
+
+Latest comparable-history and signal-day-liquidity research sample:
+- Breakout: +9.64% 2-year return, MDD -10.83%, PF 1.340.
+- Pullback: -21.90%, MDD -24.31%, PF 0.655.
+- Oversold: -15.69%, MDD -21.38%, PF 0.493.
+- SPY: +27.28% over the sample.
+- None of the 3 strategies beat SPY in any of the three 12-month windows.
+
+These numbers replace earlier draft-run examples **only for this
+specific recorded ticker snapshot**, not as an independent performance
+estimate. Results change with sample composition and can still be
+biased by active-universe selection and adjusted-data execution
+assumptions. Do not activate any strategy from these figures.
+
+Latest research result:
+https://github.com/skih4741-png/us-stock-alert/actions/runs/42580210128
