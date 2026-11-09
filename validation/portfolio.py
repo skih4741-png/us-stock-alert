@@ -16,6 +16,7 @@ import backtest
 import execution_rules
 import market
 from validation.compare_strategies import signals, STRATEGIES, COST_EACH_SIDE
+from validation.historical_universe import HistoricalMembership
 
 
 @dataclass
@@ -72,7 +73,8 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                        initial_cash: float = 10000.0, max_positions: int = 5,
                        risk_fraction: float = 0.01, max_weight: float = 0.25,
                        max_hold: int = 20, fee: float = COST_EACH_SIDE,
-                       start_date: str | None = None, end_date: str | None = None) -> dict:
+                       start_date: str | None = None, end_date: str | None = None,
+                       membership: HistoricalMembership | None = None) -> dict:
     """Full daily mark-to-market with finite cash and integer shares."""
     if strategy not in STRATEGIES:
         raise ValueError("unknown strategy")
@@ -169,6 +171,8 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                 if pos_idx < 1:
                     continue
                 prev, row = o.iloc[pos_idx-1], o.iloc[pos_idx]
+                if membership is not None and not membership.includes(ticker, o.index[pos_idx-1].date()):
+                    continue
                 if not (np.isfinite(prev.ma50) and np.isfinite(prev.low20)):
                     continue
                 close = float(prev.close)
@@ -219,4 +223,4 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                            "OHLC intrabar order ambiguity; pessimistic convention",
                            "Daily close trailing exits, not same-day stop orders",
                            "Daily SPY benchmark without distributions/cost parity",
-                           "No point-in-time corporate fundamentals or delisted equities"]}
+                           "No point-in-time fundamentals. Delisted coverage unverified even with membership input."]}
