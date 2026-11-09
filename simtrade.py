@@ -225,6 +225,13 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if d <= p["date"]:
                 continue
             op, hi, lo, cl = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
+            # Close-based orders are only actionable at a later opening price.
+            if p.get("scheduled_exit") and d > p.get("scheduled_at", ""):
+                scheduled = execution_rules.next_open_market_exit(op, SLIP)
+                if scheduled is not None:
+                    _close(st, p, d, scheduled.price, p["scheduled_exit"] + " · 다음 시가")
+                    closed = True
+                    break
             seen = p.get("seen_to", "")[:10] >= d   # 장중에 이미 확인한 날
             exit_decision = execution_rules.exit_fill(op, hi, lo, p["stop"], p["target"], half=p["half"], slip=SLIP, touch=TOUCH)
             if not seen and (exit_decision is not None and exit_decision.reason == "stop"):
@@ -240,10 +247,12 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                     _close(st, p, d, px, "1차 목표"); closed = True; break
             p["peak"] = max(p["peak"], cl)
             if p["half"] and (cl < p["peak"] * 0.92 or (not np.isnan(ma20.iloc[i]) and cl < ma20.iloc[i])):
-                _close(st, p, d, cl * (1 - SLIP), "이익 지키기 (추적 손절)"); closed = True; break
+                p["scheduled_exit"] = "이익 지키기 (추적 손절)"
+                p["scheduled_at"] = d
             held = int(np.busday_count(date.fromisoformat(p["date"]), date.fromisoformat(d)))
             if held >= cfg["stale_days"] and cl < p["entry"] * 1.02:
-                _close(st, p, d, cl * (1 - SLIP), f"{held}거래일 제자리"); closed = True; break
+                p["scheduled_exit"] = f"{held}거래일 제자리"
+                p["scheduled_at"] = d
         # 일봉 백스톱 — 장중(5분봉)이 그날을 다 못 봤어도(실행 누락·수집 실패·마지막 봉 이후 급락),
         # 최신 일봉으로 손절·목표를 반드시 재확인해 매도 누락을 막아요. 이미 닫혔으면 건너뜀(이중 매도 없음).
         if not closed and len(df):
@@ -266,7 +275,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         if not closed and len(df):
             cv = committee.verdict(comm.get(p["t"]))
             if cv.get("sell_hold"):
-                _close(st, p, df.index[-1].strftime("%Y-%m-%d"), float(df["Close"].iloc[-1]) * (1 - SLIP), "위원회 매도 신호 · " + cv.get("why", "")); closed = True
+                if not p.get("scheduled_exit"):
+                    p["scheduled_exit"] = "위원회 매도 신호 · " + cv.get("why", "")
+                    p["scheduled_at"] = df.index[-1].strftime("%Y-%m-%d")
         if not closed:
             if market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
@@ -483,6 +494,12 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
             if m is None or i not in m.index or ts <= p.get("seen_to", ""):
                 alive.append(p); continue
             p["seen_to"] = ts
+            if p.get("scheduled_exit") and day > p.get("scheduled_at", ""):
+                scheduled = execution_rules.next_open_market_exit(float(m.loc[i]["Open"]), SLIP)
+                if scheduled is not None:
+                    _close(st, p, day, scheduled.price, p["scheduled_exit"] + " · 다음 시가")
+                    events.append(f"매도 {p['t']} {p['qty']}주 · 예약 청산")
+                    continue
             if not exits(p, m.loc[i], day, stamp):
                 alive.append(p)
         st["positions"] = alive
