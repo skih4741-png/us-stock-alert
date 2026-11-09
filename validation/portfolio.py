@@ -144,7 +144,10 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
             if p.exit_next_open:
                 # Time/trailing signal was observed at the preceding CLOSE.
                 # Exit at the next trading OPEN, not the already-observed close.
-                px = op * (1 - 0.0015)
+                scheduled = execution_rules.next_open_market_exit(op, 0.0015)
+                if scheduled is None:
+                    continue
+                px = scheduled.price
                 cash += p.qty * px * (1-fee)
                 closed.append({"ticker": ticker, "date": day.strftime("%Y-%m-%d"),
                                "pnl": p.realized + p.qty * (px * (1-fee) - p.entry * (1+fee)),
