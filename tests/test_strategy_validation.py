@@ -130,8 +130,8 @@ class TestHistoricalMembership(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             file = Path(td) / "membership.csv"
             file.write_text(
-                "ticker,start_date,end_date\\nAAA,2020-01-01,2021-12-31\\n"
-                "BBB,2021-02-03,\\n", encoding="utf-8"
+                "ticker,start_date,end_date\nAAA,2020-01-01,2021-12-31\n"
+                "BBB,2021-02-03,\n", encoding="utf-8"
             )
             member = read_membership_csv(file)
             self.assertTrue(member.includes("AAA", "2021-12-31"))
