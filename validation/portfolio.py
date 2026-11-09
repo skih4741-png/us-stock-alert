@@ -67,7 +67,8 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                        strategy: str, cfg: dict, *, years: int = 3,
                        initial_cash: float = 10000.0, max_positions: int = 5,
                        risk_fraction: float = 0.01, max_weight: float = 0.25,
-                       max_hold: int = 20, fee: float = COST_EACH_SIDE,\n                       start_date: str | None = None, end_date: str | None = None) -> dict:
+                       max_hold: int = 20, fee: float = COST_EACH_SIDE,
+                       start_date: str | None = None, end_date: str | None = None) -> dict:
     """Full daily mark-to-market with finite cash and integer shares."""
     if strategy not in STRATEGIES:
         raise ValueError("unknown strategy")
