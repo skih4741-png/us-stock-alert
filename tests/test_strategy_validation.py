@@ -6,12 +6,13 @@ import pandas as pd
 
 import performance
 from validation.compare_strategies import metrics, net_return, signals
-from validation.portfolio import _risk_metrics, opening_regimes
+from validation.portfolio import _risk_metrics, opening_regimes, rank_signal_candidates
 from validation.promotion import assess_strategy
 from execution_rules import entry_fill, exit_fill
 from strategy_policy import allowed
 from validation.diagnostics import trade_attribution
 from validation.historical_universe import read_membership_csv
+from validation.research_pipeline import acquire
 from pathlib import Path
 import tempfile
 
@@ -138,6 +139,33 @@ class TestHistoricalMembership(unittest.TestCase):
             self.assertFalse(member.includes("AAA", "2022-01-01"))
             self.assertTrue(member.includes("BBB", "2024-01-01"))
             self.assertFalse(member.includes("CCC", "2024-01-01"))
+
+
+class TestReproducibleResearch(unittest.TestCase):
+    def test_rank_uses_previous_close_information_only(self):
+        ix = pd.bdate_range("2024-01-01", periods=2)
+        a = pd.DataFrame({"ret63": [0.5, -9], "dv20": [200, 1]}, index=ix)
+        b = pd.DataFrame({"ret63": [0.2, 999], "dv20": [100, 999]}, index=ix)
+        pending = pd.Series([False, True], index=ix)
+        result = rank_signal_candidates({"B": (b, pending), "A": (a, pending)}, ix[-1])
+        self.assertEqual(result, ["A", "B"])
+
+    def test_missing_requested_ticker_fails_instead_of_biasing_results(self):
+        ix = pd.bdate_range("2024-01-01", periods=300)
+        frame = pd.DataFrame({
+            "Open": 100.0, "High": 102.0, "Low": 99.0,
+            "Close": 100.0, "Volume": 100000,
+        }, index=ix)
+        listing = pd.DataFrame({
+            "yf_ticker": ["AAA", "BBB"],
+            "price": [100, 100], "volume": [10000, 10000],
+        })
+        with patch("validation.research_pipeline.universe.load_universe",
+                   return_value=(listing, "mock")), patch(
+                   "validation.research_pipeline.prices.download_history",
+                   return_value={"SPY": frame, "AAA": frame}):
+            with self.assertRaisesRegex(ValueError, "Data coverage incomplete"):
+                acquire({}, 2, 2, None)
 
 
 if __name__ == "__main__":
