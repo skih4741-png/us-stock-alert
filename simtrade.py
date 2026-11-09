@@ -210,7 +210,10 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
-    hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
+    raw_hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
+    # A backfilled morning report must never inspect a bar after bar_date.
+    hist = {t: df[df.index.strftime("%Y-%m-%d") <= bar_date].copy()
+            for t, df in raw_hist.items() if df is not None and len(df)}
     H = lambda t: hist.get(t.replace(".", "-"))
 
     # 2) 매도 규칙 (날마다)
