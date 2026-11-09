@@ -67,7 +67,7 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                        strategy: str, cfg: dict, *, years: int = 3,
                        initial_cash: float = 10000.0, max_positions: int = 5,
                        risk_fraction: float = 0.01, max_weight: float = 0.25,
-                       max_hold: int = 20, fee: float = COST_EACH_SIDE) -> dict:
+                       max_hold: int = 20, fee: float = COST_EACH_SIDE,\n                       start_date: str | None = None, end_date: str | None = None) -> dict:
     """Full daily mark-to-market with finite cash and integer shares."""
     if strategy not in STRATEGIES:
         raise ValueError("unknown strategy")
@@ -75,7 +75,11 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
         raise ValueError("invalid risk parameters")
     spy = spy.copy()
     spy.index = pd.to_datetime(spy.index).tz_localize(None)
-    dates = spy.index[spy.index >= spy.index[-1] - pd.DateOffset(years=years)]
+    window_start = pd.Timestamp(start_date) if start_date else spy.index[-1] - pd.DateOffset(years=years)
+    window_end = pd.Timestamp(end_date) if end_date else spy.index[-1]
+    dates = spy.index[(spy.index >= window_start) & (spy.index <= window_end)]
+    if len(dates) == 0:
+        raise ValueError("empty portfolio window")
     regimes = market.regime_series(spy)
     prepared = {}
     for ticker, df in history.items():
