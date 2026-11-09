@@ -73,6 +73,26 @@ def opening_regimes(spy: pd.DataFrame) -> pd.Series:
     return market.regime_series(spy).shift(1)
 
 
+def rank_signal_candidates(prepared: dict, day: pd.Timestamp) -> list[str]:
+    """Allocate scarce capital by prior-close momentum, not alphabetic ticker order.
+
+    All inputs are end-of-previous-session information: each mask is shifted,
+    momentum and dollar volume use position i-1. Missing data ranks last.
+    """
+    ranked = []
+    for ticker, (o, pending) in prepared.items():
+        if day not in o.index or not bool(pending.loc[day]):
+            continue
+        i = int(o.index.get_loc(day))
+        if i <= 0:
+            continue
+        prev = o.iloc[i - 1]
+        momentum = float(prev.ret63) if pd.notna(prev.ret63) else float("-inf")
+        liquidity = float(prev.dv20) if pd.notna(prev.dv20) else float("-inf")
+        ranked.append((ticker, momentum, liquidity))
+    return [t for t, _, _ in sorted(ranked, key=lambda x: (-x[1], -x[2], x[0]))]
+
+
 def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
                        strategy: str, cfg: dict, *, years: int = 3,
                        initial_cash: float = 10000.0, max_positions: int = 5,
@@ -166,7 +186,7 @@ def simulate_portfolio(history: dict[str, pd.DataFrame], spy: pd.DataFrame,
         # New positions use yesterday's confirmed signal, never same day's close.
         opening_regime = regimes.loc[day]
         if pd.notna(opening_regime) and opening_regime != "bear":
-            for ticker in sorted(prepared):
+            for ticker in rank_signal_candidates(prepared, day):
                 if ticker in positions or ticker in exited_today or remaining_new_slots <= 0:
                     continue
                 o, pending = prepared[ticker]
