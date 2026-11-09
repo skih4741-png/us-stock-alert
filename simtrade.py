@@ -357,7 +357,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             reason = setups.paper_gate(p)
             if reason:
                 reject(reason); continue
-            policy_ok, policy_why = strategy_policy.allowed(p.get("setup"), enabled=bool(cfg.get("validated_strategy_mode", False)))
+            policy_ok, policy_why = strategy_policy.allowed(p.get("setup"), enabled=(cfg.get("validated_strategy_mode") is True))
             if not policy_ok:
                 reject(policy_why); continue
             led_blocked, led_why = ledger.blocked(led, p["t"], p.get("setup"))
