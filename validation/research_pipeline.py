@@ -12,6 +12,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pandas as pd
+
 import config
 import prices
 import universe
@@ -41,6 +43,21 @@ def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
     raw = prices.download_history(["SPY"] + candidates, period=period, fallback=True)
     valid, rejected = clean_history(raw, min_bars=260)
     spy = valid.pop("SPY", None)
+    if membership is None and spy is not None:
+        # Equal historical observation windows require a 1-year lookback
+        # before the experiment for 252-bar breakout calculations.
+        require_from = pd.Timestamp(spy.index[-1]) - pd.DateOffset(years=years + 1)
+        require_until = pd.Timestamp(spy.index[-1]) - pd.Timedelta(days=7)
+        for ticker in candidates:
+            df = valid.get(ticker)
+            if df is None:
+                continue
+            if pd.Timestamp(df.index[0]) > require_from:
+                rejected[ticker] = ["missing_full_window_or_signal_warmup"]
+                del valid[ticker]
+            elif pd.Timestamp(df.index[-1]) < require_until:
+                rejected[ticker] = ["stale_price_history"]
+                del valid[ticker]
     if membership is None:
         names = [t for t in candidates if t in valid][:tickers]
     else:
@@ -61,6 +78,7 @@ def acquire(cfg: dict, tickers: int, years: int, universe_csv: Path | None):
         "selected_tickers": names,
         "excluded_candidate_tickers": excluded_candidates,
         "candidate_pool_size": len(candidates),
+        "requires_full_comparable_history": membership is None,
         "downloaded_tickers": len(history),
         "price_snapshot_sha256": digest.hexdigest(),
         "historical_universe_verified": False,
