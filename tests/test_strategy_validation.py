@@ -9,6 +9,7 @@ from validation.compare_strategies import metrics, net_return, signals
 from validation.portfolio import _risk_metrics
 from validation.promotion import assess_strategy
 from execution_rules import entry_fill, exit_fill
+from strategy_policy import allowed
 
 
 class TestMetrics(unittest.TestCase):
@@ -81,6 +82,12 @@ class TestFailClosedGate(unittest.TestCase):
         d = assess_strategy(metrics, independent_oos=False, verified_universe=False)
         self.assertFalse(d["eligible"])
         self.assertEqual(d["action"], "observe_only")
+
+    def test_paper_policy_opt_in_rejects_missing_evidence(self):
+        self.assertTrue(allowed("돌파", enabled=False)[0])
+        ok, reason = allowed("돌파", enabled=True)
+        self.assertFalse(ok)
+        self.assertTrue(reason)
 
     def test_missing_metrics_fail_closed(self):
         self.assertFalse(assess_strategy({}, independent_oos=True,
