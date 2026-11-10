@@ -137,6 +137,40 @@ def test_blob_update_never_clears_first_and_removes_old_tail():
     assert ws.values[-1] == ["", "", ""]
 
 
+def test_sheet_cache_reduces_reads_but_write_readback_is_remote():
+    class Worksheet:
+        row_count = 50
+        def __init__(self):
+            self.rows = [sheets.TABS["앱 데이터"], ["daily", "0", "old"]]
+            self.reads = 0
+        def get_all_values(self):
+            self.reads += 1
+            return self.rows
+        def update(self, values, *args, **kwargs):
+            self.rows = values
+    ws = Worksheet()
+    store = object.__new__(sheets.Store)
+    store.gs = type("GS", (), {"worksheet": lambda self, name: ws})()
+    assert store.get_blob("daily") == store.get_blob("daily") == "old"
+    assert ws.reads == 1
+    store.put_blob("daily", "new")
+    assert store.get_blob("daily") == "new"
+    assert ws.reads == 2
+
+
+def test_sheet_quota_retries_are_read_only_and_bounded(monkeypatch):
+    calls, delays = [], []
+    class Limited(Exception):
+        response = type("Response", (), {"status_code": 429})()
+    def read():
+        calls.append(1)
+        raise Limited()
+    monkeypatch.setattr(sheets.time, "sleep", delays.append)
+    with pytest.raises(Limited):
+        sheets.Store._read_with_backoff(read)
+    assert len(calls) == 4 and delays == [5, 15, 45]
+
+
 class Response:
     def __init__(self, status, data=None):
         self.status_code, self.data, self.headers = status, data or {}, {"retry-after": "10"}

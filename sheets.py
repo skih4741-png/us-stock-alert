@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -37,6 +38,8 @@ CHUNK = 40000  # 구글 시트 한 칸은 5만 자까지라 나눠서 저장
 class Store:
     def __init__(self):
         self.gs = None
+        self._worksheets = {}
+        self._read_cache = {}
         key = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
         sid = os.environ.get("SHEET_ID")
         if key and sid:
@@ -52,6 +55,27 @@ class Store:
         self.ensure_tabs()
 
     # ----- 공통 -----
+    def _worksheet(self, tab):
+        """Avoid repeated spreadsheet metadata reads for every blob access."""
+        cache = self.__dict__.setdefault("_worksheets", {})
+        if tab not in cache:
+            cache[tab] = self.gs.worksheet(tab)
+        return cache[tab]
+
+    @staticmethod
+    def _read_with_backoff(call):
+        """Retry only read requests on transient limits. Never replay writes."""
+        for attempt in range(4):
+            try:
+                return call()
+            except Exception as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                if status not in (429, 503) or attempt == 3:
+                    raise
+                delay = (5, 15, 45)[attempt]
+                log.warning("시트 조회 일시 제한(%s) · %s초 후 재시도", status, delay)
+                time.sleep(delay)
+
     def ensure_tabs(self):
         if self.gs:
             names = [w.title for w in self.gs.worksheets()]
@@ -78,14 +102,23 @@ class Store:
 
     def read(self, tab: str) -> pd.DataFrame:
         if self.gs:
-            rows = self.gs.worksheet(tab).get_all_values()
+            cache = self.__dict__.setdefault("_read_cache", {})
+            cached = cache.get(tab)
+            ttl = 2 if tab == "앱 데이터" else 20 if tab in ("설정", "AI 사용") else 0
+            if ttl and cached and time.monotonic() - cached[0] < ttl:
+                return cached[1].copy(deep=True)
+            rows = self._read_with_backoff(lambda: self._worksheet(tab).get_all_values())
             if not rows:
                 return pd.DataFrame(columns=TABS[tab])
-            return pd.DataFrame(rows[1:], columns=rows[0])
+            frame = pd.DataFrame(rows[1:], columns=rows[0])
+            if ttl:
+                cache[tab] = (time.monotonic(), frame.copy(deep=True))
+            return frame
         p = LOCAL / f"{tab}.csv"
         return pd.read_csv(p, dtype=str, encoding="utf-8-sig").fillna("") if p.exists() else pd.DataFrame(columns=TABS[tab])
 
     def overwrite(self, tab: str, df: pd.DataFrame):
+        self.__dict__.setdefault("_read_cache", {}).pop(tab, None)
         df = df.reindex(columns=TABS[tab]).fillna("")
         if self.gs:
             ws = self.gs.worksheet(tab)
@@ -98,6 +131,7 @@ class Store:
             df.to_csv(LOCAL / f"{tab}.csv", index=False, encoding="utf-8-sig")
 
     def append(self, tab: str, rows: list[dict]):
+        self.__dict__.setdefault("_read_cache", {}).pop(tab, None)
         if not rows:
             return
         df = pd.DataFrame(rows).reindex(columns=TABS[tab]).fillna("")
@@ -119,14 +153,18 @@ class Store:
         new = pd.DataFrame([{"키": key, "순번": str(i), "내용": p} for i, p in enumerate(parts)])
         out = pd.concat([keep, new], ignore_index=True)
         if self.gs:
-            ws = self.gs.worksheet("앱 데이터")
+            ws = self._worksheet("앱 데이터")
             values = [TABS["앱 데이터"]] + out.reindex(columns=TABS["앱 데이터"]).fillna("").astype(str).values.tolist()
             # One values update replaces the snapshot. Clearing first exposed an
             # empty sheet to the web app and destroyed all blobs if update failed.
             values += [["", "", ""] for _ in range(max(0, len(df) + 1 - len(values)))]
             if ws.row_count < len(values):
                 ws.resize(rows=len(values) + 50)
-            ws.update(values, "A1", value_input_option="RAW")
+            try:
+                ws.update(values, "A1", value_input_option="RAW")
+            finally:
+                # Verification after a write always reads the remote state.
+                self.__dict__.setdefault("_read_cache", {}).pop("앱 데이터", None)
         else:
             out.to_csv(LOCAL / "앱 데이터.csv", index=False, encoding="utf-8-sig")
 
