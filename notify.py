@@ -13,6 +13,7 @@ import requests
 from terms import DISCLAIMER, REGIME
 
 log = logging.getLogger(__name__)
+MAIL_RESULT = {"code": "not_attempted", "detail": "아직 발송하지 않음"}
 
 
 def md(iso: str) -> str:
@@ -181,31 +182,46 @@ def slack_blocks(r: dict) -> list[dict]:
 # ---------------- 발송 ----------------
 
 def send_mail(subj: str, text: str, html_text: str | None = None) -> bool:
+    global MAIL_RESULT
+    def result(code, detail, ok=False):
+        global MAIL_RESULT
+        MAIL_RESULT = {"code": code, "detail": detail}
+        if not ok and code != "disabled":
+            log.error("메일 발송: %s", detail)
+        return ok
     if os.environ.get("MAIL_ENABLED", "0") != "1":
-        return False  # 지금은 슬랙으로만 받아요 (메일을 켜려면 MAIL_ENABLED=1)
-    user = os.environ.get("NAVER_ID")
-    pw = os.environ.get("NAVER_APP_PASSWORD")
-    to = os.environ.get("MAIL_TO") or user
+        return result("disabled", "설정에서 꺼짐")
+    user = (os.environ.get("NAVER_ID") or "").strip()
+    pw = (os.environ.get("NAVER_APP_PASSWORD") or "").strip()
     if not (user and pw):
-        log.info("메일 설정 없음 → 메일은 건너뜀")
-        return False
+        return result("missing_config", "메일 계정·앱 비밀번호 설정 누락")
     if "@" not in user:
         user = f"{user}@naver.com"
-    domain = user.split("@")[1].lower()
+    recipients = [x.strip() for x in (os.environ.get("MAIL_TO") or user).split(",") if x.strip()]
+    if not recipients or any("@" not in x or "\n" in x or "\r" in x for x in recipients):
+        return result("recipient_config", "수신 주소 형식 확인 필요")
+    domain = user.rsplit("@", 1)[1].lower()
     host = os.environ.get("SMTP_HOST") or {"gmail.com": "smtp.gmail.com", "daum.net": "smtp.daum.net"}.get(domain, "smtp.naver.com")
     msg = MIMEMultipart("alternative")
-    msg["Subject"], msg["From"], msg["To"] = subj, user, to
+    msg["Subject"], msg["From"], msg["To"] = subj, user, ", ".join(recipients)
     msg.attach(MIMEText(text, "plain", "utf-8"))
     if html_text:
         msg.attach(MIMEText(html_text, "html", "utf-8"))
     try:
-        with smtplib.SMTP_SSL(host, 465, timeout=30) as s:
-            s.login(user, pw)
-            s.sendmail(user, [x.strip() for x in to.split(",")], msg.as_string())
-        return True
-    except Exception as e:
-        log.error("메일 실패: %s", e)
-        return False
+        with smtplib.SMTP_SSL(host, 465, timeout=30) as smtp:
+            smtp.login(user, pw)
+            refused = smtp.sendmail(user, recipients, msg.as_string())
+        if refused:
+            return result("partial", "일부 수신 주소 거절 · 자동 재전송 안 함")
+        return result("accepted", "메일 서버 접수 완료 · 수신함 도착 미검증", True)
+    except smtplib.SMTPAuthenticationError as error:
+        return result("authentication", f"SMTP {error.smtp_code} 인증 거절 · 계정·앱 비밀번호 갱신 필요")
+    except smtplib.SMTPRecipientsRefused:
+        return result("recipient_refused", "메일 서버가 수신 주소 거절")
+    except (TimeoutError, OSError):
+        return result("connection", "메일 서버 연결 실패·시간 초과 · 전송 여부 확인 필요")
+    except smtplib.SMTPException:
+        return result("smtp", "메일 서버 처리 실패 · 전송 여부 확인 필요")
 
 
 def send_slack(text: str, blocks: list[dict] | None = None) -> bool:
@@ -228,13 +244,14 @@ def send_report(r: dict) -> dict:
     subj = subject(r)
     text = text_body(r)
     ok_mail = send_mail(subj, text, html_body(r))
+    mail_result = dict(MAIL_RESULT)
     ok_slack = send_slack(subj, slack_blocks(r))
     # 한쪽만 실패하면 다른 쪽에 알려요
     if ok_mail and not ok_slack and os.environ.get("SLACK_WEBHOOK_URL") and os.environ.get("MAIL_ENABLED", "0") == "1":
         send_mail("[미국주식] 슬랙 발송 실패", "오늘 리포트를 슬랙으로 보내지 못했어요. 메일 내용을 확인하세요.")
     if ok_slack and not ok_mail and os.environ.get("MAIL_ENABLED", "0") == "1":
         send_slack(":warning: 오늘 리포트를 메일로 보내지 못했어요. 네이버 앱 비밀번호를 확인하세요.")
-    return {"mail": ok_mail, "slack": ok_slack, "subject": subj, "text": text}
+    return {"mail": ok_mail, "mail_detail": mail_result["detail"], "mail_code": mail_result["code"], "slack": ok_slack, "subject": subj, "text": text}
 
 
 def send_text(title: str, text: str) -> dict:
@@ -242,5 +259,5 @@ def send_text(title: str, text: str) -> dict:
     slack = send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
                        {"type": "section", "text": {"type": "mrkdwn", "text": "```" + text[:2800] + "```"}}])
     mail = send_mail(f"[미국주식] {title}", text)
-    return {"mail": mail, "slack": slack}
+    return {"mail": mail, "mail_detail": MAIL_RESULT["detail"], "mail_code": MAIL_RESULT["code"], "slack": slack}
 
