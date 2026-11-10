@@ -120,9 +120,13 @@ class Store:
         out = pd.concat([keep, new], ignore_index=True)
         if self.gs:
             ws = self.gs.worksheet("앱 데이터")
-            ws.clear()
-            ws.update([TABS["앱 데이터"]] + out.reindex(columns=TABS["앱 데이터"]).fillna("").astype(str).values.tolist(),
-                      "A1", value_input_option="RAW")
+            values = [TABS["앱 데이터"]] + out.reindex(columns=TABS["앱 데이터"]).fillna("").astype(str).values.tolist()
+            # One values update replaces the snapshot. Clearing first exposed an
+            # empty sheet to the web app and destroyed all blobs if update failed.
+            values += [["", "", ""] for _ in range(max(0, len(df) + 1 - len(values)))]
+            if ws.row_count < len(values):
+                ws.resize(rows=len(values) + 50)
+            ws.update(values, "A1", value_input_option="RAW")
         else:
             out.to_csv(LOCAL / "앱 데이터.csv", index=False, encoding="utf-8-sig")
 
@@ -270,3 +274,4 @@ class Store:
     def settings(self) -> dict:
         df = self.read("설정")
         return {str(r["항목"]).strip(): r["값"] for _, r in df.iterrows() if str(r.get("항목", "")).strip()}
+

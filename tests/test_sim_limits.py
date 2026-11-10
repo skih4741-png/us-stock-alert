@@ -17,7 +17,8 @@ def state():
 
 
 def order(t):
-    return dict(t=t, signal_date='2026-10-01', qty=1, limit=100., skip_above=110., stop=50., target=120., why='시험', setup='돌파')
+    # Cost-inclusive risk must fit the immutable 5% ceiling, even if cfg asks for 6%.
+    return dict(t=t, signal_date='2026-10-01', qty=1, limit=100., skip_above=110., stop=60., target=120., why='시험', setup='돌파')
 
 
 def candle(low=99.):
@@ -114,3 +115,4 @@ def test_buy_candle_high_is_not_assumed_to_follow_entry():
     simtrade.intraday(store, datetime(2026, 10, 2, 15, tzinfo=timezone.utc), bars={'A': df})
     result = simtrade.load(store)
     assert len(result['positions']) == 1 and not result['closed']
+

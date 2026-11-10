@@ -193,14 +193,17 @@ def numeric_cards(blob: dict, app: dict, cfg: dict, sim_state: dict | None, gpt_
     today = app.get("date") or datetime.utcnow().strftime("%Y-%m-%d")
     week_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
     holds = [h["t"] for h in app.get("holdings", [])]
+    blob["numeric_checks"] = []
     picks = sorted([p for b in app.get("bands", []) for p in b["picks"]], key=lambda p: -(p.get("total") or 0))
     pick_t = [p["t"] for p in picks if p["t"] not in holds]
     try:
         import chart
         pend_t = [o["t"] for o in (sim_state or {}).get("pending", [])]
         blob["chart"] = chart.build(list(dict.fromkeys(holds + pick_t[:15] + pend_t)))
+        blob["numeric_checks"].append({"n": "차트 분석", "ok": True, "d": "계산 완료"})
     except Exception as e:
         log.warning("차트 분석 실패: %s", e)
+        blob["numeric_checks"].append({"n": "차트 분석", "ok": False, "d": str(e)[:160]})
     try:
         import news
         import portfolio
@@ -209,13 +212,19 @@ def numeric_cards(blob: dict, app: dict, cfg: dict, sim_state: dict | None, gpt_
         pf = portfolio.build(app.get("holdings", []), lambda t: news.sector_of(t, cache))
         if pf:
             prev = blob.get("port") or {}
-            if gpt_ok and (prev.get("ai_date", "") < week_ago or not prev.get("ai")):
-                pf["ai"], pf["ai_date"] = ai.checked("포트폴리오 진단", portfolio.TASK, {k: v for k, v in pf.items() if k != "ai"}, "small", 2000), today
+            if gpt_ok and (str(prev.get("ai_date") or "") < week_ago or not prev.get("ai")):
+                pf["ai"] = ai.checked("포트폴리오 진단", portfolio.TASK, {k: v for k, v in pf.items() if k != "ai"}, "small", 2000)
+                pf["ai_date"] = today if pf["ai"] else None
             else:
                 pf["ai"], pf["ai_date"] = prev.get("ai"), prev.get("ai_date")
             blob["port"] = dict(pf, date=today)
+        else:
+            blob.pop("port", None)
+        blob["numeric_checks"].append({"n": "포트폴리오 진단", "ok": True if pf else None,
+                                       "d": "숫자 계산 완료" if pf else "계산 가능한 보유 자료 없음"})
     except Exception as e:
         log.warning("포트폴리오 진단 실패: %s", e)
+        blob["numeric_checks"].append({"n": "포트폴리오 진단", "ok": False, "d": str(e)[:160]})
     try:
         import secq
         email = str(cfg.get("SEC 연락 이메일") or "").strip()
@@ -391,3 +400,4 @@ def brief_text(blob: dict) -> str:
     if b.get("quiet"):
         lines.append("특이사항 없음: " + ", ".join(b["quiet"]))
     return "\n".join(lines)
+
