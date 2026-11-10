@@ -470,6 +470,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             _ticket(st, o["t"], o["signal_date"], result="미체결", day=d, limit=o["limit"], qty=o["qty"], low=round(lo, 2))
     st["pending"] = still
 
+    if st.get("unresolved"):
+        return _valuation_block(store, st, bar_date, now_iso, [], picks)
+
     # 평가금액·SPY
     spy = H("SPY")
     val = st["cash"] + sum(p["qty"] * float(H(p["t"])["Close"].iloc[-1]) for p in st["positions"] if H(p["t"]) is not None)

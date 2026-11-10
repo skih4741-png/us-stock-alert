@@ -86,3 +86,16 @@ def test_current_gate_rejects_missing_evidence_but_not_all_weak_trends():
     assert setups.paper_gate(legacy) == '셋업 없음'
     evidence = dict(legacy, setup='과매도 반등', edge=dict(n=100,win=60,avg=2.))
     assert setups.paper_gate(evidence) == ''  # trend score is currently a ranking input, not a hard gate
+
+
+def test_unresolved_execution_tail_cannot_publish_new_valuation(monkeypatch):
+    store, st = state()
+    p=held(); p['seen_to']='2026-10-02 15:50'
+    st['positions']=[p]
+    st['cash']=599.
+    simtrade.save(store,st)
+    monkeypatch.setattr(simtrade.prices,'download_history',lambda *a,**k:{'A':frame()})
+    result=simtrade.step(store,[],'2026-10-02',{},'2026-10-03',intraday_bars={})
+    assert not result['equity'] and not result['valuation']['ok']
+    assert result['positions'][0]['recovery_day']=='2026-10-02'
+    assert not simtrade.summary(result)['passed']
