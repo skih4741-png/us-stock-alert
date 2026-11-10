@@ -1,5 +1,4 @@
-"""앱 업데이트 알림: docs/changelog.json 맨 위 버전을 아직 안 알렸으면 푸시·슬랙·앱 알림으로 한 번 보내요.
-깃허브에 changelog.json이 바뀌어 올라오면 announce.yml이 자동으로 돌려요."""
+"""Publish release notifications and retain per-channel outcomes for safe retries."""
 import json
 import logging
 from pathlib import Path
@@ -10,17 +9,44 @@ import notify
 import push
 from sheets import Store
 
-logging.basicConfig(level=logging.INFO)
-c = json.loads(Path("docs/changelog.json").read_text(encoding="utf-8"))[0]
-store = Store()
-done = store.get_blob("announced") or ""
-if done == c["v"]:
-    print("이미 알린 버전:", c["v"])
-else:
-    title = f"앱 업데이트 {c['v']} · {c['title']}"
-    body = " / ".join(c["items"][:3])
-    n = push.send(store, title, body[:170], "#/home", "system", tag="update")
-    notify.send_slack(f":sparkles: *{title}*\n" + "\n".join("• " + x for x in c["items"]) + "\n앱을 껐다 켜면 새 버전으로 바뀌어요.")
-    appdata.add_alert(store, "update", title, " / ".join(c["items"])[:200], config.now_kst().isoformat(timespec="minutes"), "info")
-    store.put_blob("announced", c["v"])
-    print("알림 보냄:", title, "· 푸시", n)
+
+def announce(store, release):
+    version = release['v']
+    raw = store.get_blob('announce_status') or '{}'
+    status = json.loads(raw)
+    if status.get('version') != version:
+        status = dict(version=version, slack=False, app=False, push=0)
+    # Preserve compatibility with releases already completed by the old runner.
+    if store.get_blob('announced') == version and not status.get('at'):
+        return dict(version=version, legacy_complete=True)
+    title = f"앱 업데이트 {version} · {release['title']}"
+    items = release['items']
+    status['at'] = config.now_kst().isoformat(timespec='minutes')
+    def persist():
+        store.put_blob('announce_status', json.dumps(status, ensure_ascii=False))
+    if not status.get('app'):
+        appdata.add_alert(store, 'update', title, ' / '.join(items)[:200], status['at'], 'info')
+        status['app'] = True
+        persist()
+    if not status.get('slack'):
+        status['slack'] = bool(notify.send_slack(
+            f":sparkles: *{title}*\n" + '\n'.join('• ' + x for x in items)
+            + '\n앱을 다시 열면 새 버전으로 바뀌어요.'))
+        persist()
+    if not status.get('push'):
+        status['push'] = push.send(store, title, ' / '.join(items[:3])[:170], '#/home', 'system', tag='update')
+        persist()
+    if status.get('app') and status.get('slack'):
+        store.put_blob('announced', version)
+    print('업데이트 알림 결과:', json.dumps(status, ensure_ascii=False))
+    if not status.get('app') or not status.get('slack'):
+        raise RuntimeError('업데이트 알림 미완료 · 채널별 결과 확인 필요')
+    if not status.get('push'):
+        logging.warning('기기 푸시 접수 0개 · 구독·키·발송 로그 확인 필요, 기기 도착 미검증')
+    return status
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    release = json.loads(Path('docs/changelog.json').read_text(encoding='utf-8'))[0]
+    announce(Store(), release)
