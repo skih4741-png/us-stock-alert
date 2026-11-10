@@ -501,7 +501,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             mail_on = os.environ.get("MAIL_ENABLED", "0") == "1"
             slack_on = bool(os.environ.get("SLACK_WEBHOOK_URL"))
             chk("메일 발송", bool(sent.get("mail")) if mail_on else None,
-                "발송 요청 처리" if sent.get("mail") else "실패" if mail_on else "설정에서 꺼짐")
+                sent.get("mail_detail") or ("발송 요청 처리" if sent.get("mail") else "실패" if mail_on else "설정에서 꺼짐"))
             chk("슬랙 발송", bool(sent.get("slack")) if slack_on else None,
                 "발송 요청 처리" if sent.get("slack") else "실패" if slack_on else "설정 없음")
             chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")),

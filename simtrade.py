@@ -286,6 +286,29 @@ def _recover_tail(st, p, day, frames):
     return False
 
 
+
+def ledger_asof(st):
+    """Latest market date already incorporated in cash/positions; never use run time."""
+    days = [st.get("checked") or ""]
+    days += [str(e[0]) for e in st.get("equity", []) if e]
+    days += [str(c.get("exit_date") or "") for c in st.get("closed", [])]
+    for p in st.get("positions", []):
+        days.extend([str(p.get("date") or ""), str(p.get("seen_to") or "")[:10]])
+    return max(days, default="")
+
+
+def _valuation_block(store, st, day, now_iso, issues, picks):
+    for ticker, reason in issues:
+        _defer(st, ticker, day, reason)
+    st["valuation"] = {"date": day, "ok": False, "issues": list(st["unresolved"])}
+    st["pending"] = []
+    st["selection"] = {"date": day, "total": len(picks), "planned": 0,
+                       "excluded": {}, "pause": "평가·날짜 확인 대기"}
+    st["updated"] = now_iso
+    save(store, st)
+    return st
+
+
 def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, key: str = KEY,
          intraday_bars: dict | None = None) -> dict | None:
     """picks: 앱 형식 후보(pick_view). market: {'regime','rest_day'}. 반환: 상태(없으면 None)."""
@@ -294,6 +317,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         return None
     cfg = st["cfg"]
     st["unresolved"] = []
+    if bar_date < ledger_asof(st):
+        return _valuation_block(store, st, bar_date, now_iso,
+                                [("장부", "장부 기준일보다 과거 평가 요청 · 소급 기록 차단")], picks)
     verified_policy = store.get_blob("validated_strategy_policy") or None
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
@@ -303,6 +329,16 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     hist = {t: df[df.index.strftime("%Y-%m-%d") <= bar_date].copy()
             for t, df in raw_hist.items() if df is not None and len(df)}
     H = lambda t: hist.get(t.replace(".", "-"))
+    issues = []
+    for p in st["positions"]:
+        df = H(p["t"])
+        if df is None or not len(df) or df.index[-1].strftime("%Y-%m-%d") != bar_date:
+            issues.append((p["t"], "평가일 보유 종목 가격 누락·지연"))
+        elif not all(np.isfinite(float(df.iloc[-1][k])) and float(df.iloc[-1][k]) > 0
+                     for k in ("Open", "High", "Low", "Close")):
+            issues.append((p["t"], "평가일 보유 종목 가격 유효성 실패"))
+    if issues:
+        return _valuation_block(store, st, bar_date, now_iso, issues, picks)
     partial = [p["t"].replace(".", "-") for p in st["positions"] if p.get("seen_to")
                and p["seen_to"][:10] <= bar_date
                and not trading_sessions.completed_session(p["seen_to"], p["seen_to"][:10])]
@@ -434,14 +470,19 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             _ticket(st, o["t"], o["signal_date"], result="미체결", day=d, limit=o["limit"], qty=o["qty"], low=round(lo, 2))
     st["pending"] = still
 
+    if st.get("unresolved"):
+        return _valuation_block(store, st, bar_date, now_iso, [], picks)
+
     # 평가금액·SPY
     spy = H("SPY")
     val = st["cash"] + sum(p["qty"] * float(H(p["t"])["Close"].iloc[-1]) for p in st["positions"] if H(p["t"]) is not None)
-    spy_px = float(spy["Close"].iloc[-1]) if spy is not None else None
+    spy_px = float(spy["Close"].iloc[-1]) if spy is not None and spy.index[-1].strftime("%Y-%m-%d") == bar_date and np.isfinite(float(spy["Close"].iloc[-1])) and float(spy["Close"].iloc[-1]) > 0 else None
     if st["equity"] and st["equity"][-1][0] == bar_date:
         st["equity"][-1] = [bar_date, round(val, 2), spy_px]   # 같은 날 다시 돌면 최신 값으로
     else:
         st["equity"].append([bar_date, round(val, 2), spy_px])
+
+    st["valuation"] = {"date": bar_date, "ok": True, "asof": bar_date}
 
     # 월 손실 한도
     month = bar_date[:7]
@@ -697,7 +738,9 @@ def summary(st: dict, sig: dict | None = None) -> dict:
     today = config.now_kst().date()
     d5 = (sig or {}).get("d5") or {}
     ts = ticket_stats(st)
+    valuation_ok = (st.get("valuation") or {}).get("ok") is not False
     checks = [
+        ["평가 가격·날짜 확인 완료", valuation_ok, "확인 대기" if not valuation_ok else "최신 평가 기록 기준"],
         ["모의 거래 12번 이상", len(closed) >= 12, f"{len(closed)}번"],
         ["아침 후보 기록 100개 이상, 5일 뒤 평균이 SPY보다 나음",
          (d5.get("n") or 0) >= 100 and isinstance(d5.get("excess"), (int, float)) and d5["excess"] > 0,
@@ -724,6 +767,7 @@ def summary(st: dict, sig: dict | None = None) -> dict:
         "evaluated": st.get("evaluated"), "today": st.get("today") or [], "updated": st.get("updated"), "reports": (st.get("reports") or [])[:30], "curve": [[e[0], e[1]] for e in eq][-120:],
         "risk_day": day_risk(st, max(eq[-1][0] if eq else st["start"], (st.get("intra_at") or st["start"])[:10])), "review": review(st),
         "selection": st.get("selection"),
+        "valuation": st.get("valuation"), "equity_asof": eq[-1][0] if eq else None,
         "tickets": (st.get("tickets") or [])[::-1][:30], "ticket_stats": ts, "intra_at": st.get("intra_at"),
     }
 

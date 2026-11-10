@@ -1317,12 +1317,13 @@
       today = '<div class="broker-today small num">오늘 ' + (d >= 0 ? "▲" : "▼") + " " + usd(d) + (base ? " (" + pct(d / base * 100) + ")" : "") + "</div>";
     }
     const gapp = (m.ret != null && m.spy_ret != null) ? m.ret - m.spy_ret : null;
-    return '<div class="card broker">' +
+    const incomplete = m.valuation && m.valuation.ok === false;
+    return (incomplete ? '<div class="msg err">평가 확인 대기 · 아래 금액은 ' + esc(m.equity_asof || "마지막 정상 평가") + ' 기준입니다. 신규 매수를 보류했어요.</div>' : "") + '<div class="card broker">' +
       '<div class="row between"><span class="sub">모의 평가금액</span><span class="badge info">가상 $' + fmt(m.budget, 0) + " · 실제 주문 없음</span></div>" +
       '<div class="broker-eq num">$' + fmt(m.equity) + "</div>" +
       '<div class="broker-ret num ' + (up ? "good-t" : "bad-t") + '">' + (up ? "▲" : "▼") + " " + usd(gain) + " (" + pct(m.ret) + ")</div>" +
       today +
-      '<div class="broker-row small num">현금 $' + fmt(m.cash) + " · 주식 $" + fmt(m.equity - m.cash) + " · " + (m.positions || []).length + "종목</div>" +
+      '<div class="broker-row small num">현금 $' + fmt(m.cash) + (incomplete ? " · 주식 평가 확인 대기 · " : " · 주식 $" + fmt(m.equity - m.cash) + " · ") + (m.positions || []).length + "종목</div>" +
       (m.spy_ret != null ? '<div class="small num">같은 기간 SPY ' + pct(m.spy_ret) + (gapp != null ? " · " + (gapp >= 0 ? "+" : "") + fmt(gapp, 1) + "%p " + (gapp >= 0 ? "앞서요" : "뒤처져요") : "") + "</div>" : "") +
       (ref ? '<div class="small broker-ref">참고: 같은 규칙으로 ' + (ref.max_pos || 2) + "종목만 집중했다면 " + pct(ref.ret) + "</div>" : "") + "</div>";
   }
