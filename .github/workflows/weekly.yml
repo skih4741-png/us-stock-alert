@@ -13,6 +13,7 @@ jobs:
       NAVER_ID: ${{ secrets.NAVER_ID }}
       NAVER_APP_PASSWORD: ${{ secrets.NAVER_APP_PASSWORD }}
       MAIL_TO: ${{ secrets.MAIL_TO }}
+      MAIL_ENABLED: ${{ vars.MAIL_ENABLED || '0' }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -34,3 +35,4 @@ jobs:
           cache: pip
       - run: pip install yfinance pandas numpy requests gspread google-auth pywebpush
       - run: python main.py weekly
+

@@ -30,9 +30,9 @@ DEFAULT_PRICE = (1.25, 10.0)
 # small/big: 기본 모델. 환경변수 <NAME>_MODEL 또는 설정 'AI 모델 <name>'로 덮어쓸 수 있어요.
 PROVIDERS = [
     {"name": "groq", "url": "https://api.groq.com/openai/v1", "key": "GROQ_API_KEY",
-     "small": "llama-3.1-8b-instant", "big": "openai/gpt-oss-120b", "json": True, "paid": False},
+     "small": "openai/gpt-oss-20b", "big": "openai/gpt-oss-120b", "json": True, "paid": False},
     {"name": "openrouter", "url": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY",
-     "small": "meta-llama/llama-3.3-70b-instruct:free", "big": "meta-llama/llama-3.3-70b-instruct:free", "json": False, "paid": False},
+     "small": "openrouter/free", "big": "openrouter/free", "json": False, "paid": False},
     {"name": "nvidia", "url": "https://integrate.api.nvidia.com/v1", "key": "NVIDIA_API_KEY",
      "small": "meta/llama-3.1-8b-instruct", "big": "meta/llama-3.3-70b-instruct", "json": False, "paid": False},
     {"name": "huggingface", "url": "https://router.huggingface.co/v1", "key": "HF_API_KEY",
@@ -52,11 +52,14 @@ COMMON = """너는 미국 주식 개인 투자 앱의 분석 도우미야. 아�
 7. 쉬운 한국어로, 영어 약자는 처음 한 번 풀어서 써.
 8. 답은 요청한 모양의 JSON 하나로만."""
 
-_S = {"store": None, "cfg": {}, "usage": None, "dirty": False, "disabled_reason": "", "dead": set()}
+_S = {"store": None, "cfg": {}, "usage": None, "dirty": False, "disabled_reason": "", "dead": set(),
+      "bad_models": set(), "cooldown": {}, "last_request": {}, "errors": {},
+      "run": {"succeeded": 0, "failed": 0}}
 
 
 def init(store, cfg: dict):
-    _S.update(store=store, cfg=cfg, usage=None, dirty=False, disabled_reason="", dead=set())
+    _S.update(store=store, cfg=cfg, usage=None, dirty=False, disabled_reason="", dead=set(),
+              bad_models=set(), cooldown={}, last_request={}, errors={}, run={"succeeded": 0, "failed": 0})
 
 
 def _month() -> str:
@@ -118,7 +121,8 @@ def _paid_off() -> bool:
 def _have(p: dict) -> bool:
     if p.get("paid") and _paid_off():
         return False
-    return bool(os.environ.get(p["key"])) and p["name"] not in _S["dead"]
+    return (bool(os.environ.get(p["key"])) and p["name"] not in _S["dead"]
+            and time.monotonic() >= _S["cooldown"].get(p["name"], 0))
 
 
 def enabled() -> tuple[bool, str]:
@@ -196,12 +200,29 @@ def _record(where: str, p: dict, model: str, pin: int, pout: int):
 
 
 def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90, _fallback: bool = False) -> dict | None:
+    name, model = p["name"], body.get("model", "")
+    if name == "openrouter" and _paid_off() and model != "openrouter/free" and not model.endswith(":free"):
+        _S["errors"][name] = {"status": "paid_model_blocked", "model": model, "where": where[:80]}
+        return None
+    if (name, model) in _S["bad_models"]:
+        if name == "groq" and model != "openai/gpt-oss-20b" and not _fallback:
+            return _post(p, path, dict(body, model="openai/gpt-oss-20b"), where, timeout, True)
+        return None
     key = os.environ.get(p["key"])
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     if p["name"] == "openrouter":
         headers["HTTP-Referer"] = "https://github.com/skih4741-png/us-stock-alert"
         headers["X-Title"] = "us-stock-alert"
     for attempt in range(2):
+        if name == "groq":
+            try:
+                interval = max(0, min(10, float(_S["cfg"].get("AI Groq 호출 간격(초)", 3))))
+            except (TypeError, ValueError):
+                interval = 3
+            remaining = interval - (time.monotonic() - _S["last_request"].get(name, 0))
+            if remaining > 0:
+                time.sleep(remaining)
+        _S["last_request"][name] = time.monotonic()
         try:
             r = requests.post(p["url"] + path, json=body, timeout=timeout, headers=headers)
         except Exception as e:
@@ -220,8 +241,11 @@ def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90, _fallba
             err = {"message": err}
         code = str(err.get("code") or err.get("type") or "")
         msg = str(err.get("message", "") or "")
-        if r.status_code == 404 and p["name"] == "groq" and not _fallback:
-            fallback = dict(body, model="llama-3.1-8b-instant")
+        _S["errors"][name] = {"status": r.status_code, "model": model, "where": where[:80]}
+        if r.status_code in (404, 410):
+            _S["bad_models"].add((name, model))
+        if r.status_code in (404, 410) and name == "groq" and not _fallback:
+            fallback = dict(body, model="openai/gpt-oss-20b")
             if body.get("model") == fallback["model"]:
                 return None
             # 한 번만 재시도; 제어 플래그는 HTTP 본문에 보내지 않아요.
@@ -234,7 +258,22 @@ def _post(p: dict, path: str, body: dict, where: str, timeout: int = 90, _fallba
             else:
                 log.warning("%s 키 거부(%s) → 다음 공급자", p["name"], r.status_code)
             return None
-        if code == "insufficient_quota" or r.status_code in (402, 429):
+        if r.status_code == 413 and name == "groq" and attempt == 0:
+            # Bound one retry. Shrink data while preserving the system instructions.
+            body = dict(body, messages=[dict(m, content=m.get("content", "")[:max(256, len(m.get("content", "")) // 2)])
+                                       if m.get("role") != "system" else dict(m)
+                                       for m in body.get("messages", [])])
+            body["max_tokens"] = min(int(body.get("max_tokens", 2000)), 1500)
+            continue
+        if r.status_code == 429 and code != "insufficient_quota":
+            try:
+                retry_after = max(3, min(300, float(getattr(r, "headers", {}).get("retry-after", 60))))
+            except (TypeError, ValueError):
+                retry_after = 60
+            _S["cooldown"][name] = time.monotonic() + retry_after
+            log.info("%s 일시 제한(429) → %.0f초 뒤 재사용", name, retry_after)
+            return None
+        if code == "insufficient_quota" or r.status_code == 402:
             _S["dead"].add(p["name"])
             if p["name"] == "openai" and code == "insufficient_quota":
                 _S["disabled_reason"] = "OpenAI 크레딧 부족"
@@ -257,9 +296,14 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
     ok, why = enabled()
     if not ok:
         log.info("AI 건너뜀(%s): %s", where, why)
+        _S["run"]["failed"] += 1
         return None
     src = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
-    user = task + "\n\n— 여기부터 자료 —\n" + src[:60000] + "\n— 자료 끝 —\nJSON으로만 답해."
+    try:
+        source_limit = max(1000, min(60000, int(float(_S["cfg"].get("AI 입력 최대 글자", 12000)))))
+    except (TypeError, ValueError):
+        source_limit = 12000
+    user = task + "\n\n— 여기부터 자료 —\n" + src[:source_limit] + "\n— 자료 끝 —\nJSON으로만 답해."
     for p in _chain():
         if not _have(p):
             continue
@@ -271,6 +315,11 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
                 "messages": [{"role": "system", "content": COMMON}, {"role": "user", "content": user}]}
         if p["json"]:
             body["response_format"] = {"type": "json_object"}
+        if p["name"] == "groq":
+            body["messages"][1]["content"] = user[:8000]
+            body[tok] = min(max_tokens, 4000)
+            if model.startswith("openai/gpt-oss"):
+                body["reasoning_effort"] = "low"
         if p["name"] == "openai" and model.startswith("gpt-5"):
             body["reasoning_effort"] = "low"
         j = _post(p, "/chat/completions", body, where, timeout)
@@ -288,8 +337,10 @@ def chat_json(where: str, task: str, data, kind: str = "small", max_tokens: int 
         except Exception:
             parsed = None
         if parsed is not None:
+            _S["run"]["succeeded"] += 1
             return parsed
         log.warning("%s 답 형식 오류(%s) → 다음 공급자", p["name"], where)
+    _S["run"]["failed"] += 1
     return None
 
 
@@ -353,6 +404,7 @@ def checked(where: str, task: str, data, kind: str = "small", max_tokens: int = 
         return None
     ins = inspect(where, ans, data)
     if ins is None:
+        _S["run"]["failed"] += 1
         if not keep_unchecked:
             return None
         ans["_검사"] = {"ok": None, "issues": [], "note": "검사관이 답하지 못했어요 — 숫자는 아래 시세 표로 한 번 더 확인하세요"}
@@ -398,7 +450,8 @@ def status() -> dict:
     ok, why = enabled()
     keys = [p["name"] for p in PROVIDERS if os.environ.get(p["key"])]
     return {"month": u["month"], "spent": spent(), "cap": cap(), "calls": u["calls"], "by": u["by"],
-            "on": ok, "why": why, "keys": keys, "prov": u.get("prov", {})}
+            "on": ok, "why": why, "keys": keys, "prov": u.get("prov", {}),
+            "run": dict(_S["run"]), "errors": dict(_S["errors"])}
 
 
 if __name__ == "__main__":  # python ai.py check — 공급자·키 확인 (값은 출력하지 않아요)
@@ -416,3 +469,4 @@ if __name__ == "__main__":  # python ai.py check — 공급자·키 확인 (값�
     print("상태:", json.dumps(status(), ensure_ascii=False))
     flush()
     sys.exit(0)
+

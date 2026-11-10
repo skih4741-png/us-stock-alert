@@ -8,6 +8,7 @@ import json
 import os
 import math
 import setups
+import operations_health
 
 from terms import DISCLAIMER, REGIME
 
@@ -143,18 +144,13 @@ def add_run(store, kind: str, at: str, ok, took: int, changed: list, checks: lis
     except Exception:
         perf = {}
     runs = perf.get("runs") or []
-    bad = [c for c in checks if c.get("ok") is False]
-    if ok is True and bad:
-        ok = "warn"   # 끝까지 돌았지만 점검 하나 이상 실패
+    ok = operations_health.run_outcome(ok, checks)
     runs.insert(0, {"kind": kind, "label": RUN_LABEL.get(kind, kind), "at": at, "ok": ok, "took": took,
-                    "changed": [str(x)[:160] for x in changed][:8], "checks": checks[-30:], "err": str(err)[-350:],
+                    "changed": [str(x)[:160] for x in changed][:8], "checks": checks[-30:], "err": str(err)[-600:],
                     "run_url": ("https://github.com/" + os.environ["GITHUB_REPOSITORY"] + "/actions/runs/" + os.environ["GITHUB_RUN_ID"])
                     if os.environ.get("GITHUB_REPOSITORY") and os.environ.get("GITHUB_RUN_ID", "").isdigit() else ""})
     perf["runs"] = runs[:keep]
-    try:
-        store.put_blob("perf", dumps(_clean(perf)))
-    except Exception:
-        pass
+    store.put_blob("perf", dumps(_clean(perf)))
 
 
 def add_alert(store, kind: str, title: str, body: str, at: str, tone: str = "info", max_items: int = 200):
@@ -172,3 +168,4 @@ def add_alert(store, kind: str, title: str, body: str, at: str, tone: str = "inf
     else:
         items.insert(0, {"kind": kind, "title": title, "body": body, "at": at, "tone": tone})
     store.put_blob("alerts", dumps(items[:max_items]))
+

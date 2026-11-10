@@ -61,14 +61,17 @@ def chk(name: str, ok, detail: str = ""):
 
 def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", stage: str = ""):
     at = config.now_kst().isoformat(timespec="minutes")
+    ok = operations_health.run_outcome(ok, list(CHECKS), require_daily=kind == "daily")
     try:
         appdata.add_run(store, kind, at, ok, int(time.time() - t0), changed, list(CHECKS), err)
     except Exception as e:
         log.warning("실행 기록 실패: %s", e)
+        ok = False
+        chk("실행 기록 저장", False, e)
     try:
         previous = operations_health.read_health(store)
         report = operations_health.build_health(kind=kind, at=at, checks=list(CHECKS),
-                                                 success=bool(ok), error=err, stage=stage, previous=previous)
+                                                 success=ok, error=err, stage=stage, previous=previous)
         try:
             recent = json.loads(store.get_blob("perf") or "{}").get("runs") or []
             report["weekly"] = operations_health.weekly_metrics(recent, config.now_kst())
@@ -76,13 +79,24 @@ def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", st
             report["weekly_error"] = str(metrics_error)[:160]
         report["recovery"] = operations_health.recovery_plan(list(CHECKS))
         operations_health.save_health(store, report)
-        if ok and kind == "daily" and report["state"] == "failed":
+        if ok != "skip" and kind == "daily" and report["state"] in ("failed", "incomplete"):
             failures = " / ".join(report["failed"])[:250]
             log.error("운영 점검 실패: %s", failures)
             notify.send_slack("⚠ 아침 분석 일부 단계 실패 · " + failures +
                               "\nGitHub Actions 로그와 관리자 점검 화면을 확인하세요.")
     except Exception as e:
         log.error("운영 상태 저장/경고 실패: %s", e)
+        chk("운영 상태 저장", False, e)
+        try:
+            perf = json.loads(store.get_blob("perf") or "{}")
+            latest = (perf.get("runs") or [None])[0]
+            if latest and latest.get("at") == at and latest.get("kind") == kind:
+                latest.update(ok=False, checks=list(CHECKS)[-30:], err="운영 상태 저장 실패")
+                store.put_blob("perf", appdata.dumps(perf))
+        except Exception as persist_error:
+            log.error("실패 상태 기록도 저장하지 못함: %s", persist_error)
+        return False
+    return ok
 
 STATE = Path(__file__).parent / "data" / "state.json"
 import re as _re
@@ -133,8 +147,8 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             log.info("새 거래일 자료가 없어요(미국 휴장) → 종료")
             store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                       "성공/실패": "건너뜀", "메모": "미국 휴장"}])
-            record_run(store, "daily", t0, "skip", [f"새 거래일 자료 없음 (마지막 {bar_date}) — 미국 휴장이라 쉬었어요"])
-            return {"skipped": True}
+            outcome = record_run(store, "daily", t0, "skip", [f"새 거래일 자료 없음 (마지막 {bar_date}) — 휴장 또는 이미 처리한 거래일"])
+            return {"skipped": True, "exit_code": 0 if outcome == "skip" else 2}
         mk = market.judge(spy, vix, cfg)
         prev_regime = state.get("regime")
         regime_to_bear = prev_regime not in (None, "bear") and mk["regime"] == "bear"
@@ -483,7 +497,14 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             miss = [h["t"] for h in app.get("holdings", []) if h.get("price") is None]
             chk("보유 종목 가격", (not miss) if app.get("holdings") else None,
                 (f"{len(app['holdings'])}개 모두 받음" if not miss else "못 받음: " + ", ".join(miss[:6])) if app.get("holdings") else "보유 종목이 없어요")
-            chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")), f"메일 {'O' if sent.get('mail') else 'X'} · 슬랙 {'O' if sent.get('slack') else 'X'}")
+            mail_on = os.environ.get("MAIL_ENABLED", "0") == "1"
+            slack_on = bool(os.environ.get("SLACK_WEBHOOK_URL"))
+            chk("메일 발송", bool(sent.get("mail")) if mail_on else None,
+                "발송 요청 처리" if sent.get("mail") else "실패" if mail_on else "설정에서 꺼짐")
+            chk("슬랙 발송", bool(sent.get("slack")) if slack_on else None,
+                "발송 요청 처리" if sent.get("slack") else "실패" if slack_on else "설정 없음")
+            chk("메일·슬랙 발송", bool(sent.get("mail") or sent.get("slack")),
+                "채널별 결과 참조 · 수신 기기 도착은 미검증")
             audited = operations_health.verify_daily_artifacts(store, today_iso)
             app_audit = next((x for x in audited if x["n"] == "앱 데이터 읽기 검증"), None)
             if app_audit is not None and app_audit["ok"] is False:
@@ -500,15 +521,16 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
                        + (f" (어제 {REGIME[prev_regime]})" if prev_regime and prev_regime != mk["regime"] else "")]
             if st_sim and st_sim.get("today"):
                 changed.append("모의: " + " / ".join(st_sim["today"][:2]))
-            record_run(store, "daily", t0, True, changed)
+            outcome = record_run(store, "daily", t0, True, changed)
         took = int(time.time() - t0)
         store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
-                                  "성공/실패": "성공", "분석한 종목 수": len(base), "걸린 시간(초)": took,
+                                  "성공/실패": ("성공" if dry or outcome is True else "부분 실패" if outcome == "warn" else "실패"), "분석한 종목 수": len(base), "걸린 시간(초)": took,
                                   "메모": f"메일 {'O' if sent['mail'] else 'X'} · 슬랙 {'O' if sent['slack'] else 'X'} · 국면 {REGIME[mk['regime']]}"}])
         if not dry:
             state.update({"last_bar_date": bar_date, "regime": mk["regime"], "last_run": now.isoformat()})
             save_state(state)
-        return {"report": report, "results": results, "analyzed": len(base)}
+        return {"report": report, "results": results, "analyzed": len(base),
+                "exit_code": 0 if dry or outcome is True else 2}
     except Exception as e:
         took = int(time.time() - t0)
         msg = f"{stage} 단계에서 멈췄어요: {e}"
@@ -809,7 +831,9 @@ def run_watch(kind: str, dry: bool):
             record_run(store or Store(), kind, t0, False, changed + [f"멈춤: {str(e)[:100]}"], traceback.format_exc())
         raise
     if store is not None and not dry:
-        record_run(store, kind, t0, True, changed or ["새로 알릴 것 없음"])
+        outcome = record_run(store, kind, t0, True, changed or ["새로 알릴 것 없음"])
+        return {"exit_code": 0 if outcome is True else 2}
+    return {"exit_code": 0, "skipped": store is None}
 
 
 def _run_watch(kind: str, dry: bool, changed: list):
@@ -913,12 +937,22 @@ def _run_watch(kind: str, dry: bool, changed: list):
 def run_ai(store, app: dict, cfg: dict, now, send: bool = True):
     """4단계 GPT 기능 (밤사이 브리핑·실적 카드·4관점·쉬운 리포트·사전 부검). GPT가 꺼져 있으면 건너뛰어요."""
     try:
+        before = ai.status().get("run", {}).copy()
         blob = research.run_daily(store, app, cfg, simtrade.load(store))
+        for item in (blob or {}).get("numeric_checks", []):
+            chk(item["n"], item.get("ok"), item.get("d", ""))
         st_ = (blob or {}).get("status") or ai.status()
-        if not st_.get("on"):
-            chk("AI 카드", None, "GPT 꺼짐 — " + str(st_.get("why") or "") + " · 숫자 카드(차트·포트폴리오·분기)는 계산")
+        counters = ai.status().get("run", {})
+        failures = counters.get("failed", 0) - before.get("failed", 0)
+        successes = counters.get("succeeded", 0) - before.get("succeeded", 0)
+        if failures:
+            chk("AI 카드", False, f"호출 성공 {successes} · 실패 {failures} · 공급자 상태 참조")
+        elif not st_.get("on"):
+            chk("AI 카드", False if st_.get("errors") else None,
+                "GPT 꺼짐 — " + str(st_.get("why") or "") + " · 숫자 카드는 별도 점검")
         else:
-            chk("AI 카드", True, f"이번 달 ${float(st_.get('spent') or 0):.2f} / ${float(st_.get('cap') or 0):.0f}")
+            chk("AI 카드", True if successes else None,
+                f"이번 실행 응답 {successes}개" if successes else "새 호출 없음 · 저장된 자료 사용 또는 대상 없음")
         text = research.brief_text(blob or {})
         items = ((blob or {}).get("brief") or {}).get("items") or []
         if send and text and items:
@@ -945,7 +979,9 @@ def run_news(store, app: dict, cfg: dict, now, send: bool = True):
         srcs = sorted({str(v.get("출처", "")).split(" ")[0] for v in mac.values() if isinstance(v, dict)} - {""})
         chk("경제뉴스", bool(rep or (out.get("all") or {}).get("업종")),
             f"업종 {len((out.get('all') or {}).get('업종') or [])}개" + (" · 요약 있음" if rep else " · 요약 없음(GPT 꺼짐/실패)"))
-        chk("매크로 지표", bool(mac), (f"{len(mac)}개 · 출처 " + "/".join(srcs)) if mac else "FRED·BLS 둘 다 못 받음")
+        cached_macro = sum(bool(v.get("cached")) for v in mac.values() if isinstance(v, dict))
+        chk("매크로 지표", bool(mac) and not cached_macro,
+            (f"{len(mac)}개 · 저장된 이전 자료 {cached_macro}개 · 출처 " + "/".join(srcs)) if mac else "FRED·BLS 둘 다 못 받음")
         if send and (rep or (out.get("all") or {}).get("업종")):
             notify.send_slack("오늘의 경제뉴스 5초 요약", [{"type": "header", "text": {"type": "plain_text", "text": "오늘의 경제뉴스 5초 요약"}},
                                                     {"type": "section", "text": {"type": "mrkdwn", "text": news.slack_text(out)[:2900]}}])
@@ -1118,7 +1154,8 @@ def run_weekly(dry: bool):
     if dry:
         print(text)
         return
-    notify.send_text("주간 요약 · 신호 성적", text)
+    sent = notify.send_text("주간 요약 · 신호 성적", text)
+    chk("주간 요약 발송", bool(sent.get("mail") or sent.get("slack")), "발송 요청 처리 · 기기 도착은 미검증")
     at = now.isoformat(timespec="minutes")
     first = lines[1] if len(lines) > 1 else "지난 신호 성적이 나왔어요"
     try:
@@ -1129,7 +1166,8 @@ def run_weekly(dry: bool):
     except Exception as e:
         log.warning("주간 요약 앱 알림 실패: %s", e)
         chk("주간 요약 저장", False, e)
-    record_run(store, "weekly", t0, True, [first])
+    outcome = record_run(store, "weekly", t0, True, [first])
+    return {"exit_code": 0 if outcome is True else 2}
 
 
 def notify_fail(msg: str):
@@ -1151,14 +1189,17 @@ if __name__ == "__main__":
     ap.add_argument("--app-only", action="store_true", help="보내지 않고 앱 데이터만 저장")
     ap.add_argument("--force", action="store_true", help="새 거래일 자료가 없어도(휴장) 강제로 전체 실행")
     a = ap.parse_args()
+    exit_code = 0
     if a.mode == "daily":
-        run_daily(a.limit, a.dry, a.app_only, a.force)
+        result = run_daily(a.limit, a.dry, a.app_only, a.force)
+        exit_code = result.get("exit_code", 0)
     elif a.mode in ("premarket", "intraday"):
-        run_watch(a.mode, a.dry)
+        exit_code = run_watch(a.mode, a.dry).get("exit_code", 0)
     elif a.mode == "weekly":
-        run_weekly(a.dry)
+        exit_code = (run_weekly(a.dry) or {}).get("exit_code", 0)
     elif a.mode == "pushtest":
         print("보낸 푸시:", push.send(Store(), "시험 알림", a.message or "푸시 알림이 잘 와요", "#/alerts", "system"))
     else:
         notify_fail(a.message or "원인을 알 수 없어요")
-    sys.exit(0)
+    sys.exit(exit_code)
+

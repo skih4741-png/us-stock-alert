@@ -237,8 +237,10 @@ def send_report(r: dict) -> dict:
     return {"mail": ok_mail, "slack": ok_slack, "subject": subj, "text": text}
 
 
-def send_text(title: str, text: str) -> None:
+def send_text(title: str, text: str) -> dict:
     """주간 요약·과거 검증처럼 긴 글: 슬랙(코드 블록) + 메일(켜져 있을 때)."""
-    send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
+    slack = send_slack(title, [{"type": "header", "text": {"type": "plain_text", "text": title[:150]}},
                        {"type": "section", "text": {"type": "mrkdwn", "text": "```" + text[:2800] + "```"}}])
-    send_mail(f"[미국주식] {title}", text)
+    mail = send_mail(f"[미국주식] {title}", text)
+    return {"mail": mail, "slack": slack}
+

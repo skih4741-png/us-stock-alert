@@ -10,6 +10,10 @@
  */
 const OWNER_EMAIL = 'skih4741@naver.com';   // 설정 코드·임시 비밀번호를 받는 메일 (여기만 바꾸면 돼요)
 const APP_NAME = '미국주식 알림';
+const SERVER_VERSION = '2.25.1';
+// Mutations stay serialized. Long market/AI reads must not block login or writes.
+const UNLOCKED_ACTIONS = ['status', 'quote', 'search', 'indices', 'stats', 'fin', 'ai', 'askAI', 'data', 'history', 'pushStatus'];
+let READ_ONLY_REQUEST = false;
 const ITER = 1000;                           // 해시 반복 횟수
 const FULL_TTL_KEEP = 30 * 24 * 3600e3;      // 로그인 유지 30일
 const FULL_TTL = 12 * 3600e3;                // 유지 안 함 12시간 (앱은 닫으면 지워요)
@@ -21,29 +25,34 @@ const MAIL_PER_DAY = 3;
 
 const PROPS = PropertiesService.getScriptProperties();
 
-function doGet() { return out_({ ok: true, app: APP_NAME }); }
+function doGet() { return out_({ ok: true, app: APP_NAME, serverVersion: SERVER_VERSION }); }
 
 function doPost(e) {
   let req;
   try { req = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
   catch (err) { return out_({ ok: false, error: '요청 형식이 잘못됐어요' }); }
-  const fn = ACTIONS[req.action];
+  if (!req || typeof req !== 'object' || Array.isArray(req)) return out_({ ok: false, error: '요청 형식이 잘못됐어요' });
+  const fn = Object.prototype.hasOwnProperty.call(ACTIONS, req.action) && ACTIONS[req.action];
   if (!fn) return out_({ ok: false, error: '알 수 없는 요청이에요' });
-  const lock = LockService.getScriptLock();
+  const unlocked = UNLOCKED_ACTIONS.indexOf(req.action) >= 0;
+  const lock = unlocked ? null : LockService.getScriptLock();
+  let acquired = false;
   try {
-    lock.waitLock(15000);
-    return out_(fn(req));
+    READ_ONLY_REQUEST = unlocked;
+    if (lock) { lock.waitLock(15000); acquired = true; }
+    return out_(Object.assign({}, fn(req), { serverVersion: SERVER_VERSION }));
   } catch (err) {
     return out_({ ok: false, error: String(err && err.message || err) });
   } finally {
-    try { lock.releaseLock(); } catch (x) {}
+    READ_ONLY_REQUEST = false;
+    if (acquired) { try { lock.releaseLock(); } catch (x) {} }
   }
 }
 
 /* ---------------- 요청 ---------------- */
 const ACTIONS = {
   status: function () {
-    return { ok: true, hasAccount: !!acct_().hash };
+    return { ok: true, hasAccount: !!acct_().hash, serverVersion: SERVER_VERSION };
   },
 
   // 시세 프록시 (로그인 없이 공개 시장 데이터만). 야후를 서버에서 받아 앱에 넘겨요(CORS 없음).
@@ -545,6 +554,7 @@ const PAPER_START = 1000;
 function paperSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
   let sh = ss.getSheetByName('모의 거래');
+  if (READ_ONLY_REQUEST) return sh || emptySheet_();
   if (!sh) {
     sh = ss.insertSheet('모의 거래');
     sh.getRange(1, 1, 1, PAPER_COLS.length).setValues([PAPER_COLS]);
@@ -585,8 +595,15 @@ function paperWrite_(rowNo, values) {
 function sheet_(name, header) {
   const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
   let sh = ss.getSheetByName(name);
+  if (READ_ONLY_REQUEST) return sh || emptySheet_();
   if (!sh) { sh = ss.insertSheet(name); sh.getRange(1, 1, 1, header.length).setValues([header]); }
   return sh;
+}
+function emptySheet_() {
+  // Reads must never create sheets or change headers while another request writes.
+  return { getDataRange: function () { return {
+    getDisplayValues: function () { return []; }, getValues: function () { return []; }
+  }; } };
 }
 function watchList_() {
   const sh = sheet_('관심 종목', ['종목']);
@@ -752,6 +769,7 @@ function askAI_(r) {
 function pushSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById(PROPS.getProperty('SHEET_ID'));
   let sh = ss.getSheetByName('푸시 구독');
+  if (READ_ONLY_REQUEST) return sh || emptySheet_();
   if (!sh) { sh = ss.insertSheet('푸시 구독'); sh.appendRow(['등록 시각', '기기', '종류', '구독']); }
   return sh;
 }
@@ -842,57 +860,36 @@ function r2_(x) { return (x == null || isNaN(x)) ? null : Math.round(x * 100) / 
 
 // ---- 온디맨드 AI (무료 공급자 체인, 전부 OpenAI 호환 /chat/completions). 키는 Script Properties에.
 var AI_PROVIDERS = [
-  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'llama-3.1-8b-instant', json: true },
+  { name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY', model: 'openai/gpt-oss-20b', json: true },
   { name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', key: 'GEMINI_API_KEY', model: 'gemini-3.8-flash', json: false },
-  { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'meta-llama/llama-3.3-70b-instruct:free', json: false },
+  { name: 'openrouter', url: 'https://openrouter.ai/api/v1/chat/completions', key: 'OPENROUTER_API_KEY', model: 'openrouter/free', json: false },
   { name: 'nvidia', url: 'https://integrate.api.nvidia.com/v1/chat/completions', key: 'NVIDIA_API_KEY', model: 'meta/llama-3.3-70b-instruct', json: false },
   { name: 'huggingface', url: 'https://router.huggingface.co/v1/chat/completions', key: 'HF_API_KEY', model: 'meta-llama/Llama-3.3-70B-Instruct', json: false }
   // OpenAI(유료)는 비용 발생으로 체인에서 제거했어요. 무료 공급자만 사용(비용 0).
 ];
 function aiCall_(sys, usr) {
-  var props = PropertiesService.getScriptProperties().getProperties();
-  var haveAny = false, diag = [];
-  var candidates = AI_PROVIDERS.map(function (p) {
-    return Object.assign({}, p, { model: props[p.name.toUpperCase() + '_MODEL'] || p.model });
+  return aiCallMsgs_([{ role: 'system', content: sys }, { role: 'user', content: usr }], true, 2500);
+}
+
+function boundedMessages_(messages, limit) {
+  var system = messages.filter(function (m) { return m.role === 'system'; }).map(function (m) {
+    return { role: 'system', content: String(m.content || '').slice(0, 3000) };
   });
-  for (var i = 0; i < candidates.length; i++) {
-    var p = candidates[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
-    haveAny = true;
-    var body = { model: p.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }], max_tokens: 2000, temperature: 0.3 };
-    if (p.json) body.response_format = { type: 'json_object' };
-    try {
-      var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
-      var code = resp.getResponseCode();
-      if (code !== 200) {
-        diag.push(p.name + ':' + code);
-        // 레이트리밋(429)은 잠깐 쉬고 같은 공급자를 한 번 더 시도(무료 등급 분당 한도 대비).
-        if (code === 429 && !p.retried) {
-          Utilities.sleep(2500);
-          candidates.splice(i + 1, 0, Object.assign({}, p, { retried: true }));
-          continue;
-        }
-        // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
-        if (code === 404 && p.name === 'groq' && !p.fallback) {
-          var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
-          candidates.splice(i + 1, 0, Object.assign({}, p, { model: backup, fallback: true }));
-        }
-        continue;
-      }
-      var d = JSON.parse(resp.getContentText());
-      var txt = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-      if (!txt) {
-        diag.push(p.name + ':빈응답');
-        if (p.name === 'groq' && !p.fallback) {
-          var b2 = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
-          candidates.splice(i + 1, 0, Object.assign({}, p, { model: b2, fallback: true }));
-        }
-        continue;
-      }
-      var m = txt.match(/\{[\s\S]*\}/); if (!m) { diag.push(p.name + ':JSON아님'); continue; }
-      return { ok: true, provider: p.name, model: p.model, data: JSON.parse(m[0]) };
-    } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
+  var rest = messages.filter(function (m) { return m.role !== 'system'; }), out = [], remaining = limit;
+  for (var i = rest.length - 1; i >= 0 && remaining > 0; i--) {
+    if (remaining < 40) break;
+    var text = String(rest[i].content || '');
+    if (text.length > remaining) {
+      var tail = Math.min(1500, Math.floor(remaining / 3));
+      text = text.slice(0, remaining - tail - 20) + '\n[자료 일부 생략]\n' + text.slice(-tail);
+    }
+    out.unshift({ role: rest[i].role, content: text }); remaining -= text.length;
   }
-  return { ok: false, error: haveAny ? ('AI 응답 실패 — ' + (diag.filter(function (x) { return x.indexOf('키없음') < 0; }).join(', ') || '원인 미상') + ' · 잠시 후 다시') : 'AI 키가 아직 없어요 (Apps Script 설정 필요)', diag: diag };
+  return system.concat(out);
+}
+function aiCooldown_(name, seconds) {
+  try { var c = CacheService.getScriptCache(); if (seconds) c.put('ai_cool_' + name, '1', seconds); return !!c.get('ai_cool_' + name); }
+  catch (e) { return false; }
 }
 
 // 공급자 키가 하나라도 있나 / OpenAI(유료)만 있나 — '묻기'가 무료로 돌 수 있는지 판단용.
@@ -919,25 +916,28 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
   });
   for (var i = 0; i < candidates.length; i++) {
     var p = candidates[i], k = props[p.key]; if (!k) { diag.push(p.name + ':키없음'); continue; }
+    if (p.name === 'openrouter' && p.model !== 'openrouter/free' && !/:free$/.test(p.model)) {
+      diag.push(p.name + ':유료 모델 차단'); continue;
+    }
+    if (aiCooldown_(p.name)) { diag.push(p.name + ':잠시 제한 중'); continue; }
     haveAny = true;
     var isOAI = (p.name === 'openai');
-    var body = { model: p.model, messages: messages, temperature: 0.3 };
-    body[isOAI ? 'max_completion_tokens' : 'max_tokens'] = maxTok || 3000;
+    var body = { model: p.model, messages: boundedMessages_(messages, p.shrunk ? 3000 : p.name === 'groq' ? 7000 : 12000), temperature: 0.3 };
+    if (p.name === 'groq' && p.model.indexOf('openai/gpt-oss') === 0) body.reasoning_effort = 'low';
+    body[isOAI ? 'max_completion_tokens' : 'max_tokens'] = Math.min(maxTok || 3000, p.shrunk ? 1500 : 4000);
     if (wantJson && p.json) body.response_format = { type: 'json_object' };
     try {
       var resp = UrlFetchApp.fetch(p.url, { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { Authorization: 'Bearer ' + k }, payload: JSON.stringify(body) });
       var code = resp.getResponseCode();
       if (code !== 200) {
         diag.push(p.name + ':' + code);
-        // 레이트리밋(429)은 잠깐 쉬고 같은 공급자를 한 번 더 시도(무료 등급 분당 한도 대비).
-        if (code === 429 && !p.retried) {
-          Utilities.sleep(2500);
-          candidates.splice(i + 1, 0, Object.assign({}, p, { retried: true }));
-          continue;
+        if (code === 429) { aiCooldown_(p.name, 60); continue; }
+        if (code === 413 && !p.shrunk) {
+          candidates.splice(i + 1, 0, Object.assign({}, p, { shrunk: true })); continue;
         }
         // 모델 접근 오류에만 같은 공급자의 백업 모델을 시도. 키/한도 오류는 다음 공급자로.
-        if (code === 404 && p.name === 'groq' && !p.fallback) {
-          var backup = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+        if ((code === 404 || code === 410) && p.name === 'groq' && !p.fallback) {
+          var backup = p.model === 'openai/gpt-oss-20b' ? 'openai/gpt-oss-120b' : 'openai/gpt-oss-20b';
           candidates.splice(i + 1, 0, Object.assign({}, p, { model: backup, fallback: true }));
         }
         continue;
@@ -947,7 +947,7 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       if (!txt) {
         diag.push(p.name + ':빈응답');
         if (p.name === 'groq' && !p.fallback) {
-          var b2 = p.model === 'llama-3.1-8b-instant' ? 'openai/gpt-oss-20b' : 'llama-3.1-8b-instant';
+          var b2 = p.model === 'openai/gpt-oss-20b' ? 'openai/gpt-oss-120b' : 'openai/gpt-oss-20b';
           candidates.splice(i + 1, 0, Object.assign({}, p, { model: b2, fallback: true }));
         }
         continue;
@@ -955,6 +955,7 @@ function aiCallMsgs_(messages, wantJson, maxTok) {
       if (isOAI) { var u = d.usage || {}, pr = AI_PRICE[p.model] || [0.15, 0.60]; addAppSpent_((u.prompt_tokens || 0) / 1e6 * pr[0] + (u.completion_tokens || 0) / 1e6 * pr[1]); }
       var m = txt.match(/\{[\s\S]*\}/);
       var data = null; if (m) { try { data = JSON.parse(m[0]); } catch (e) {} }
+      if (wantJson && (!data || Array.isArray(data) || typeof data !== 'object')) { diag.push(p.name + ':JSON아님'); continue; }
       return { ok: true, provider: p.name, model: p.model, text: txt, data: data };
     } catch (e) { diag.push(p.name + ':예외 ' + String(e).slice(0, 60)); }
   }
@@ -1102,3 +1103,4 @@ function entryContext_(input) {
     team:tm?{date:String(tm.date || '').slice(0,10),version:String(tm.version || '').slice(0,30),
       views:(Array.isArray(tm.views)?tm.views:[]).slice(0,4).map(function(v){return {name:String(v.name || '').slice(0,20),stance:String(v.stance || '').slice(0,20),reason:String(v.reason || '').slice(0,350)};})}:null};
 }
+

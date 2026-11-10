@@ -46,19 +46,27 @@
   async function api(action, body) {
     if (!CFG.API_URL) throw new Error("로그인 서버 주소가 아직 설정되지 않았어요 (config.js)");
     const payload = JSON.stringify(Object.assign({ action: action, device: deviceId(), label: deviceLabel() }, body || {}));
-    let res, last;
-    for (let i = 0; i < 3; i++) {  // 연결이 잠깐 끊겨도 두 번 더 시도
+    const safeRetry = ['data', 'status', 'history', 'pushStatus', 'quote', 'search', 'indices', 'stats', 'fin'].includes(action);
+    const attempts = safeRetry ? 2 : 1;
+    const timeoutMs = ['ai', 'askAI'].includes(action) ? 90000 : 25000;
+    let res, last, j;
+    for (let i = 0; i < attempts; i++) {  // 조회만 재시도; 쓰기는 처리 여부 확인 전 재전송하지 않아요
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         res = await fetch(CFG.API_URL, {
-          method: "POST", redirect: "follow", cache: "no-store", credentials: "omit",
+          method: "POST", redirect: "follow", cache: "no-store", credentials: "omit", signal: controller.signal,
           headers: { "Content-Type": "text/plain;charset=utf-8" }, body: payload,
         });
+        if (res.ok) j = await res.json();
         break;
-      } catch (e) { last = e; await new Promise(r => setTimeout(r, 800 * (i + 1))); }
+      } catch (e) { res = null; last = e; if (i + 1 < attempts) await new Promise(r => setTimeout(r, 800)); }
+      finally { clearTimeout(timer); }
     }
+    if (!res && last && last.name === "AbortError") throw new Error(safeRetry ? "서버 응답 시간이 초과됐어요. 잠시 후 다시 조회해 주세요." : "서버 응답이 늦어요. 처리 여부를 새로고침으로 확인한 뒤 다시 시도해 주세요.");
     if (!res) throw new Error("서버에 연결하지 못했어요. 인터넷 연결(와이파이·VPN·광고 차단 앱)을 확인하고 다시 시도해 주세요. (" + (last && last.message) + ")");
     if (!res.ok) throw new Error("서버 응답 오류 (" + res.status + ")");
-    const j = await res.json();
+    S.serverVersion = j.serverVersion || "미확인";
     if (j.auth) { clearAll(); go("#/login"); }
     return j;
   }
@@ -2127,7 +2135,7 @@
       if (mc["한 줄"] || Object.keys(mt).length) {
         h += '<h2>🌍 매크로 (금리·물가·고용·환율)</h2><div class="card">' + (mc["한 줄"] ? "<b>" + esc(mc["한 줄"]) + "</b>" : "") +
           (Object.keys(mt).length ? '<dl class="kv num" style="margin-top:6px">' + Object.values(mt).map(x => "<dt>" + esc(x["이름"]) + "</dt><dd>" + fmt(x["값"]) + esc(x["단위"] === "원" ? "원" : x["단위"] === "천 명" ? "천 명" : "%") +
-            ' <span class="small">직전 ' + (x["직전"] == null ? "—" : fmt(x["직전"])) + " · " + esc(x["기준일"]) + "</span></dd>").join("") + "</dl>" : "") +
+            ' <span class="small">직전 ' + (x["직전"] == null ? "—" : fmt(x["직전"])) + " · " + esc(x["기준일"]) + (x.cached ? " · 이전 저장 자료(갱신 실패)" : "") + "</span></dd>").join("") + "</dl>" : "") +
           ((mc["지표 풀이"] || []).length ? '<ul class="plain small">' + mc["지표 풀이"].map(x => "<li><b>" + esc(x["이름"]) + "</b> " + esc(x["값"] || "") + " — " + esc(x["쉬운 뜻"] || "") + "</li>").join("") + "</ul>" : "") +
           (mc["지정학"] ? '<div class="small">🌐 지정학: ' + esc(mc["지정학"]) + "</div>" : "") + "</div>";
         const sc = mc["6개월 시나리오"] || {};
@@ -2268,13 +2276,13 @@
       '<dl class="kv num"><dt>아침 분석(브리핑·리포트 등)</dt><dd>$' + fmt(u.program) + "</dd><dt>앱 질문</dt><dd>$" + fmt(u.app) + "</dd>" +
       (S.ai && S.ai.off ? "<dt>꺼진 이유</dt><dd>" + esc(S.ai.off) + "</dd>" : "") + "</dl>" +
       '<div class="small">80%·100%·크레딧 소진 때 푸시로 알려요. 한도는 구글 시트 \'설정\' 탭 \'AI 월 한도(달러)\'. 한도에 닿으면 GPT 없이 규칙만으로 돌아가요.</div>' +
-      (u.appKey === false ? '<div class="msg note">앱 \'AI에게 묻기\'를 쓰려면 Apps Script → 프로젝트 설정 → 스크립트 속성에 OPENAI_API_KEY를 직접 넣어 주세요.</div>' : "") + "</div>" +
+      (u.appKey === false ? '<div class="msg note">앱 \'AI에게 묻기\'를 쓰려면 Apps Script → 프로젝트 설정 → 스크립트 속성에 사용할 무료 공급자의 API 키를 넣어 주세요.</div>' : "") + "</div>" +
       '<a class="btn ghost" href="#/ask">AI에게 묻기</a><a class="btn ghost" href="#/profile">투자 성향 인터뷰' + (S.profile && Object.keys(S.profile).length ? " (다시 하기)" : "") + "</a>";
   }
 
   function weeklyOperations(runs) {
     const now = Date.now(), after = now - 7 * 864e5;
-    const recent = runs.filter(r => r.kind === "daily" && Number.isFinite(Date.parse(r.at || "")) &&
+    const recent = runs.filter(r => r.kind === "daily" && r.ok !== "skip" && Number.isFinite(Date.parse(r.at || "")) &&
       Date.parse(r.at) >= after && Date.parse(r.at) <= now);
     const successes = recent.filter(r => r.ok === true).length;
     const warnings = recent.filter(r => r.ok === "warn").length;
@@ -2287,10 +2295,10 @@
 
   function viewOperations() {
     const runs = runsOf();
-    const r = runs.find(x => x.kind === "daily");
+    const r = runs.find(x => x.kind === "daily" && x.ok !== "skip");
     const late = staleInfo();
     const week = weeklyOperations(runs);
-    const state = !r ? "기록 없음" : late ? "실행 지연/미확인" : r.ok === true ? "정상" : r.ok === false ? "실패" : "점검 필요";
+    const state = !r ? "기록 없음" : late ? "실행 지연/미확인" : r.ok === true ? "정상" : r.ok === false ? "실패" : "부분 실패/미확인";
     const tone = !r || late ? "warn" : r.ok === true ? "good" : r.ok === false ? "bad" : "warn";
     const required = ["메일·슬랙 발송", "앱 데이터 저장", "앱 데이터 읽기 검증", "자동 모의투자", "모의매매 저장 상태"];
     const checks = r && Array.isArray(r.checks) ? r.checks : [];
@@ -2299,6 +2307,8 @@
     const body = '<button class="back" onclick="history.back()">← 뒤로</button><h1>🩺 관리자 운영 점검</h1>' +
       '<div class="card"><div class="row between"><b>마지막 아침 실행</b><span class="badge ' + tone + '">' + esc(state) + '</span></div>' +
       '<div class="small">실행 시각: ' + esc(r ? whenText(r.at) : "기록 없음") + '</div>' +
+      '<div class="small">화면 버전 ' + esc(CFG.VERSION || '미확인') + ' · 서버 버전 ' + esc(S.serverVersion || '미확인') + '</div>' +
+      (S.serverVersion !== CFG.SERVER_VERSION ? '<div class="msg note">서버 업데이트 확인이 필요해요. 화면 업데이트만으로 서버 기능은 바뀌지 않습니다.</div>' : '') +
       (late ? '<div class="msg note">예정된 실행 시각 이후 새로운 기록이 없습니다.</div>' : "") +
       '<div class="small">발송 요청 처리와 수신 기기 도착은 서로 다른 검증입니다.</div></div>' +
       '<h2>최근 7일 운영 지표</h2><div class="card"><div class="row between"><b>실행 성공률</b><b>' +
@@ -2308,7 +2318,7 @@
       '<div class="small">실행 ' + week.total + '회 · 정상 ' + week.successes + '회 · 경고 ' +
       week.warnings + '회 · 실패 ' + week.fails + '회</div>' +
       '<div class="small">기록된 아침 실행 기준 · 예약됐지만 시작하지 않은 실행은 제외</div></div>' +
-      '<h2>핵심 기능 점검</h2><div class="card"><ul class="checks">' + audit.map(checkLine).join("") + '</ul></div>' +
+      '<h2>기능별 점검 결과</h2><div class="card"><ul class="checks">' + audit.concat(checks.filter(c => !required.includes(c.n))).map(checkLine).join("") + '</ul></div>' +
       '<h2>실패 단계 및 복구 안내</h2><div class="card">' +
       (audit.filter(x => x.ok !== true).length ?
         audit.filter(x => x.ok !== true).map(x => '<div class="small"><b>' + esc(x.n) + '</b> · ' +
@@ -2549,3 +2559,4 @@
   render();
   refresh(true);
 })();
+

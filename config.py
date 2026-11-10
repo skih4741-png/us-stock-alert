@@ -53,7 +53,17 @@ DEFAULTS: dict[str, float | str] = {
     "AI 월 한도(달러)": 5,
     "뉴스 관심 주제": "",   # 뉴스 탭 업종 13개 중 맨 위에 고정할 업종(쉼표로, 비우면 내 보유가 많은 업종부터). 보여주는 업종 수는 제한하지 않아요
     "AI 브리핑 종목 수": 8,
-    "검증 전략만 표시": "아니오",  # 기본 OFF. 검증된 정책 없으면 신규 주식 후보 없음\n    "SEC 연락 이메일": "",       # 분기 공시(10-Q) 비교용. SEC는 요청자 연락처를 요구해요. 비우면 그 기능만 꺼져요       # 밤사이 브리핑·4관점·쉬운 리포트를 만들 최대 종목 수 (보유 우선)
+    "AI 공급자 순서": "groq,openrouter,nvidia,huggingface,openai",
+    "AI 모델 groq": "",
+    "AI 모델 openrouter": "",
+    "AI 모델 nvidia": "",
+    "AI 모델 huggingface": "",
+    "AI 임베딩 모델": "text-embedding-3-small",
+    "유료 AI 사용": "아니오",
+    "AI 입력 최대 글자": 12000,
+    "AI Groq 호출 간격(초)": 3,
+    "SEC 연락 이메일": "",
+    "검증 전략만 표시": "아니오",  # 기본 OFF. 검증된 정책 없으면 신규 주식 후보 없음
 }
 
 
@@ -107,3 +117,4 @@ def price_bands(cfg: dict) -> list[tuple[float, float, str]]:
             break
         bands.append((lo, hi, name))
     return bands
+

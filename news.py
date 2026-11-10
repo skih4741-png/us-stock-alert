@@ -146,6 +146,19 @@ def market_table() -> dict:
     return out
 
 
+def merge_macro_cache(current: dict, previous: dict) -> dict:
+    """Keep a dated last-known value only when a fresh equivalent is missing."""
+    out = {k: dict(v, cached=False) for k, v in current.items() if isinstance(v, dict)}
+    names = {v.get("이름") for v in out.values()}
+    for k, value in previous.items():
+        if not isinstance(value, dict) or not value.get("기준일") or value.get("값") is None:
+            continue
+        if k not in out and value.get("이름") not in names:
+            out[k] = dict(value, cached=True)
+            names.add(value.get("이름"))
+    return out
+
+
 def macro_table() -> dict:
     """FRED CSV로 물가·고용·성장·금리·환율. 실패한 지표는 빠져요."""
     out, fails = {}, 0
@@ -314,7 +327,7 @@ def build(store, cfg: dict, holdings: list[str]) -> dict:
                 out.append(x)
         return out
 
-    macro = macro_table()
+    macro = merge_macro_cache(macro_table(), (ab.get("news") or {}).get("macro") or {})
     headlines = uniq(yahoo_news("SPY", 10) + gnews("stock market Fed economy", n=10) + gnews("미국 증시", ko=True, n=8))
     cache = _industries(holdings[:20], cache)
     ab["news_ind"] = cache
@@ -454,3 +467,4 @@ if __name__ == "__main__":  # python news.py [--send] — 지금 한 번 만들�
                                                 {"type": "section", "text": {"type": "mrkdwn", "text": slack_text(res)[:2900]}}])
         appdata.add_alert(st, "news", "오늘의 경제뉴스", " / ".join(rep.get("5초 요약") or [])[:200], res["at"], "info")
     sys.exit(0)
+

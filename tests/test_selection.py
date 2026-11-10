@@ -17,16 +17,19 @@ def pick(**changes):
 
 def test_balanced_gate_keeps_positive_net_expectancy():
     p = pick()
-    assert setups.is_elite(p['edge'], 2.)
-    assert not setups.exclusion(p)
+    assert not setups.paper_gate(p)
+    assert not setups.is_elite(p['edge'], 2.)  # Paper evidence does not imply the stricter elite gate.
     for key, value, reason in [('n', 7, '완료 표본 부족'), ('win', 54, '목표 도달률 미달'),
-                               ('avg', 0, '비용 차감 기대값 미달'), ('avg_r', -.1, '비용 차감 기대값 미달')]:
+                               ('avg', 0, '비용 차감 기대값 음수')]:
         q = copy.deepcopy(p)
         q['edge'][key] = value
         assert not setups.is_elite(q['edge'], 2.)
-        assert setups.exclusion(q) == reason
-    assert setups.exclusion(pick(setup=None)) == '셋업 없음'
-    assert setups.exclusion(pick(etf=True)) == 'ETF·펀드 제외'
+        assert setups.paper_gate(q) == reason
+    assert setups.paper_gate(pick(setup=None)) == '셋업 없음'
+    assert setups.paper_gate(pick(etf=True)) == 'ETF·펀드 제외'
+    strong = dict(p['edge'], avg_r=.2, robust=True)
+    assert setups.is_elite(strong, 2.)
+    assert not setups.is_elite(dict(strong, robust=False), 2.)
     assert not setups.is_elite(p['edge'], 1.49)
 
 
@@ -63,3 +66,4 @@ def test_order_funnel_records_reasons_and_preserves_guards(monkeypatch):
     assert st['cfg']['day_loss'] == .03 and st['cfg']['day_trades'] == 3
     st = simtrade.step(store, candidates, '2026-10-02', {'regime':'bear'}, '2026-10-03')
     assert not st['pending'] and st['selection']['pause'] == '하락장'
+

@@ -12,14 +12,29 @@ from datetime import datetime, timedelta, timezone
 CRITICAL = ("메일·슬랙 발송", "앱 데이터 저장", "자동 모의투자")
 
 
+def run_outcome(ok, checks: list[dict], *, require_daily: bool = False):
+    """Use explicit values; non-empty 'skip'/'warn' strings are not success."""
+    if ok is False or ok == "skip":
+        return ok
+    entries = {c.get("n"): c.get("ok") for c in checks}
+    if any(entries.get(n) is False for n in CRITICAL + ("앱 데이터 읽기 검증",)):
+        return False
+    if ok == "warn" or any(c.get("ok") is False for c in checks):
+        return "warn"
+    if require_daily and any(n not in entries or entries[n] is None for n in CRITICAL):
+        return "warn"
+    return True
+
+
 def build_health(*, kind: str, at: str, checks: list[dict], success: bool,
                  error: str = "", stage: str = "", previous: dict | None = None) -> dict:
     entries = {str(c.get("n")): {"ok": c.get("ok"), "detail": str(c.get("d", ""))[:300]}
                for c in checks if c.get("n")}
     failing = [name for name, value in entries.items() if value["ok"] is False]
     missing = [name for name in CRITICAL if name not in entries] if kind == "daily" else []
-    optional = [name for name in CRITICAL if entries.get(name, {}).get("ok") is None]
-    state = "failed" if not success or failing else "incomplete" if missing or optional else "ok"
+    optional = [name for name in CRITICAL if entries.get(name, {}).get("ok") is None] if kind == "daily" else []
+    state = ("skipped" if success == "skip" else "failed" if success is False or failing
+             else "incomplete" if missing or optional or success == "warn" else "ok")
     if kind != "daily" and state == "ok":
         state = "ok"
     repo = os.environ.get("GITHUB_REPOSITORY", "")
@@ -139,7 +154,7 @@ def weekly_metrics(runs: list[dict], now: datetime | None = None,
     start = now - timedelta(days=days)
     selected = []
     for r in runs:
-        if r.get("kind") != kind:
+        if r.get("kind") != kind or r.get("ok") == "skip":
             continue
         try:
             timestamp = datetime.fromisoformat(str(r.get("at", "")).replace("Z", "+00:00"))
@@ -165,3 +180,4 @@ def weekly_metrics(runs: list[dict], now: datetime | None = None,
         "timed_runs": len(durations),
         "note": "기록된 실행 기준. 예약됐지만 시작되지 않은 실행은 이 통계에 포함되지 않음",
     }
+

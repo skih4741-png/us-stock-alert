@@ -5,6 +5,12 @@ on:
     paths:
       - "performance.py"
       - "main.py"
+      - "ai.py"
+      - "research.py"
+      - "sheets.py"
+      - "diagnostics.py"
+      - "notify.py"
+      - "apps_script/**"
       - "app.py"
       - "appdata.py"
       - "docs/**"
@@ -18,7 +24,7 @@ on:
       - "validation/**"
       - "execution_rules.py"
       - "simtrade.py"
-      - "tests/test_strategy_validation.py"
+      - "tests/**"
       - ".github/workflows/strategy-validation-tests.yml"
   workflow_dispatch:
 
@@ -33,12 +39,16 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest
       - name: Compile validation modules
         run: python -m compileall -q app.py operations_health.py main.py config.py performance.py setups.py execution_rules.py backtest.py simtrade.py strategy_policy.py validation tests/test_strategy_validation.py
       - name: Run regression tests
-        run: python -m unittest discover -s tests -p 'test_strategy_validation.py' -v
+        run: python -m pytest tests -q
       - name: Browser application JavaScript syntax check
         run: node --check docs/app.js && node --check docs/config.js
+      - name: Server and browser regression tests
+        run: |
+          for test in tests/*.cjs; do node "$test" || exit 1; done
       - name: App-import smoke test
         run: python -c "import main, simtrade, strategy_policy; print('imports OK')"
+
