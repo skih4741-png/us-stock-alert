@@ -24,6 +24,10 @@ on:
       - "validation/**"
       - "execution_rules.py"
       - "simtrade.py"
+      - "kisbridge.py"
+      - "trading_sessions.py"
+      - "requirements.txt"
+      - ".github/workflows/watch.yml"
       - "tests/**"
       - ".github/workflows/strategy-validation-tests.yml"
   workflow_dispatch:

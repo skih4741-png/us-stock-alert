@@ -22,6 +22,7 @@ import push
 import simtrade
 import trade_guard
 import broker_state
+import trading_sessions
 
 log = logging.getLogger(__name__)
 KEY = "kis"
@@ -138,6 +139,12 @@ def run(store, now_utc: datetime | None = None) -> dict | None:
             rec = {"date": day, "t": o["t"], "side": "매수", "qty": o["qty"], "price": o["limit"],
                    "why": o["why"], "odno": "", "signal": o["signal_date"],
                    "intent": broker_state.intent_key("buy", o["t"], o["signal_date"])}
+            valid_session = trading_sessions.order_session(o)
+            if valid_session != day:
+                rec["status"] = "안 냄: " + ("주문 유효기간 만료" if valid_session and day > valid_session else "주문 유효 거래일 확인 대기")
+                st["orders"].append(rec)
+                persist()
+                continue
             reason = ""
             px = (quotes.get(o["t"].replace(".", "-")) or {}).get("price")
             try:
@@ -212,3 +219,4 @@ def run(store, now_utc: datetime | None = None) -> dict | None:
     st["at"] = kst.isoformat(timespec="minutes")
     store.put_blob(KEY, json.dumps(st, ensure_ascii=False, default=str))
     return st
+

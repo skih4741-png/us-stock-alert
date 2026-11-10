@@ -793,7 +793,9 @@ def run_sim_intraday(store):
     for key in (simtrade.KEY, simtrade.REF_KEY):
         try:
             ev = simtrade.intraday(store, now, key)
-            chk("장중 모의 체결" + ("" if key == simtrade.KEY else " (참고용)"), True, f"체결 {len(ev or [])}건 (5분봉 기준)")
+            pending_review = (simtrade.load(store, key) or {}).get("unresolved") or []
+            chk("장중 모의 체결" + ("" if key == simtrade.KEY else " (참고용)"), not pending_review,
+                f"미확인 {len(pending_review)}건 · 체결 보류" if pending_review else f"체결 {len(ev or [])}건 (5분봉 기준)")
         except Exception as e:
             log.warning("장중 모의 체결 실패(%s): %s", key, e)
             chk("장중 모의 체결" + ("" if key == simtrade.KEY else " (참고용)"), False, e)
@@ -1018,7 +1020,10 @@ def run_sim(store, app: dict, now):
             if traded:
                 push.send(store, title, " / ".join(st["today"][:3])[:170], "#/score", "daily", tag="sim")
             simtrade.maybe_evaluate(store, st, tell, sig)
-            chk("자동 모의투자", True, " / ".join((st.get("today") or ["거래 없음"])[:3])[:180])
+            unresolved = st.get("unresolved") or []
+            chk("자동 모의투자", not unresolved,
+                f"미확인 체결 구간 {len(unresolved)}건 · 신규 매수 보류" if unresolved
+                else " / ".join((st.get("today") or ["거래 없음"])[:3])[:180])
         else:
             chk("자동 모의투자", None, "모의 계좌가 아직 없어요")
         return st
