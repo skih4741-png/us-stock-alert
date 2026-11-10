@@ -8,3 +8,5 @@ google-auth>=2.29
 streamlit>=1.38
 altair>=5.0
 pywebpush>=2.0
+exchange-calendars>=4.11,<5
+

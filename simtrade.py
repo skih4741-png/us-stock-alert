@@ -30,6 +30,7 @@ import prices
 import setups
 import strategy_policy
 import trade_guard
+import trading_sessions
 
 
 def _committee(store) -> dict:
@@ -203,12 +204,96 @@ def _close(st, p, day, px, why):
     st["log"].append(f"{day} 매도 {p['t']} {qty}주 @{px:.2f} · {why}")
 
 
-def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, key: str = KEY) -> dict | None:
+def _defer(st, ticker, day, reason):
+    item = {"t": ticker, "date": day, "reason": reason}
+    if item not in st.setdefault("unresolved", []):
+        st["unresolved"].append(item)
+
+
+def _expiry(st, order, day):
+    session = trading_sessions.order_session(order)
+    if not session:
+        _defer(st, order["t"], day, "주문 유효 거래일 확인 실패")
+        return "unknown"
+    if day > session:
+        _ticket(st, order["t"], order["signal_date"], result="안 냄 (주문 유효기간 만료)", day=day,
+                valid_session=session)
+        st["log"].append(f"{day} 만료 {order['t']} · 유효 거래일 {session}")
+        return "expired"
+    return "active" if day == session else "future"
+
+
+def _exit_position(st, p, row, day, stamp, fresh=False, events=None):
+    events = events if events is not None else []
+    op, hi, lo = (float(row[k]) for k in ("Open", "High", "Low"))
+    decision = execution_rules.exit_fill(
+        op, hi, lo, p["stop"], p["target"],
+        half=p["half"], fresh=fresh, slip=SLIP, touch=TOUCH,
+    )
+    if decision is None:
+        return False
+    if decision.reason == "stop":
+        why = ("손절선" if not p["half"] else "본전 손절") + f" ({stamp} ET)"
+        _close(st, p, day, decision.price, why)
+        events.append(f"매도 {p['t']} {p['qty']}주 · {why}")
+        return True
+    px = decision.price
+    if p["qty"] >= 2:
+        half = dict(p, qty=p["qty"] // 2)
+        _close(st, half, day, px, f"1차 목표 (절반, {stamp} ET)")
+        p["qty"] -= half["qty"]
+        p["half"], p["stop"] = True, p["entry"]
+        p["stop_effective_after"] = day + " " + stamp
+        events.append(f"매도 {p['t']} {half['qty']}주 · 1차 목표 절반")
+        return False
+    _close(st, p, day, px, f"1차 목표 ({stamp} ET)")
+    events.append(f"매도 {p['t']} {p['qty']}주 · 1차 목표")
+    return True
+
+
+def _recover_tail(st, p, day, frames):
+    """Only use unprocessed, completed 5m bars; never reuse an earlier daily low."""
+    import pandas as pd
+    seen = str(p.get("seen_to") or "")
+    if seen[:10] > day or trading_sessions.completed_session(seen, day):
+        p.pop("recovery_day", None)
+        return False
+    p["recovery_day"] = day
+    closing = trading_sessions.close_time(day)
+    frame = frames.get(p["t"].replace(".", "-"))
+    if closing is None or frame is None or not len(frame):
+        _defer(st, p["t"], day, "장중 처리 이후 5분봉 없음 · 일봉 소급 적용 차단")
+        return False
+    frame = frame.sort_index()
+    if frame.index.tz is None:
+        _defer(st, p["t"], day, "5분봉 시간대 확인 실패")
+        return False
+    last = pd.Timestamp(seen, tz="America/New_York")
+    expected = last + timedelta(minutes=5)
+    tail = frame[(frame.index > last) & (frame.index + timedelta(minutes=5) <= closing)]
+    for stamp, row in tail.iterrows():
+        if stamp != expected:
+            break
+        label = stamp.strftime("%H:%M")
+        p["seen_to"] = stamp.strftime("%Y-%m-%d %H:%M")
+        if _exit_position(st, p, row, day, label, events=[]):
+            return True
+        expected = stamp + timedelta(minutes=5)
+    if not trading_sessions.completed_session(p.get("seen_to", ""), day):
+        _defer(st, p["t"], day, "미확인 장중 구간 · 일봉 소급 적용 차단")
+    else:
+        p.pop("recovery_day", None)
+    return False
+
+
+def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, key: str = KEY,
+         intraday_bars: dict | None = None) -> dict | None:
     """picks: 앱 형식 후보(pick_view). market: {'regime','rest_day'}. 반환: 상태(없으면 None)."""
     st = load(store, key)
     if not st:
         return None
     cfg = st["cfg"]
+    st["unresolved"] = []
     verified_policy = store.get_blob("validated_strategy_policy") or None
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
@@ -218,6 +303,14 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     hist = {t: df[df.index.strftime("%Y-%m-%d") <= bar_date].copy()
             for t, df in raw_hist.items() if df is not None and len(df)}
     H = lambda t: hist.get(t.replace(".", "-"))
+    partial = [p["t"].replace(".", "-") for p in st["positions"] if p.get("seen_to")
+               and p["seen_to"][:10] <= bar_date
+               and not trading_sessions.completed_session(p["seen_to"], p["seen_to"][:10])]
+    if intraday_bars is None:
+        try:
+            intraday_bars = _bars5(list(dict.fromkeys(partial))) if partial else {}
+        except Exception:
+            intraday_bars = {}
 
     # 2) 매도 규칙 (날마다)
     keep = []
@@ -227,8 +320,12 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             keep.append(p); continue
         closed = False
         ma20 = df["Close"].rolling(20).mean()
-        for d, row, i in _bars_between(df, max(p["date"], st.get("checked") or ""), bar_date):
-            if d <= p["date"]:
+        after = st.get("checked") or ""
+        if p.get("recovery_day"):
+            after = min(after, (date.fromisoformat(p["recovery_day"]) - timedelta(days=1)).isoformat())
+        entry_floor = (date.fromisoformat(p["date"]) - timedelta(days=1)).isoformat() if p.get("seen_to") else p["date"]
+        for d, row, i in _bars_between(df, max(entry_floor, after), bar_date):
+            if d < p["date"] or (d == p["date"] and not p.get("seen_to")):
                 continue
             op, hi, lo, cl = (float(row[k]) for k in ("Open", "High", "Low", "Close"))
             # Close-based orders are only actionable at a later opening price.
@@ -239,6 +336,12 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                     closed = True
                     break
             seen = p.get("seen_to", "")[:10] >= d   # 장중에 이미 확인한 날
+            if seen:
+                if _recover_tail(st, p, d, intraday_bars):
+                    closed = True
+                    break
+                if p.get("recovery_day"):
+                    break  # Do not advance decisions beyond an unknown earlier interval.
             exit_decision = execution_rules.exit_fill(op, hi, lo, p["stop"], p["target"], half=p["half"], slip=SLIP, touch=TOUCH)
             if not seen and (exit_decision is not None and exit_decision.reason == "stop"):
                 _close(st, p, d, exit_decision.price, "손절선" if not p["half"] else "본전 손절"); closed = True; break
@@ -249,6 +352,8 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
                     _close(st, half, d, px, "1차 목표 (절반)")
                     p["qty"] -= half["qty"]
                     p["half"], p["stop"] = True, p["entry"]
+                    close = trading_sessions.close_time(d)
+                    p["stop_effective_after"] = close.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M") if close else d + " 23:59"
                 else:
                     _close(st, p, d, px, "1차 목표"); closed = True; break
             p["peak"] = max(p["peak"], cl)
@@ -259,33 +364,17 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if held >= cfg["stale_days"] and cl < p["entry"] * 1.02:
                 p["scheduled_exit"] = f"{held}거래일 제자리"
                 p["scheduled_at"] = d
-        # 일봉 백스톱 — 장중(5분봉)이 그날을 다 못 봤어도(실행 누락·수집 실패·마지막 봉 이후 급락),
-        # 최신 일봉으로 손절·목표를 반드시 재확인해 매도 누락을 막아요. 이미 닫혔으면 건너뜀(이중 매도 없음).
-        if not closed and len(df):
-            ld = df.index[-1].strftime("%Y-%m-%d")
-            if ld > p["date"]:
-                last = df.iloc[-1]
-                op_, hi_, lo_ = float(last["Open"]), float(last["High"]), float(last["Low"])
-                decision_ = execution_rules.exit_fill(op_, hi_, lo_, p["stop"], p["target"], half=p["half"], slip=SLIP, touch=TOUCH)
-                if decision_ is not None and decision_.reason == "stop":
-                    _close(st, p, ld, decision_.price, ("손절선" if not p["half"] else "본전 손절") + " · 일봉 백스톱"); closed = True
-                elif decision_ is not None and decision_.reason == "target":
-                    px_ = decision_.price
-                    if p["qty"] >= 2:
-                        half = dict(p, qty=p["qty"] // 2)
-                        _close(st, half, ld, px_, "1차 목표 (절반) · 일봉 백스톱")
-                        p["qty"] -= half["qty"]; p["half"], p["stop"] = True, p["entry"]
-                    else:
-                        _close(st, p, ld, px_, "1차 목표 · 일봉 백스톱"); closed = True
+        # Each daily bar is evaluated once above. A new stop must not be applied
+        # to that same bar's earlier low, including after intraday processing.
         # 위원회 매도 신호 — 아직 안 닫혔는데 5인 위원회가 강한 반대로 돌면 다음 날 시가에 정리(보호적, 손절·목표가 먼저).
-        if not closed and len(df):
+        if not closed and not p.get("recovery_day") and len(df):
             cv = committee.verdict(comm.get(p["t"]))
             if cv.get("sell_hold"):
                 if not p.get("scheduled_exit"):
                     p["scheduled_exit"] = "위원회 매도 신호 · " + cv.get("why", "")
                     p["scheduled_at"] = df.index[-1].strftime("%Y-%m-%d")
         if not closed:
-            if market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
+            if not p.get("recovery_day") and market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
             keep.append(p)
     st["positions"] = keep
@@ -294,12 +383,21 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     # 1) 주문 체결
     still = []
     for o in st["pending"]:
+        validity = _expiry(st, o, bar_date)
+        if validity == "expired":
+            continue
+        if validity != "active":
+            still.append(o)
+            continue
         df = H(o["t"])
         if df is None:
             still.append(o); continue
         d, row = _bar_after(df, o["signal_date"])
         if d is None or d > bar_date:
             still.append(o); continue
+        if d != trading_sessions.order_session(o):
+            _defer(st, o["t"], bar_date, "유효 거래일 일봉 없음 · 체결 보류")
+            continue
         guard = day_risk(st, d)
         if guard["blocked"]:
             _ticket(st, o["t"], o["signal_date"], result="안 냄 (" + guard["reason"] + ")", day=d)
@@ -359,9 +457,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     selection = {"date": bar_date, "total": len(picks), "planned": 0, "excluded": {}}
     def reject(reason):
         selection["excluded"][reason] = selection["excluded"].get(reason, 0) + 1
-    selection["pause"] = ("모의 기간 종료" if not in_window else "시장 매수 쉬는 날" if market.get("rest_day")
+    selection["pause"] = ("체결 확인 대기" if st.get("unresolved") else "모의 기간 종료" if not in_window else "시장 매수 쉬는 날" if market.get("rest_day")
                           else "하락장" if market.get("regime") == "bear" else "월 손실 한도" if stopped else "")
-    if in_window and not market.get("rest_day") and market.get("regime") != "bear" and not stopped:
+    if in_window and not market.get("rest_day") and market.get("regime") != "bear" and not stopped and not st.get("unresolved"):
         held = {p["t"] for p in st["positions"]}
         slots = cfg["max_pos"] - len(st["positions"])
         cash = st["cash"]
@@ -408,9 +506,14 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             if qty < 1:
                 reject("정수 1주 위험·예산 한도")
                 continue
+            valid_session = trading_sessions.next_session(bar_date)
+            if not valid_session:
+                reject("주문 유효 거래일 확인 실패")
+                _defer(st, p["t"], bar_date, "주문 유효 거래일 확인 실패")
+                continue
             t5 = sum(1 for x in (p.get("trend5") or []) if x[1])
             st["pending"].append({"t": p["t"], "qty": qty, "limit": round(limit, 2), "skip_above": float(pl.get("skip_if_open_above") or limit * 1.03),
-                                  "stop": float(pl["stop"]), "target": float(pl["target"]), "signal_date": bar_date, "signal_edge": dict(p.get("edge") or {}), "setup": p.get("setup"),
+                                  "stop": float(pl["stop"]), "target": float(pl["target"]), "signal_date": bar_date, "valid_session": valid_session, "signal_edge": dict(p.get("edge") or {}), "setup": p.get("setup"),
                                   "why": f"총점 {p.get('total'):.0f} · 추세 합류 {t5}/5 · 손익비 {pl.get('rr')}"})
             o = st["pending"][-1]
             _ticket(st, o["t"], bar_date, result="대기", limit=o["limit"], qty=qty, skip_above=o["skip_above"], stop=o["stop"], target=o["target"])
@@ -433,7 +536,7 @@ def _bars5(tickers: list[str]) -> dict:
     out = {}
     if not tickers:
         return out
-    raw = yf.download(tickers, period="1d", interval="5m", group_by="ticker", progress=False, auto_adjust=True, prepost=False)
+    raw = yf.download(tickers, period="5d", interval="5m", group_by="ticker", progress=False, auto_adjust=True, prepost=False)
     for t in tickers:
         try:
             m = raw[t] if isinstance(raw.columns, pd.MultiIndex) else raw
@@ -453,9 +556,22 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
     if not st:
         return []
     day = now_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    pend = [o for o in st["pending"] if day > o["signal_date"]]
+    st["unresolved"] = [x for x in st.get("unresolved", []) if x.get("reason") != "주문 유효 거래일 확인 실패"]
+    for p in st["positions"]:
+        seen = str(p.get("seen_to") or "")
+        if seen and seen[:10] < day and not trading_sessions.completed_session(seen, seen[:10]):
+            p.setdefault("recovery_day", seen[:10])
+        if p.get("recovery_day"):
+            _defer(st, p["t"], p["recovery_day"], "이전 거래일 장중 구간 복구 대기")
+    pending = []
+    for order in st["pending"]:
+        if _expiry(st, order, day) != "expired":
+            pending.append(order)
+    st["pending"] = pending
+    pend = [o for o in st["pending"] if trading_sessions.order_session(o) == day]
     tick = sorted({o["t"] for o in pend} | {p["t"] for p in st["positions"]})
     if not tick:
+        save(store, st)  # Expiry is persisted even with no prices/positions.
         return []
     bars = bars if bars is not None else _bars5([t.replace(".", "-") for t in tick])
     today = {}
@@ -468,37 +584,13 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
     events, n_log = [], len(st["log"])
     # 시간 순서대로 기존 보유 매도 → 신규 매수. 손실 한도 도달 뒤의 매수를 막아요.
     times = sorted({i for m in today.values() for i in m.index if i + timedelta(minutes=5) <= now_utc})
-    def exits(p, row, day, stamp, fresh=False):
-        op, hi, lo = (float(row[k]) for k in ("Open", "High", "Low"))
-        decision = execution_rules.exit_fill(
-            op, hi, lo, p["stop"], p["target"],
-            half=p["half"], fresh=fresh, slip=SLIP, touch=TOUCH,
-        )
-        if decision is None:
-            return False
-        if decision.reason == "stop":
-            why = ("손절선" if not p["half"] else "본전 손절") + f" ({stamp} ET)"
-            _close(st, p, day, decision.price, why)
-            events.append(f"매도 {p['t']} {p['qty']}주 · {why}")
-            return True
-        px = decision.price
-        if p["qty"] >= 2:
-            half = dict(p, qty=p["qty"] // 2)
-            _close(st, half, day, px, f"1차 목표 (절반, {stamp} ET)")
-            p["qty"] -= half["qty"]
-            p["half"], p["stop"] = True, p["entry"]
-            events.append(f"매도 {p['t']} {half['qty']}주 · 1차 목표 절반")
-            return False
-        _close(st, p, day, px, f"1차 목표 ({stamp} ET)")
-        events.append(f"매도 {p['t']} {p['qty']}주 · 1차 목표")
-        return True
 
     for i in times:
         ts, stamp = i.strftime("%Y-%m-%d %H:%M"), i.strftime("%H:%M")
         alive = []
         for p in st["positions"]:
             m = today.get(p["t"])
-            if m is None or i not in m.index or ts <= p.get("seen_to", ""):
+            if p.get("recovery_day") or m is None or i not in m.index or ts <= p.get("seen_to", ""):
                 alive.append(p); continue
             p["seen_to"] = ts
             if p.get("scheduled_exit") and day > p.get("scheduled_at", ""):
@@ -507,18 +599,18 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
                     _close(st, p, day, scheduled.price, p["scheduled_exit"] + " · 다음 시가")
                     events.append(f"매도 {p['t']} {p['qty']}주 · 예약 청산")
                     continue
-            if not exits(p, m.loc[i], day, stamp):
+            if not _exit_position(st, p, m.loc[i], day, stamp, events=events):
                 alive.append(p)
         st["positions"] = alive
         keep = []
         for o in st["pending"]:
             m = today.get(o["t"])
-            if day <= o["signal_date"] or m is None or i not in m.index or ts <= o.get("seen_to", ""):
+            if trading_sessions.order_session(o) != day or m is None or i not in m.index or ts <= o.get("seen_to", ""):
                 keep.append(o); continue
             row = m.loc[i]
             o["seen_to"] = ts
             guard = day_risk(st, day)
-            reason = guard["reason"]
+            reason = "미확인 체결 구간" if st.get("unresolved") else guard["reason"]
             if not o.get("open_px"):
                 o["open_px"] = float(row["Open"])
             if o["open_px"] > o["skip_above"]:
@@ -549,10 +641,20 @@ def intraday(store, now_utc: datetime, key: str = KEY, bars: dict | None = None)
             _ticket(st, o["t"], o["signal_date"], result="체결", day=day, limit=o["limit"], qty=o["qty"], fill_px=round(px, 4), at=f"{stamp} ET")
             st["log"].append(f"{day} 매수 {o['t']} {o['qty']}주 @{px:.2f} · {stamp} ET 체결 · {o['why']}")
             events.append(f"매수 체결 {o['t']} {o['qty']}주 @${px:.2f}")
-            if not exits(p, row, day, stamp, fresh=True):
+            if not _exit_position(st, p, row, day, stamp, fresh=True, events=events):
                 st["positions"].append(p)
         st["pending"] = keep
     day_risk(st, day)
+    closing = trading_sessions.close_time(day)
+    if closing and now_utc >= closing:
+        remaining = []
+        for order in st["pending"]:
+            if trading_sessions.order_session(order) == day:
+                _ticket(st, order["t"], order["signal_date"], result="미체결", day=day,
+                        valid_session=day, note="당일 장 종료로 만료")
+            else:
+                remaining.append(order)
+        st["pending"] = remaining
     st["intra_at"] = now_utc.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M ET")
     if events:
         st["today"] = (st.get("today") or []) + st["log"][n_log:]
@@ -686,3 +788,4 @@ def keep_report(store, st: dict, title: str, text: str, at: str):
     reps = [r for r in (st.get("reports") or []) if r.get("date") != at[:10]]
     st["reports"] = ([{"date": at[:10], "at": at, "title": title, "text": text}] + reps)[:30]
     save(store, st)
+
