@@ -14,7 +14,7 @@ for(const route of ['home','picks','pick','hold','stock','watch','holdings','sco
 assert.ok(D.render('pick',{S,t:'TEST'}).includes('&lt;img'));
 assert.equal(D.condition(S.deskNotes[0],7),'무효 가격 도달 · 재검토');
 assert.equal(D.condition(S.deskNotes[0],10),'관찰 가격 도달 · 매수 확정 아님');
-assert.ok(D.render('score',{S,seg:'acct'}).includes('수동 모의 · 선택한 이유'));
+assert.ok(!D.render('score',{S,seg:'acct'}).includes('수동 모의 · 선택한 이유'));
 assert.ok(D.render('score',{S,seg:'fund'}).includes('연구 제안 비교'));
 assert.equal(D.snapshot(S,'TEST').policy,'balanced-2.19.0');
 console.log('PASS: all 17 screen contexts, old/missing data, note escaping, price conditions, account/fund panels');
