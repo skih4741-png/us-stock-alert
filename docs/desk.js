@@ -94,10 +94,6 @@
       ['내부 장부 채점 (누적)',ts.n==null?'대기':ts.n+'건 중 '+ts.filled+'건 체결'],
       ['증권사 모의',k.on ? k.err || '연결 설정됨 · 아래 체결 확인' : k.why || '미연결']])+
       '<p class="small">서로 다른 기간·계좌의 숫자예요. 주문 계획·주문 접수·체결은 다르며 실전 주문은 비활성입니다.</p>');
-    if(seg==='acct') {
-      body+=card('수동 모의 · 선택한 이유',table(['종목','기록 당시 근거','비용 차감 손익 추정'],arr(S.paper).map(p=>[p.t,p.entry_context?.reason || '매수 당시 기록 없음',p.sold_price? '$'+N(p.qty*(p.sold_price*(1-.0035)-p.price*(1+.0035))):'청산 전']))+
-        '<p class="small">수동 장부 원금·수익률은 기존 비용 전 방식입니다. 이 표만 왕복 비용 0.35%씩을 뺀 참고값이며 실제 수수료와 다를 수 있어요.</p>');
-    }
     if(seg==='fund') {
       const w=S.ai?.fund?.weights || {}, hs=arr(S.data?.holdings), total=hs.reduce((s,h)=>s+h.qty*h.price,0);
       body+=card('현재 비중과 연구 제안 비교',table(['종목','현재 주식 내 비중','MeanRisk 연구 비중'],arr(w.assets).map(t=>{const h=hs.find(x=>x.t===t);return [t,total?N((h?h.qty*h.price:0)/total*100)+'%':'—',w.meanrisk?.[t]==null?'—':N(w.meanrisk[t]*100)+'%'];}))+
@@ -183,3 +179,4 @@
   root.TradeDesk=api;
   if(typeof module!=='undefined') module.exports=api;
 })(typeof window!=='undefined'?window:globalThis);
+
