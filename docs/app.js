@@ -517,6 +517,7 @@
       '<div class="small" style="margin-top:6px"><b>보유</b> ' + (pos.length ? pos.map(p => esc(p.t) + " " + p.qty + "주").join(", ") : "없음") +
       " · <b>다음 주문</b> " + (pend.length ? pend.map(o => esc(o.t)).join(", ") : "없음") + " · 자세히 →</div></a>";
   }
+  const isWatched = t => (S.watchlist || []).includes(String(t).toUpperCase());
   async function watchDo(action, t) {
     try {
       const j = await api(action, { token: S.token, t: String(t).toUpperCase() });
@@ -1188,6 +1189,8 @@
       return '<li class="' + (on ? "hit" : "ok") + '">' + (on ? "●" : "✓") + " " + esc(r[1]) + '<span class="small"> · ' + (on ? "걸림" : "괜찮음") + "</span></li>";
     }).join("") + "</ul></div>";
   }
+  const usd = v => v == null ? "—" : (v > 0 ? "+$" : v < 0 ? "-$" : "$") + fmt(Math.abs(v));
+  const signTone = v => v == null ? "" : v > 0 ? "up" : v < 0 ? "down" : "";
   function statRow(label, st, spy) {
     if (!st || !st.n) return "<dt>" + esc(label) + "</dt><dd>아직 없음</dd>";
     return "<dt>" + esc(label) + "</dt><dd>" + st.n + "개 · 평균 " + pct(st.avg) + " · 수익 비율 " + st.win + "%" +
