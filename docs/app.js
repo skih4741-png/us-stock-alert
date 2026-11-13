@@ -1489,7 +1489,7 @@
       const bf = val.buffett || {}, m = val.methods || {};
       h += '<div class="card"><div class="row between"><b>적정가 · 밸류에이션</b><span class="badge ' + vt + '">' + esc(vd || "") + "</span></div>" +
         '<div class="small" style="margin:2px 0 4px">적정가 중앙값 <b>$' + f(val.fair_mid, 2) + "</b> · 안전마진 <b>" + (mp == null ? "—" : mp + "%") + "</b></div>" + gauge +
-        '<div class="small" style="margin-top:6px">버핏 체크 <b>' + (bf.passed || 0) + "/" + (bf.checked || 0) + "</b> · 그레이엄 $" + f(m["그레이엄 넘버"], 0) + " · 적정PER $" + f(m["적정 PER"], 0) + " · DCF $" + f(m["간이 DCF"], 0) + "</div>" +
+        '<div class="small" style="margin-top:6px">재무 품질 <b>' + (bf.passed || 0) + "/" + (bf.checked || 0) + "</b> · 그레이엄 $" + f(m["그레이엄 넘버"], 0) + " · 적정PER $" + f(m["적정 PER"], 0) + " · DCF $" + f(m["간이 DCF"], 0) + "</div>" +
         '<div class="small" style="color:var(--sub);margin-top:2px">' + esc(why || "") + "</div></div>";
     }
     if (ind) {
