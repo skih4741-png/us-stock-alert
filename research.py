@@ -19,6 +19,9 @@ import ai
 import rag
 import investment_team
 import committee
+import financials
+import valuation
+import agents
 
 log = logging.getLogger(__name__)
 KEY = "ai"
@@ -356,6 +359,34 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             comm[t] = norm
     keep2 = set(focus) | set(holds) | set(watch_t)
     blob["committee"] = {t: v for t, v in comm.items() if t in keep2 or t in pending_t}
+
+    # ---- 재무·적정가 에이전트 (valuation) : 후보·보유·관심, AI 없이 재무 숫자로 매일 계산 ----
+    # 적정가 3방식(그레이엄·적정PER·2단계DCF) + 안전마진 → 매수 거부·매도 신호(더 조심하는 쪽으로만).
+    val = blob.setdefault("valuation", {})
+    price_of = {p["t"]: p.get("price") for p in picks}
+    price_of.update({h["t"]: h.get("price") for h in app.get("holdings", [])})
+    for t in comm_focus:
+        if t.startswith("^"):
+            continue
+        try:
+            raw = financials.fetch(t.replace(".", "-"))
+            res = valuation.analyze(raw, price_of.get(t), cfg=cfg)
+        except Exception as e:
+            log.info("적정가 계산 건너뜀(%s): %s", t, e)
+            res = None
+        if res:
+            val[t] = dict(res, date=today)
+    blob["valuation"] = {t: v for t, v in val.items() if t in keep2 or t in pending_t}
+
+    # ---- AI 투자 에이전트 팀 (agents) : 6역할 종합 뷰, 표시용(판단은 setups/위원회/적정가) ----
+    ag = {}
+    pick_by = {p["t"]: p for p in picks}
+    for t in comm_focus:
+        if t.startswith("^"):
+            continue
+        ag[t] = agents.team(t, fin=fin.get(t), val=val.get(t),
+                            market=app.get("market"), pick=pick_by.get(t))
+    blob["agents"] = {t: v for t, v in ag.items() if t in keep2 or t in pending_t}
 
     # ---- 사전 부검 + 거부권 섀도 (자동 모의 주문 계획) ----
     pm = blob.get("pm", {})

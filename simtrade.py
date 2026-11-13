@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 import committee
+import valuation
 import execution_rules
 import ledger
 import prices
@@ -37,6 +38,14 @@ def _committee(store) -> dict:
     """최신 아침 리포트(ai 블롭)의 월가 5인 위원회 결과. 모의 진입·청산에 '더 조심'으로만 반영."""
     try:
         return (json.loads(store.get_blob("ai") or "{}") or {}).get("committee") or {}
+    except Exception:
+        return {}
+
+
+def _valuation(store) -> dict:
+    """최신 아침 리포트(ai 블롭)의 적정가 에이전트 결과. 모의 진입·청산에 '더 조심'으로만 반영."""
+    try:
+        return (json.loads(store.get_blob("ai") or "{}") or {}).get("valuation") or {}
     except Exception:
         return {}
 
@@ -323,6 +332,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     verified_policy = store.get_blob("validated_strategy_policy") or None
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
+    val = _valuation(store)    # 재무·적정가 에이전트 — 고평가면 매수 거부·매도 신호(더 조심하는 쪽으로만)
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
     raw_hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
     # A backfilled morning report must never inspect a bar after bar_date.
@@ -405,10 +415,13 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
         # 위원회 매도 신호 — 아직 안 닫혔는데 5인 위원회가 강한 반대로 돌면 다음 날 시가에 정리(보호적, 손절·목표가 먼저).
         if not closed and not p.get("recovery_day") and len(df):
             cv = committee.verdict(comm.get(p["t"]))
-            if cv.get("sell_hold"):
-                if not p.get("scheduled_exit"):
-                    p["scheduled_exit"] = "위원회 매도 신호 · " + cv.get("why", "")
-                    p["scheduled_at"] = df.index[-1].strftime("%Y-%m-%d")
+            vv = valuation.verdict(val.get(p["t"]))
+            if cv.get("sell_hold") and not p.get("scheduled_exit"):
+                p["scheduled_exit"] = "위원회 매도 신호 · " + cv.get("why", "")
+                p["scheduled_at"] = df.index[-1].strftime("%Y-%m-%d")
+            elif vv.get("sell_signal") and not p.get("scheduled_exit"):
+                p["scheduled_exit"] = "적정가 고평가 · " + vv.get("why", "")
+                p["scheduled_at"] = df.index[-1].strftime("%Y-%m-%d")
         if not closed:
             if not p.get("recovery_day") and market.get("regime") == "bear" and p["stop"] < p["entry"] and float(df["Close"].iloc[-1]) > p["entry"]:
                 p["stop"] = p["entry"]  # 하락장 전환: 수익 중이면 손절을 매수가로
@@ -523,6 +536,9 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             cv = committee.verdict(comm.get(p["t"]))   # 위원회 강한 반대면 매수 거르기(더 조심)
             if cv.get("veto_buy"):
                 reject("위원회 반대"); continue
+            vv = valuation.verdict(val.get(p["t"]))    # 적정가 대비 고평가면 매수 거르기(더 조심)
+            if vv.get("veto_buy"):
+                reject("적정가 고평가"); continue
             pl = p.get("plan") or {}
             px, stop = p.get("price"), pl.get("stop")
             if not px or not stop or px < 3 or p["t"] in held or px * (1 + FEE) > cash:
