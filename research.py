@@ -22,6 +22,8 @@ import committee
 import financials
 import valuation
 import agents
+import indicators
+import prices
 
 log = logging.getLogger(__name__)
 KEY = "ai"
@@ -378,14 +380,30 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             val[t] = dict(res, date=today)
     blob["valuation"] = {t: v for t, v in val.items() if t in keep2 or t in pending_t}
 
-    # ---- AI 투자 에이전트 팀 (agents) : 6역할 종합 뷰, 표시용(판단은 setups/위원회/적정가) ----
+    # ---- 기술지표 + 리스크 수치 (indicators) : 후보·보유·관심, 1년 가격 이력 기반 ----
+    ind = {}
+    try:
+        ind_focus = [t for t in comm_focus if not t.startswith("^")]
+        if ind_focus:
+            raw_hist = prices.download_history([t.replace(".", "-") for t in ind_focus] + ["SPY"], period="1y")
+            spy_df = raw_hist.get("SPY")
+            spy_close = spy_df["Close"] if spy_df is not None and len(spy_df) else None
+            for t in ind_focus:
+                res = indicators.analyze(raw_hist.get(t.replace(".", "-")), spy_close)
+                if res:
+                    ind[t] = res
+    except Exception as e:
+        log.info("지표·리스크 계산 단계 건너뜀: %s", e)
+    blob["indicators"] = {t: v for t, v in ind.items() if t in keep2 or t in pending_t}
+
+    # ---- AI 투자 에이전트 팀 (agents) : 6역할 종합 뷰(기술지표·리스크 반영), 표시용 ----
     ag = {}
     pick_by = {p["t"]: p for p in picks}
     for t in comm_focus:
         if t.startswith("^"):
             continue
         ag[t] = agents.team(t, fin=fin.get(t), val=val.get(t),
-                            market=app.get("market"), pick=pick_by.get(t))
+                            market=app.get("market"), pick=pick_by.get(t), ind=ind.get(t))
     blob["agents"] = {t: v for t, v in ag.items() if t in keep2 or t in pending_t}
 
     # ---- 사전 부검 + 거부권 섀도 (자동 모의 주문 계획) ----

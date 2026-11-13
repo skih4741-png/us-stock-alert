@@ -225,6 +225,8 @@ def send_mail(subj: str, text: str, html_text: str | None = None) -> bool:
 
 
 def send_slack(text: str, blocks: list[dict] | None = None) -> bool:
+    if os.environ.get("SLACK_ENABLED", "0") != "1":
+        return False  # 슬랙 알림 끔(푸시로만 받아요). 다시 켜려면 SLACK_ENABLED=1.
     url = os.environ.get("SLACK_WEBHOOK_URL")
     if not url:
         log.info("슬랙 설정 없음 → 슬랙은 건너뜀")

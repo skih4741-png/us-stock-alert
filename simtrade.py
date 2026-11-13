@@ -49,6 +49,14 @@ def _valuation(store) -> dict:
     except Exception:
         return {}
 
+
+def _agents(store) -> dict:
+    """최신 아침 리포트(ai 블롭)의 6역할 에이전트 종합. 매수 품질 게이트에 써요(종합 '주의'면 거름)."""
+    try:
+        return (json.loads(store.get_blob("ai") or "{}") or {}).get("agents") or {}
+    except Exception:
+        return {}
+
 log = logging.getLogger(__name__)
 KEY = "sim"          # 판단용 (가상 1,000달러, 2026-10-09 사용자 요청으로 100→1,000)
 REF_KEY = "sim_ref"  # 참고용 1,000달러 · 최대 2종목 집중형 (판단용 5종목 분산과 비교, 판단에 안 씀)
@@ -333,6 +341,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     n_log = len(st["log"])
     comm = _committee(store)   # 월가 5인 위원회 — 매수 거부·매도 신호(더 조심하는 쪽으로만)
     val = _valuation(store)    # 재무·적정가 에이전트 — 고평가면 매수 거부·매도 신호(더 조심하는 쪽으로만)
+    ags = _agents(store)       # 6역할 종합 — 종합 '주의'(품질·적정가·리스크 중 경고)면 매수 안 함
     need = sorted({o["t"] for o in st["pending"]} | {p["t"] for p in st["positions"]} | {"SPY"})
     raw_hist = prices.download_history([t.replace(".", "-") for t in need], period="90d")
     # A backfilled morning report must never inspect a bar after bar_date.
@@ -539,6 +548,11 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             vv = valuation.verdict(val.get(p["t"]))    # 적정가 대비 고평가면 매수 거르기(더 조심)
             if vv.get("veto_buy"):
                 reject("적정가 고평가"); continue
+            # 다요소 품질 게이트: 6역할 에이전트 종합이 '주의'(재무·적정가·리스크 중 경고)면 매수 안 함.
+            # 자료가 없으면(에이전트 미생성) 막지 않아요 — 기존 셋업·엣지 규칙이 판단.
+            av = (ags.get(p["t"]) or {}).get("summary") or {}
+            if av.get("stance") == "주의":
+                reject("에이전트 종합 주의"); continue
             pl = p.get("plan") or {}
             px, stop = p.get("price"), pl.get("stop")
             if not px or not stop or px < 3 or p["t"] in held or px * (1 + FEE) > cash:
