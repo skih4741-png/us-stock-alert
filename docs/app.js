@@ -611,12 +611,12 @@
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
       stockQuickLinks(t) + stockNewsCard(t) + liveChartBox(t, null) +
       quoteSumCard(t) +
-      '<h2>에이전트 심층분석</h2>' + agentHtml(t) +
+      ((S.ai && ((S.ai.agents && S.ai.agents[t]) || (S.ai.valuation && S.ai.valuation[t]) || (S.ai.indicators && S.ai.indicators[t]))) ? '<h2>에이전트 심층분석</h2>' + agentHtml(t) : "") +
       ((S.ai && S.ai.committee && S.ai.committee[t]) ? '<h2>월가 5인 위원회</h2>' + committeeHtml(t) : "") +
       aiCard(t) +
       statsCard(t) +
       priceAlertCard(t) +
-      '<p class="foot">관심 종목도 시세·투자지표·실적·배당을 실시간으로 볼 수 있어요. AI 리포트·재무 신호 전체 분석은 보유·후보 상위만 계산해요. · ' + esc(DISCLAIMER) + "</p>");
+      '<p class="foot">관심 종목도 시세·투자지표·실적·배당을 실시간으로 볼 수 있어요. 에이전트 심층분석(적정가·지표·6역할)은 보유·관심·후보 종목에 매일 붙어요. · ' + esc(DISCLAIMER) + "</p>");
     bindWatch();
     bindPriceAlert();
     bindAi();
@@ -1446,7 +1446,7 @@
     const ag = S.ai && S.ai.agents && S.ai.agents[t];
     const val = S.ai && S.ai.valuation && S.ai.valuation[t];
     const ind = S.ai && S.ai.indicators && S.ai.indicators[t];
-    if (!ag && !val && !ind) return '<div class="empty">' + esc(aiOff() || "에이전트 심층분석은 아직 없어요(보유·관심 상위, 매일 갱신).") + "</div>";
+    if (!ag && !val && !ind) return aiOff() ? '<div class="empty">' + esc(aiOff()) + "</div>" : "";
     const f = (x, n) => (x == null ? "—" : fmt(x, n));
     const col = s => s === "긍정" ? "var(--good)" : s === "주의" ? "var(--warn)" : "var(--line2)";
     let h = "";
