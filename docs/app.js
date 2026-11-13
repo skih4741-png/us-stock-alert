@@ -609,7 +609,7 @@
     appShell("watch", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(t, "", w.px, '<span class="badge info">관심</span>') +
       '<button class="btn ghost" style="width:auto;margin:8px 0 0;padding:8px 14px" data-' + (watched ? "wdel" : "wadd") + '="' + esc(t) + '">' + (watched ? "★ 관심 중" : "☆ 관심 추가") + "</button>" +
-      stockQuickLinks(t) + stockNewsCard(t) + liveChartBox(t, null) +
+      stockQuickLinks(t) + stockNewsCard(t) + companyHtml(t) + liveChartBox(t, null) +
       quoteSumCard(t) +
       ((S.ai && ((S.ai.agents && S.ai.agents[t]) || (S.ai.valuation && S.ai.valuation[t]) || (S.ai.indicators && S.ai.indicators[t]))) ? '<h2>에이전트 심층분석</h2>' + agentHtml(t) : "") +
       ((S.ai && S.ai.committee && S.ai.committee[t]) ? '<h2>월가 5인 위원회</h2>' + committeeHtml(t) : "") +
@@ -873,7 +873,7 @@
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, (p.setup ? '<span class="badge ' + edgeTone(p.edge) + '">' + esc(p.setup) + "</span> " : "") + '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
-      stockQuickLinks(p.t) + '<div class="card">선정 이유 · ' + esc(pickReason(p)) + '<div class="small">확인할 점 · ' + esc(pickCaution(p)) + "</div></div>" + stockNewsCard(p.t) +
+      stockQuickLinks(p.t) + '<div class="card">선정 이유 · ' + esc(pickReason(p)) + '<div class="small">확인할 점 · ' + esc(pickCaution(p)) + "</div></div>" + stockNewsCard(p.t) + companyHtml(p.t) +
       // ── 매수 계획 (핵심 · 왜 이 화면에 왔나) ──
       '<h2>매수 계획</h2><div class="card"><dl class="kv num">' +
       "<dt>매수 구간</dt><dd>" + fmt(pl.zone_low) + " ~ " + fmt(pl.zone_high) + "</dd>" +
@@ -958,7 +958,7 @@
         ? '<h2>왜 이 결론인가</h2><div class="card"><ul class="plain">' +
           (h.hits || []).map(x => "<li>" + esc(x) + "</li>").join("") +
           (h.reasons || []).slice(0, 3).map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></div>" : "") +
-      stockQuickLinks(h.t) + stockNewsCard(h.t) +
+      stockQuickLinks(h.t) + stockNewsCard(h.t) + companyHtml(h.t) +
       // 총점
       (h.total == null ? "" : "<h2>총점 " + fmt(h.total, 0) + "</h2>" + (h.cats && Object.keys(h.cats).length ? scoreBars(h.cats) : "")) +
       // 종목 정보 (지표·AI·실적·알림)
@@ -1445,6 +1445,45 @@
       rows +
       (c.conflict && c.conflict !== "확인 못 함" ? '<div class="small" style="margin-top:4px">⚖ 갈리는 쟁점: ' + esc(c.conflict) + "</div>" : "") +
       '<div class="small" style="margin-top:6px">' + esc(c.date || "") + " · AI 관찰 · 투자 권유 아님 · 판단은 100% 본인 몫</div></div>";
+  }
+  const SECTOR_KO = {
+    "Technology": "기술", "Healthcare": "헬스케어", "Financial Services": "금융", "Financial": "금융",
+    "Consumer Cyclical": "경기소비재", "Consumer Defensive": "필수소비재", "Industrials": "산업재",
+    "Energy": "에너지", "Utilities": "유틸리티", "Real Estate": "부동산", "Basic Materials": "소재",
+    "Communication Services": "커뮤니케이션", "ETF": "ETF·펀드"
+  };
+  const COUNTRY_KO = {
+    "United States": "미국", "China": "중국", "Canada": "캐나다", "United Kingdom": "영국",
+    "Ireland": "아일랜드", "Netherlands": "네덜란드", "Switzerland": "스위스", "Japan": "일본",
+    "South Korea": "한국", "Germany": "독일", "France": "프랑스", "Brazil": "브라질",
+    "Taiwan": "대만", "Bermuda": "버뮤다", "Israel": "이스라엘", "India": "인도"
+  };
+  function fmtMktCap(v) {
+    if (v == null || !isFinite(v)) return null;
+    if (v >= 1e12) return "$" + fmt(v / 1e12, 2) + "조(T)";
+    if (v >= 1e9) return "$" + fmt(v / 1e9, 1) + "십억(B)";
+    if (v >= 1e6) return "$" + fmt(v / 1e6, 0) + "백만(M)";
+    return "$" + fmt(v, 0);
+  }
+  function companyHtml(t) {
+    const c = S.ai && S.ai.company && S.ai.company[t];
+    if (!c) return "";
+    const secKo = SECTOR_KO[c.sector] || c.sector || "";
+    const sub = c["세부_ko"] || "";
+    const mc = fmtMktCap(c.market_cap);
+    const ctry = COUNTRY_KO[c.country] || c.country || "";
+    const rows = [];
+    if (secKo || sub) rows.push(["업종", esc(secKo) + (sub ? " · " + esc(sub) : "")]);
+    if (mc) rows.push(["시가총액", mc]);
+    if (ctry) rows.push(["본사", esc(ctry)]);
+    if (c.employees) rows.push(["직원 수", Number(c.employees).toLocaleString("en-US") + "명"]);
+    // 사실 정보(업종·시총·본사)나 한국어 설명 중 하나라도 있어야 카드를 띄워요.
+    if (!rows.length && !c["설명"]) return "";
+    const web = c.website && /^https?:\/\//i.test(c.website) ? '<a class="link" href="' + esc(c.website) + '" target="_blank" rel="noopener">홈페이지</a>' : "";
+    return '<div class="card"><div class="row between"><b>회사 정보</b>' + web + "</div>" +
+      rows.map(r => '<div class="row between" style="padding:3px 0"><span class="sub">' + r[0] + "</span><span>" + r[1] + "</span></div>").join("") +
+      (c["설명"] ? '<div class="small" style="margin-top:8px;line-height:1.7">' + esc(c["설명"]) + "</div>" : "") +
+      '<div class="small" style="color:var(--sub);margin-top:6px">출처: 야후 파이낸스 회사 개요 · 한국어 요약은 AI 정리(참고용)</div></div>';
   }
   function agentHtml(t) {
     const ag = S.ai && S.ai.agents && S.ai.agents[t];

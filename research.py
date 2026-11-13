@@ -28,6 +28,12 @@ import prices
 log = logging.getLogger(__name__)
 KEY = "ai"
 
+COMPANY_TASK = (
+    "미국 상장사 하나를 한국 투자자에게 쉽게 소개해. 아래 영문 개요를 바탕으로 사실만, 과장·투자권유·전망·목표가 없이.\n"
+    "출력(JSON): {\"세부업종\": \"한국어 한두 단어\", \"사업\": \"이 회사가 무슨 사업으로 어떻게 돈을 버는지 2~3문장, 한국어, 쉬운 말\"}\n"
+    "모르면 값을 비워 둬. 숫자·주가·매수의견은 넣지 마."
+)
+
 BRIEF = """목표: 내 보유 종목에 지난 하루 무슨 일이 있었는지 아침 브리핑.
 출력: {"items":[{"종목":"","무슨 일":"한 줄","시각":"자료의 시각","닿는 곳":"매출·마진·밸류에이션·수급 중","중요도":"상|중|하","이유":"한 줄","링크":"자료의 링크 하나"}]}
 - 중요한 종목부터. 종목마다 가장 중요한 사건 1~2개. 모두 '중'이면 그 안에서 순서를 매겨.
@@ -426,6 +432,39 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         ag[t] = agents.team(t, fin=fin.get(t), val=val.get(t),
                             market=app.get("market"), pick=pick_by.get(t), ind=ind.get(t))
     blob["agents"] = {t: v for t, v in ag.items() if t in deep_focus}
+
+    # ---- 회사 정보 (업종·사업 개요·시총·본사) : 후보·보유·관심. 사실 자료 + 한국어 소개(무료 AI, 월 1회) ----
+    comp = blob.setdefault("company", {})
+    month_ago = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+    try:
+        prof = prices.profiles([t.replace(".", "-") for t in deep_focus if not t.startswith("^")])
+        for t in deep_focus:
+            if t.startswith("^"):
+                continue
+            p = prof.get(t.replace(".", "-"))
+            if not p:
+                continue
+            prev = comp.get(t) or {}
+            rec = {"name": p.get("name") or p.get("short"), "sector": p.get("sector"),
+                   "industry": p.get("industry"), "market_cap": p.get("market_cap"),
+                   "website": p.get("website"), "country": p.get("country"), "employees": p.get("employees")}
+            # 한국어 사업 설명 — 거의 안 바뀌므로 월 1회만 새로. 실패해도 위 사실 정보는 그대로 표시.
+            if prev.get("설명") and prev.get("d", "") >= month_ago:
+                rec["설명"] = prev["설명"]; rec["세부_ko"] = prev.get("세부_ko"); rec["d"] = prev["d"]
+            else:
+                en = p.get("summary_en")
+                if en:
+                    res = ai.chat_json("회사 한국어 소개", COMPANY_TASK,
+                                       {"종목": t, "이름": p.get("name"), "업종": p.get("sector"),
+                                        "세부업종": p.get("industry"), "영문 개요": en[:1600]}, "small", 600)
+                    if res:
+                        rec["설명"] = (res.get("사업") or res.get("설명") or "").strip()
+                        rec["세부_ko"] = (res.get("세부업종") or "").strip()
+                        rec["d"] = today
+            comp[t] = rec
+    except Exception as e:
+        log.info("회사 정보 단계 건너뜀: %s", e)
+    blob["company"] = {t: v for t, v in comp.items() if t in deep_focus}
 
     # ---- 사전 부검 + 거부권 섀도 (자동 모의 주문 계획) ----
     pm = blob.get("pm", {})

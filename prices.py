@@ -152,6 +152,45 @@ def dividend_info(tickers: list[str], pause: float = 0.2) -> dict[str, dict]:
     return out
 
 
+PROFILE_CACHE = Path(__file__).parent / "data" / "company_profiles.json"
+PROFILE_FIELDS = {
+    "longName": "name", "shortName": "short", "sector": "sector", "industry": "industry",
+    "marketCap": "market_cap", "longBusinessSummary": "summary_en", "website": "website",
+    "country": "country", "fullTimeEmployees": "employees",
+}
+
+
+def profiles(tickers: list[str], max_age_days: int = 30, pause: float = 0.3) -> dict[str, dict]:
+    """회사 기본 정보(업종·사업 개요·시총·본사 등). 거의 안 바뀌므로 한 달 저장본을 써요."""
+    import yfinance as yf
+
+    cache = {}
+    if PROFILE_CACHE.exists():
+        try:
+            cache = json.loads(PROFILE_CACHE.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+    fresh_after = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat()
+    changed = False
+    for t in tickers:
+        item = cache.get(t)
+        if item and item.get("_at", "") >= fresh_after:
+            continue
+        try:
+            info = yf.Ticker(t).info or {}
+            rec = {v: info.get(k) for k, v in PROFILE_FIELDS.items()}
+            rec["_at"] = datetime.utcnow().isoformat()
+            cache[t] = rec
+            changed = True
+        except Exception as e:
+            log.info("회사 정보 실패 %s: %s", t, e)
+        time.sleep(pause)
+    if changed:
+        PROFILE_CACHE.parent.mkdir(exist_ok=True)
+        PROFILE_CACHE.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    return {t: cache[t] for t in tickers if t in cache}
+
+
 def earnings_dates(tickers: list[str]) -> dict[str, str]:
     """다가오는 실적 발표일 (YYYY-MM-DD). 모르면 빠져요."""
     import yfinance as yf
