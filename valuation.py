@@ -75,6 +75,11 @@ def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
+def _div(a, b):
+    """안전 나눗셈 — 분자가 None이거나 분모가 None/0이면 None(자료 희소한 종목 대비)."""
+    return a / b if (a is not None and b not in (None, 0)) else None
+
+
 # ---------------------------------------------------------------- 버핏 체크리스트
 def buffett_checklist(rows: dict) -> dict:
     """해자·수익성·안정성·현금흐름을 5개 항목으로. 각 항목 ok(True/False/None)."""
@@ -90,10 +95,10 @@ def buffett_checklist(rows: dict) -> dict:
     debt = _last(_series(rows, "lt_debt"))
     eq_last = _last(eq)
 
-    roe = (_last(net) / eq_last) if (eq_last not in (None, 0)) else None
-    op_margin = (_last(op) / _last(rev)) if (_last(rev) not in (None, 0)) else None
-    cur_ratio = (cur_a / cur_l) if (cur_l not in (None, 0)) else None
-    debt_eq = (debt / eq_last) if (eq_last not in (None, 0) and debt is not None) else None
+    roe = _div(_last(net), eq_last)
+    op_margin = _div(_last(op), _last(rev))
+    cur_ratio = _div(cur_a, cur_l)
+    debt_eq = _div(debt, eq_last)
     # FCF: financials에 fcf 없으면 ocf - |capex| 로
     fcf_last = _last(fcf)
     if fcf_last is None and _last(ocf) is not None and _last(capex) is not None:
@@ -189,7 +194,7 @@ def analyze(fin: dict | None, price: float | None, shares: float | None = None,
     eps = _last(eps_s)
     eq = _series(rows, "equity")
     sh = shares or _last(_series(rows, "shares_out")) or _last(_series(rows, "shares_avg"))
-    bps = (_last(eq) / sh) if (sh not in (None, 0)) else None
+    bps = _div(_last(eq), sh)
     fcf_s = _series(rows, "fcf")
     fcf_last = _last(fcf_s)
     if fcf_last is None:
