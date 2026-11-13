@@ -345,6 +345,8 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     except Exception:
         watch_t = []
     comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + focus))[:16]
+    # 적정가·지표·에이전트는 AI 비용 0(재무 숫자·가격 계산)이라 보유·관심 전체로 넓게 계산해요(위원회만 16 제한).
+    deep_focus = list(dict.fromkeys(holds + watch_t + pending_t + pick_t))[:40]
     for t in comm_focus:
         previous = comm.get(t) or {}
         if previous.get("date", "") >= week_ago and previous.get("version") == committee.VERSION and previous.get("members"):
@@ -367,7 +369,7 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     val = blob.setdefault("valuation", {})
     price_of = {p["t"]: p.get("price") for p in picks}
     price_of.update({h["t"]: h.get("price") for h in app.get("holdings", [])})
-    for t in comm_focus:
+    for t in deep_focus:
         if t.startswith("^"):
             continue
         try:
@@ -378,12 +380,12 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             res = None
         if res:
             val[t] = dict(res, date=today)
-    blob["valuation"] = {t: v for t, v in val.items() if t in keep2 or t in pending_t}
+    blob["valuation"] = {t: v for t, v in val.items() if t in deep_focus}
 
     # ---- 기술지표 + 리스크 수치 (indicators) : 후보·보유·관심, 1년 가격 이력 기반 ----
     ind = {}
     try:
-        ind_focus = [t for t in comm_focus if not t.startswith("^")]
+        ind_focus = [t for t in deep_focus if not t.startswith("^")]
         if ind_focus:
             raw_hist = prices.download_history([t.replace(".", "-") for t in ind_focus] + ["SPY"], period="1y")
             spy_df = raw_hist.get("SPY")
@@ -394,17 +396,17 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
                     ind[t] = res
     except Exception as e:
         log.info("지표·리스크 계산 단계 건너뜀: %s", e)
-    blob["indicators"] = {t: v for t, v in ind.items() if t in keep2 or t in pending_t}
+    blob["indicators"] = {t: v for t, v in ind.items() if t in deep_focus}
 
     # ---- AI 투자 에이전트 팀 (agents) : 6역할 종합 뷰(기술지표·리스크 반영), 표시용 ----
     ag = {}
     pick_by = {p["t"]: p for p in picks}
-    for t in comm_focus:
+    for t in deep_focus:
         if t.startswith("^"):
             continue
         ag[t] = agents.team(t, fin=fin.get(t), val=val.get(t),
                             market=app.get("market"), pick=pick_by.get(t), ind=ind.get(t))
-    blob["agents"] = {t: v for t, v in ag.items() if t in keep2 or t in pending_t}
+    blob["agents"] = {t: v for t, v in ag.items() if t in deep_focus}
 
     # ---- 사전 부검 + 거부권 섀도 (자동 모의 주문 계획) ----
     pm = blob.get("pm", {})

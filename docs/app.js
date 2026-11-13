@@ -1300,7 +1300,7 @@
         '<span class="grow small">사자 ' + buy + " · 팔자 " + sell + (veto ? ' · <span class="bad-t">위원회 반대</span>' : "") + "</span>" +
         '<span class="badge ' + tone + '">' + (b.score == null ? "—" : fmt(b.score, 2)) + "</span></div>";
     }).join("");
-    return '<div class="card"><div class="row between"><b>🏦 모의 종목 · 월가 5인</b><a class="small link" href="#/picks">후보 →</a></div>' +
+    return '<div class="card"><div class="row between"><b>🏦 모의 종목 · 분석 요약</b></div>' +
       '<div class="small" style="margin:2px 0 8px">위원회가 이 종목들을 어떻게 보는지 · 종합 ≤ -0.30이면 모의 매수를 거르고(위원회 반대), 보유는 매도 신호로 작용해요(규칙이 우선).</div>' +
       '<div class="list">' + rows + "</div></div>";
   }
