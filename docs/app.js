@@ -856,6 +856,20 @@
     if (!p) return appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button><div class="empty">오늘 목록에 없는 종목이에요</div>');
     const pl = p.plan || {};
     const cons = (p.tags || []).filter(x => /실적|보류|출렁임|위험|참고/.test(x)).concat(p.caution ? [p.caution] : []).concat(p.warn ? [p.warn] : []);
+    const segDefs = [
+      ["agent", "에이전트", agentHtml(p.t)],
+      ["fin", "재무 5초", finHtml(finFor(p.t))],
+      ["pro", "찬반 근거", '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
+        (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
+        '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>"],
+      ["chart", "차트", chartHtml(p.t)],
+      ["v4", "월가 5인", committeeHtml(p.t)],
+      ["rep", "쉬운 리포트", repHtml(p.t)],
+    ].filter(s => s[2] && s[2].trim());
+    const segs = {};
+    segDefs.forEach(s => { segs[s[0]] = s[2]; });
+    const firstSeg = segDefs.length ? segDefs[0][0] : null;
+    const segBtnsHtml = '<div class="segs">' + segDefs.map((s, i) => '<button' + (i === 0 ? ' class="on"' : "") + ' data-s="' + s[0] + '">' + esc(s[1]) + "</button>").join("") + '</div><div id="seg"></div>';
     appShell("picks", '<button class="back" onclick="history.back()">← 뒤로</button>' +
       stockHeader(p.t, p.name, p.price, (p.setup ? '<span class="badge ' + edgeTone(p.edge) + '">' + esc(p.setup) + "</span> " : "") + '<span class="badge info">총점 ' + fmt(p.total, 0) + "</span>") +
       '<div class="small" style="margin-top:4px">' + esc(p.band) + " · " + (p.streak > 1 ? "연속 " + p.streak + "일" : "신규") + (p.etf ? " · ETF·펀드" : "") + "</div>" +
@@ -871,22 +885,12 @@
       edgeCard(p) + lensPanel(p) +
       "<h2>점수</h2>" + scoreBars(p.cats) + trendHtml(p.trend5) + pmHtml(p.t) +
       // ── 더 깊이 보기 ──
-      '<div class="segs"><button class="on" data-s="agent">에이전트</button><button data-s="fin">재무 5초</button><button data-s="pro">찬반 근거</button><button data-s="chart">차트</button><button data-s="v4">월가 5인</button><button data-s="rep">쉬운 리포트</button></div><div id="seg"></div>' +
+      segBtnsHtml +
       quoteSumCard(p.t) + statsCard(p.t) + aiCard(p.t) + priceAlertCard(p.t) +
       '<details class="sig"><summary><b>📓 이 종목 일지 (알림·모의 거래)</b></summary>' + tickerLogHtml(p.t) + "</details>" +
       '<p class="foot">' + esc(DISCLAIMER) + "</p>");
-    const segs = {
-      agent: agentHtml(p.t),
-      fin: finHtml(finFor(p.t)),
-      pro: '<div class="card"><b>좋은 점</b><ul class="plain">' + (p.reasons || []).map(r => "<li>" + esc(r) + "</li>").join("") + "</ul>" +
-        (p.desc ? '<div class="sub">' + esc(p.desc) + "</div>" : "") + "</div>" +
-        '<div class="card"><b>걱정되는 점</b><ul class="plain">' + (cons.length ? cons.map(r => "<li>" + esc(r) + "</li>").join("") : "<li>오늘 규칙상 특별한 경고는 없어요</li>") + "</ul></div>",
-      chart: chartHtml(p.t),
-      v4: committeeHtml(p.t),
-      rep: repHtml(p.t),
-    };
     const seg = document.getElementById("seg");
-    seg.innerHTML = segs.agent;
+    if (seg && firstSeg) seg.innerHTML = segs[firstSeg];
     $app.querySelectorAll(".segs button").forEach(b => b.addEventListener("click", () => {
       $app.querySelectorAll(".segs button").forEach(x => x.classList.toggle("on", x === b));
       seg.innerHTML = segs[b.dataset.s];
@@ -933,7 +937,8 @@
     // 자세히 분석 — 흩어진 6개 섹션을 탭 하나로 (차트·실적·재무·가치·쉬운 리포트·분기 공시)
     // '실적' 탭 제거 — 실적은 위 '종목 정보 → 실적'(statsCard)에 분기 매출·EPS + AI 상세까지 한 곳에 모았어요.
     const panes = [["에이전트", agentHtml(h.t)], ["차트", chartHtml(h.t)], ["재무", finHtml(finFor(h.t))],
-                   ["월가 5인", committeeHtml(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]];
+                   ["월가 5인", committeeHtml(h.t)], ["쉬운 리포트", repHtml(h.t)], ["분기 공시", secqHtml(h.t)]]
+                  .filter(p => p[1] && p[1].trim());
     const dtabs = '<div class="segs dtabs">' + panes.map((p, i) => '<button data-dt="' + i + '"' + (i === 0 ? ' class="on"' : "") + ">" + esc(p[0]) + "</button>").join("") + "</div>" +
       '<div class="dpanes">' + panes.map((p, i) => '<div class="dpane"' + (i ? " hidden" : "") + ">" + p[1] + "</div>").join("") + "</div>";
     appShell("holdings", '<button class="back" onclick="history.back()">← 뒤로</button>' +
@@ -1422,7 +1427,7 @@
   }
   function committeeHtml(t) {
     const c = S.ai && S.ai.committee && S.ai.committee[t];
-    if (!c || !(c.members || []).length) return b4Html(t);  // 위원회 자료 없으면 기존 버핏 4관점을 그대로
+    if (!c || !(c.members || []).length) return "";  // 위원회 자료 없으면 표시 안 함 (버핏 4관점 폐지)
     const b = c.blend || {};
     const col = s => s === "사자" ? "var(--up)" : s === "팔자" ? "var(--down)" : "var(--line2)";
     const mk = s => s === "사자" ? '<span class="good-t">사자</span>' : s === "팔자" ? '<span class="bad-t">팔자</span>' : '<span class="sub">' + (s === "기권" ? "기권" : "중립") + "</span>";
@@ -1439,8 +1444,7 @@
       '<div class="small" style="margin:2px 0 10px">버핏·멍거·그레이엄·린치·드러켄밀러가 각자 보는 눈 · 전략 <b>' + esc(b.strategy || "") + '</b> 가중 · <b>참고용</b>(실제 주문·비중은 규칙이 정해요)</div>' +
       rows +
       (c.conflict && c.conflict !== "확인 못 함" ? '<div class="small" style="margin-top:4px">⚖ 갈리는 쟁점: ' + esc(c.conflict) + "</div>" : "") +
-      '<div class="small" style="margin-top:6px">' + esc(c.date || "") + " · AI 관찰 · 투자 권유 아님 · 판단은 100% 본인 몫</div></div>" +
-      '<details class="sig"><summary><b>버핏 4관점 상세</b></summary>' + b4Html(t) + "</details>";
+      '<div class="small" style="margin-top:6px">' + esc(c.date || "") + " · AI 관찰 · 투자 권유 아님 · 판단은 100% 본인 몫</div></div>";
   }
   function agentHtml(t) {
     const ag = S.ai && S.ai.agents && S.ai.agents[t];
@@ -1493,7 +1497,7 @@
   }
   function b4Html(t) {
     const x = S.ai && S.ai.b4 && S.ai.b4[t];
-    if (!x) return '<div class="empty">' + esc(aiOff() || "이 종목의 4관점 점검은 아직 없어요(보유·후보 상위만, 7일마다).") + "</div>";
+    if (!x) return aiOff() ? '<div class="empty">' + esc(aiOff()) + "</div>" : "";
     return '<div class="card"><div class="row between"><b>종합</b><span class="badge ' + tone3(x["종합"]) + '">' + esc(x["종합"] || "") + "</span></div>" +
       (x["한 줄"] ? '<div class="sub">' + esc(x["한 줄"]) + "</div>" : "") + "</div>" +
       (x["관점"] || []).map(v => '<div class="card"><div class="row between"><b>' + esc(v["이름"]) + '</b><span class="badge ' + tone3(v["판정"]) + '">' + esc(v["판정"]) + "</span></div>" +
@@ -1502,7 +1506,7 @@
   }
   function repHtml(t) {
     const x = S.ai && S.ai.rep && S.ai.rep[t];
-    if (!x) return '<div class="empty">' + esc(aiOff() || "이 종목의 쉬운 리포트는 아직 없어요(보유·후보 상위만, 7일마다).") + "</div>";
+    if (!x) return aiOff() ? '<div class="empty">' + esc(aiOff()) + "</div>" : "";
     return '<div class="card"><b>7줄 요약</b><ol class="plain">' + (x["7줄 요약"] || []).map(l => "<li>" + esc(l) + "</li>").join("") + "</ol></div>" +
       '<div class="card"><b>지표 신호</b><div class="sigrows">' + (x["신호"] || []).map(g =>
         '<div class="sigrow"><div class="row between"><span class="signame">' + esc(g["지표"]) + '</span><span class="badge ' + tone3(g["좋음/나쁨"]) + '">' +
@@ -1821,7 +1825,7 @@
   // 분기 공시 비교 (SEC XBRL 숫자 · 파이썬 계산)
   function secqHtml(t) {
     const q = S.ai && S.ai.secq && S.ai.secq[t];
-    if (!q) return '<div class="empty">' + esc((S.ai && S.ai.secq_off) || "이 종목은 SEC 분기 숫자가 없어요 (ETF·외국 회사 등)") + "</div>";
+    if (!q) return (S.ai && S.ai.secq_off) ? '<div class="empty">' + esc(S.ai.secq_off) + "</div>" : "";
     const big = v => v == null ? "—" : Math.abs(v) >= 1e9 ? fmt(v / 1e9, 2) + "B" : Math.abs(v) >= 1e6 ? fmt(v / 1e6, 1) + "M" : fmt(v, 2);
     return '<div class="card"><div class="small">' + esc(q.quarter) + " · " + esc(q.form || "") + " · 신고일 " + esc(q.filed || "") + "</div>" +
       ((q.changes || []).length ? '<b>직전 분기와 달라진 점</b><ol class="plain" style="padding-left:18px;list-style:decimal">' + q.changes.map(x => "<li>" + esc(x) + "</li>").join("") + "</ol>" : "") +
