@@ -349,13 +349,21 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             for t, df in raw_hist.items() if df is not None and len(df)}
     H = lambda t: hist.get(t.replace(".", "-"))
     issues = []
+    delayed = []
     for p in st["positions"]:
         df = H(p["t"])
-        if df is None or not len(df) or df.index[-1].strftime("%Y-%m-%d") != bar_date:
-            issues.append((p["t"], "평가일 보유 종목 가격 누락·지연"))
-        elif not all(np.isfinite(float(df.iloc[-1][k])) and float(df.iloc[-1][k]) > 0
-                     for k in ("Open", "High", "Low", "Close")):
+        if df is None or not len(df):
+            issues.append((p["t"], "평가일 보유 종목 가격 전부 누락"))
+            continue
+        if not all(np.isfinite(float(df.iloc[-1][k])) and float(df.iloc[-1][k]) > 0
+                   for k in ("Open", "High", "Low", "Close")):
             issues.append((p["t"], "평가일 보유 종목 가격 유효성 실패"))
+            continue
+        # 유동성 낮은 종목은 야후 데이터가 하루이틀 밀릴 수 있어요. 정확히 평가일 바가 아니어도
+        # 최근 종가(hist는 bar_date 이하로만 필터됨)로 평가하고, 지연분만 표시 — 전체를 얼리지 않음.
+        last_date = df.index[-1].strftime("%Y-%m-%d")
+        if last_date != bar_date:
+            delayed.append({"t": p["t"], "asof": last_date})
     if issues:
         return _valuation_block(store, st, bar_date, now_iso, issues, picks)
     partial = [p["t"].replace(".", "-") for p in st["positions"] if p.get("seen_to")
@@ -504,7 +512,7 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
     else:
         st["equity"].append([bar_date, round(val, 2), spy_px])
 
-    st["valuation"] = {"date": bar_date, "ok": True, "asof": bar_date}
+    st["valuation"] = {"date": bar_date, "ok": True, "asof": bar_date, "delayed": delayed}
 
     # 월 손실 한도
     month = bar_date[:7]
