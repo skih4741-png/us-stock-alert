@@ -80,6 +80,18 @@ def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", st
             report["weekly_error"] = str(metrics_error)[:160]
         report["recovery"] = operations_health.recovery_plan(list(CHECKS))
         operations_health.save_health(store, report)
+        try:  # 공개로 읽을 수 있는 실행 요약(로그인 없이 raw로 확인) — 진단용
+            import os
+            os.makedirs("docs", exist_ok=True)
+            with open("docs/last_run.json", "w", encoding="utf-8") as _f:
+                json.dump({"at": at, "kind": kind, "state": report.get("state"),
+                           "outcome": ok if isinstance(ok, str) else bool(ok),
+                           "failed": report.get("failed", []),
+                           "not_checked": report.get("not_checked", []),
+                           "checks": [{"n": c.get("n"), "ok": c.get("ok"), "d": (c.get("d") or "")[:160]} for c in CHECKS]},
+                          _f, ensure_ascii=False, indent=1)
+        except Exception as _e:
+            log.warning("last_run.json 기록 실패: %s", _e)
         if ok != "skip" and kind == "daily" and report["state"] in ("failed", "incomplete"):
             failures = " / ".join(report["failed"])[:250]
             log.error("운영 점검 실패: %s", failures)
@@ -149,7 +161,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             store.append("실행 기록", [{"날짜": now.strftime("%Y-%m-%d"), "시각": now.strftime("%H:%M"), "종류": "아침 리포트",
                                       "성공/실패": "건너뜀", "메모": "미국 휴장"}])
             outcome = record_run(store, "daily", t0, "skip", [f"새 거래일 자료 없음 (마지막 {bar_date}) — 휴장 또는 이미 처리한 거래일"])
-            return {"skipped": True, "exit_code": 0 if outcome == "skip" else 2}
+            return {"skipped": True, "exit_code": 2 if outcome is False else 0}
         mk = market.judge(spy, vix, cfg)
         prev_regime = state.get("regime")
         regime_to_bear = prev_regime not in (None, "bear") and mk["regime"] == "bear"
@@ -531,7 +543,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
             state.update({"last_bar_date": bar_date, "regime": mk["regime"], "last_run": now.isoformat()})
             save_state(state)
         return {"report": report, "results": results, "analyzed": len(base),
-                "exit_code": 0 if dry or outcome is True else 2}
+                "exit_code": 2 if (not dry and outcome is False) else 0}
     except Exception as e:
         took = int(time.time() - t0)
         msg = f"{stage} 단계에서 멈췄어요: {e}"
@@ -835,7 +847,7 @@ def run_watch(kind: str, dry: bool):
         raise
     if store is not None and not dry:
         outcome = record_run(store, kind, t0, True, changed or ["새로 알릴 것 없음"])
-        return {"exit_code": 0 if outcome is True else 2}
+        return {"exit_code": 2 if outcome is False else 0}
     return {"exit_code": 0, "skipped": store is None}
 
 
@@ -1173,7 +1185,7 @@ def run_weekly(dry: bool):
         log.warning("주간 요약 앱 알림 실패: %s", e)
         chk("주간 요약 저장", False, e)
     outcome = record_run(store, "weekly", t0, True, [first])
-    return {"exit_code": 0 if outcome is True else 2}
+    return {"exit_code": 2 if outcome is False else 0}
 
 
 def notify_fail(msg: str):
