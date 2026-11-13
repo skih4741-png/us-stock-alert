@@ -210,17 +210,26 @@ def bls_table() -> dict:
         d = [x for x in series.get(sid) or [] if x.get("period", "").startswith("M") and x["period"] != "M13"]
         if len(d) < 3:
             continue
-        val = lambda x: float(x["value"])
+        def val(x):
+            # BLS는 결측을 '-'로 주기도 하고 큰 수에 콤마가 붙기도 해요. 숫자 아니면 None.
+            try:
+                return float(str((x or {}).get("value", "")).replace(",", ""))
+            except (ValueError, TypeError):
+                return None
         cur, prv = d[0], d[1]
+        if val(cur) is None:          # 최신 값이 결측이면 이 지표는 건너뜀
+            continue
         key = lambda x: (int(x["year"]), x["period"])
         if how == "yoy":
             def yoy(x):
                 b = next((y for y in d if key(y) == (int(x["year"]) - 1, x["period"])), None)
-                return round((val(x) / val(b) - 1) * 100, 2) if b else None
+                return round((val(x) / val(b) - 1) * 100, 2) if (b and val(x) is not None and val(b)) else None
             v, p = yoy(cur), yoy(prv)
             unit = "%"
         elif how == "diff":
-            v, p, unit = round(val(cur) - val(prv), 1), round(val(prv) - val(d[2]), 1), "천 명"
+            v = round(val(cur) - val(prv), 1) if val(prv) is not None else None
+            p = round(val(prv) - val(d[2]), 1) if (val(prv) is not None and val(d[2]) is not None) else None
+            unit = "천 명"
         else:
             v, p, unit = val(cur), val(prv), "%"
         out[sid] = {"이름": name, "기준일": f"{cur['year']}-{cur['period'][1:]}", "값": v, "직전": p, "단위": unit, "출처": f"BLS {sid}"}
