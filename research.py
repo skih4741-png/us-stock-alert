@@ -344,8 +344,9 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
         watch_t = list((json.loads(store.get_blob("watch") or "{}").get("items") or {}).keys())
     except Exception:
         watch_t = []
-    comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + focus))[:16]
-    # 적정가·지표·에이전트는 AI 비용 0(재무 숫자·가격 계산)이라 보유·관심 전체로 넓게 계산해요(위원회만 16 제한).
+    # 위원회(월가 5인)는 주 1회 캐시라 한도를 24로 넓혀 상위 매수 후보까지 포함 — 후보 상세 표시 + 후보 매수 veto 적용.
+    comm_focus = list(dict.fromkeys(pending_t + holds + watch_t + pick_t))[:24]
+    # 적정가·지표·에이전트는 AI 비용 0(재무 숫자·가격 계산)이라 보유·관심·후보 전체로 넓게 계산해요(위원회만 24 제한).
     deep_focus = list(dict.fromkeys(holds + watch_t + pending_t + pick_t))[:40]
     for t in comm_focus:
         previous = comm.get(t) or {}
