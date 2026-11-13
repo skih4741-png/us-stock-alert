@@ -369,6 +369,24 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
     val = blob.setdefault("valuation", {})
     price_of = {p["t"]: p.get("price") for p in picks}
     price_of.update({h["t"]: h.get("price") for h in app.get("holdings", [])})
+    # 1년 가격 이력을 적정가 계산 '전에' 미리 받아, 현재가가 없는 종목(관심 등)엔 마지막 종가를 현재가로 공급.
+    # → 관심 종목 적정가가 '확인 못 함/안전마진 —'으로 뜨던 문제 해결. (지표 단계에서 이 이력을 그대로 재사용)
+    raw_hist = {}
+    ind_focus = [t for t in deep_focus if not t.startswith("^")]
+    try:
+        if ind_focus:
+            raw_hist = prices.download_history([t.replace(".", "-") for t in ind_focus] + ["SPY"], period="1y")
+            for t in ind_focus:
+                if price_of.get(t) is not None:
+                    continue
+                df = raw_hist.get(t.replace(".", "-"))
+                if df is not None and len(df):
+                    try:
+                        price_of[t] = float(df["Close"].iloc[-1])
+                    except Exception:
+                        pass
+    except Exception as e:
+        log.info("가격 이력 선다운로드 실패(적정가 현재가 보강 생략): %s", e)
     for t in deep_focus:
         if t.startswith("^"):
             continue
@@ -382,12 +400,12 @@ def run_daily(store, app: dict, cfg: dict, sim_state: dict | None) -> dict | Non
             val[t] = dict(res, date=today)
     blob["valuation"] = {t: v for t, v in val.items() if t in deep_focus}
 
-    # ---- 기술지표 + 리스크 수치 (indicators) : 후보·보유·관심, 1년 가격 이력 기반 ----
+    # ---- 기술지표 + 리스크 수치 (indicators) : 후보·보유·관심, 위 1년 이력 재사용 ----
     ind = {}
     try:
-        ind_focus = [t for t in deep_focus if not t.startswith("^")]
         if ind_focus:
-            raw_hist = prices.download_history([t.replace(".", "-") for t in ind_focus] + ["SPY"], period="1y")
+            if not raw_hist:
+                raw_hist = prices.download_history([t.replace(".", "-") for t in ind_focus] + ["SPY"], period="1y")
             spy_df = raw_hist.get("SPY")
             spy_close = spy_df["Close"] if spy_df is not None and len(spy_df) else None
             for t in ind_focus:

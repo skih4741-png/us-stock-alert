@@ -1466,9 +1466,19 @@
         '<div class="small" style="margin:2px 0 10px">5역할 종합 · 신뢰도 <b>' + (s.confidence == null ? "—" : s.confidence) + "/5</b> · " + esc(s.line || "") + "</div>" + bars +
         '<div class="small" style="color:var(--sub)">AI 관찰 · 투자 권유 아님 · 매수/매도는 규칙이 정해요</div></div>';
     }
-    if (val) {
-      const vt = val.verdict === "저평가" ? "good" : val.verdict === "고평가" ? "warn" : "info";
-      const lo = val.fair_low, hi = val.fair_high, px = val.price;
+    if (val && val.fair_mid != null) {
+      // 현재가가 비어 있으면(관심 종목 등) 지표의 종가로 안전마진·판정을 보강 — "확인 못 함"이 뜨지 않게
+      const vpx = val.price != null ? val.price : (ind && ind.price != null ? ind.price : null);
+      let mp = val.margin_pct, vd = val.verdict, why = val.why;
+      if (mp == null && vpx != null && val.fair_mid) {
+        const mr = (val.fair_mid - vpx) / val.fair_mid;
+        mp = Math.round(mr * 1000) / 10;
+        if (mr >= 0.25) { vd = "저평가"; why = "현재가가 적정가 중앙값보다 " + Math.round(mr * 100) + "% 낮아요(안전마진 확보)"; }
+        else if (mr <= -0.10) { vd = "고평가"; why = "현재가가 적정가 중앙값보다 " + Math.round(-mr * 100) + "% 높아요"; }
+        else { vd = "적정"; why = "현재가가 적정가 범위 근처예요"; }
+      }
+      const vt = vd === "저평가" ? "good" : vd === "고평가" ? "warn" : "info";
+      const lo = val.fair_low, hi = val.fair_high, px = vpx;
       let gauge = "";
       if (lo != null && hi != null && hi > lo && px != null) {
         const pos = Math.max(2, Math.min(98, (px - lo) / (hi - lo) * 100));
@@ -1477,10 +1487,10 @@
           '<div class="row between small"><span>저평가 $' + f(lo, 0) + "</span><span>현재 $" + f(px, 2) + "</span><span>고평가 $" + f(hi, 0) + "</span></div>";
       }
       const bf = val.buffett || {}, m = val.methods || {};
-      h += '<div class="card"><div class="row between"><b>적정가 · 밸류에이션</b><span class="badge ' + vt + '">' + esc(val.verdict || "") + "</span></div>" +
-        '<div class="small" style="margin:2px 0 4px">적정가 중앙값 <b>$' + f(val.fair_mid, 2) + "</b> · 안전마진 <b>" + (val.margin_pct == null ? "—" : val.margin_pct + "%") + "</b></div>" + gauge +
+      h += '<div class="card"><div class="row between"><b>적정가 · 밸류에이션</b><span class="badge ' + vt + '">' + esc(vd || "") + "</span></div>" +
+        '<div class="small" style="margin:2px 0 4px">적정가 중앙값 <b>$' + f(val.fair_mid, 2) + "</b> · 안전마진 <b>" + (mp == null ? "—" : mp + "%") + "</b></div>" + gauge +
         '<div class="small" style="margin-top:6px">버핏 체크 <b>' + (bf.passed || 0) + "/" + (bf.checked || 0) + "</b> · 그레이엄 $" + f(m["그레이엄 넘버"], 0) + " · 적정PER $" + f(m["적정 PER"], 0) + " · DCF $" + f(m["간이 DCF"], 0) + "</div>" +
-        '<div class="small" style="color:var(--sub);margin-top:2px">' + esc(val.why || "") + "</div></div>";
+        '<div class="small" style="color:var(--sub);margin-top:2px">' + esc(why || "") + "</div></div>";
     }
     if (ind) {
       const b = ind.boll || {}, st = ind.stoch || {}, rm = ind.risk || {};
@@ -2472,8 +2482,8 @@
   const GLOSSARY = [
     ["앱 전체", [["하단 탭바 (Tab Bar)", "홈 · 후보 · 보유 · 뉴스 · 모의투자 (5개)"], ["배지 · 인디케이터 (Badge)", "뉴스·모의투자 탭 위 빨간 점 = 안 본 새 소식"], ["세이프 에어리어 (Safe Area)", "탭바 아래 홈바 여백"], ["토스트 (Toast)", "잠깐 떴다 사라지는 검은 알림"], ["오프라인 배너", "인터넷 끊기면 맨 위 노란 줄"], ["풀 투 리프레시 (Refresher)", "맨 위에서 아래로 당기면 새로고침"], ["백 제스처 (Back Gesture)", "왼쪽 끝에서 오른쪽으로 밀면 뒤로"], ["테마 컨트롤러", "설정 → 화면 모드 (자동·밝게·어둡게)"]]],
     ["홈", [["앱바 (App Bar)", "맨 위 '오늘 · 날짜' 줄과 🔔·⚙️ 아이콘 버튼"], ["업데이트 카드", "새 버전 바뀐 점 (확인했어요 버튼)"], ["카드 · 래디얼 프로그레스", "모의투자 진행 중 카드의 동그란 진행률(○/90일)"], ["스테이터스 (Status)", "초록 깜빡이는 점 = 진행 중"], ["카드", "오늘의 경제뉴스 · 내 자산 · 밤사이 브리핑"], ["칩 (Chip)", "AI에게 묻기 · 장 전 갭 · 성향 인터뷰"], ["리스트 · 아이템 (List · Item)", "내 보유 한 줄 결론, 매수 후보 상위"]]],
-    ["후보", [["세그먼트 (Segment)", "엄선/전체 토글"], ["검색바 (Searchbar)", "종목 찾기 칸"], ["리스트 · 배지", "종목 줄과 점수·태그"], ["종목 상세 → 세그먼트", "재무 5초 · 찬반 근거 · 차트 · 4관점 · 쉬운 리포트"]]],
-    ["보유", [["카드 (Stat)", "🧺 내 포트폴리오 진단 숫자 3칸"], ["프로그레스 바", "업종 비중 막대"], ["컬랩스 (Collapse)", "AI 풀이 · 주요 리스크 접기/펴기"], ["종목 상세 → 컬랩스", "차트 분석 · 분기 공시 비교 · 버핏 4관점 · 쉬운 리포트"]]],
+    ["후보", [["세그먼트 (Segment)", "엄선/전체 토글"], ["검색바 (Searchbar)", "종목 찾기 칸"], ["리스트 · 배지", "종목 줄과 점수·태그"], ["종목 상세 → 세그먼트", "에이전트 · 재무 5초 · 찬반 근거 · 차트 · 월가 5인 · 쉬운 리포트"]]],
+    ["보유", [["카드 (Stat)", "🧺 내 포트폴리오 진단 숫자 3칸"], ["프로그레스 바", "업종 비중 막대"], ["컬랩스 (Collapse)", "AI 풀이 · 주요 리스크 접기/펴기"], ["종목 상세 → 컬랩스", "차트 분석 · 분기 공시 비교 · 월가 5인 · 쉬운 리포트"]]],
     ["뉴스", [["세그먼트", "5초 요약 · 업종 13개 · 내 종목 · 매크로·숫자"], ["컬랩스 (아코디언)", "업종 13개 각 줄 (누르면 펼침)"], ["배지 (신호등)", "🟢🟡🔴 · 호재/악재/소음"], ["칩", "더 물어보기 질문"]]],
     ["모의투자", [["세그먼트", "자동 모의 · 분석·리포트"], ["프로그레스 바", "3개월 진행 막대, 체결률 막대"], ["버튼 (Secondary)", "주문표 복사"], ["리스트 · 배지", "주문표 채점 (체결·미체결·안 냄)"]]],
     ["입력·띄우는 것", [["텍스트에어리어 (Textarea)", "AI에게 묻기 질문 칸"], ["셀렉트 (Select)", "질문 템플릿 종목 고르기"], ["로딩 (loading)", "제출 버튼이 '처리 중…'으로 잠김"], ["인라인 에러 (Field Error)", "칸 아래 빨간 글씨"], ["엠프티 스테이트 (Empty State)", "내용 없을 때 아이콘 + 제목 + 다음 행동 칩"]]],

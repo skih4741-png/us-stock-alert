@@ -68,7 +68,7 @@
     const risk=arr(p.tags).find(x=>/주의|실적|위험|보류|출렁임/.test(x)) || p.conclusion || p.entry_exclusion || '자료·주문 조건 추가 확인';
     return card(t+' · 검토 요약', '<p><b>근거</b> '+E(reason)+'</p><p><b>주의</b> '+E(risk)+'</p>'+
       '<p class="small">'+E(S.data?.date || '자료 기준일 없음')+' · '+E(p.elite?'엄선 기준 통과 · 주문 전 검사 별도':p.entry_exclusion || '자동 모의 대상 여부 확인 대기')+'</p>'+
-      '<button class="chip" data-desk-ask="'+E(t)+'">이 자료로 AI에게 묻기</button>'+link('cal','일정 확인'))+teamHtml(S,t)+thesis(S,t);
+      '<button class="chip" data-desk-ask="'+E(t)+'">이 자료로 AI에게 묻기</button>'+link('cal','일정 확인'))+teamHtml(S,t);
   }
   function watch(S) {
     return card('관심종목 · 기다리는 이유',table(['종목','상태','기다리는 조건','다음 확인일'],arr(S.watchlist).map(t=>{const n=noteFor(S,t);return [t,condition(n,entity(S,t).price),n.wait || '종목 상세에서 조건 기록',n.next || '미지정'];}))+
@@ -146,7 +146,7 @@
     if(['pick','hold','stock'].includes(route) && t) return entityHtml(S,t);
     if(route==='home') return home(S);
     if(route==='picks') return card('관찰·주의·주문 제한을 구분해요',list(['관찰: 아직 셋업이 없거나 표본을 모으는 종목','주의: AI 의견 차이·자료 부족은 검토 정보이며 추가 차단 조건이 아니에요','주문 제한: 현금·손절 위험금액·일일 한도·정수 수량을 코드가 다시 검사해요']));
-    if(route==='watch') return watch(S);
+    if(route==='watch') return '';
     if(route==='holdings') return holdings(S);
     if(route==='score') return score(S,C.seg || 'auto');
     if(route==='cal') return calendar(S);
