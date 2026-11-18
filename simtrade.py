@@ -366,6 +366,16 @@ def step(store, picks: list[dict], bar_date: str, market: dict, now_iso: str, ke
             delayed.append({"t": p["t"], "asof": last_date})
     if issues:
         return _valuation_block(store, st, bar_date, now_iso, issues, picks)
+    # 오래된 '미확인 장중 구간' 자동 확정: 진입일이 이미 완전히 지난 뒤에도 5분봉이 끝내
+    # 안 들어오는 저유동 종목(예: GNE)은 recovery_day가 영구히 고정돼 엔진 전체를 얼려요.
+    # 그 거래일이 지났으면 더는 소급(look-ahead) 위험이 없으므로 종가 시점으로 확정하고 풀어줘요.
+    for _p in st["positions"]:
+        _rd = _p.get("recovery_day")
+        if _rd and _rd < bar_date:
+            _close_dt = trading_sessions.close_time(_rd)
+            _p["seen_to"] = (_close_dt.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M")
+                             if _close_dt is not None else _rd + " 16:00")
+            _p.pop("recovery_day", None)
     partial = [p["t"].replace(".", "-") for p in st["positions"] if p.get("seen_to")
                and p["seen_to"][:10] <= bar_date
                and not trading_sessions.completed_session(p["seen_to"], p["seen_to"][:10])]
