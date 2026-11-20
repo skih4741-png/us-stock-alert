@@ -92,7 +92,7 @@ def record_run(store, kind: str, t0: float, ok, changed: list, err: str = "", st
                           _f, ensure_ascii=False, indent=1)
         except Exception as _e:
             log.warning("last_run.json 기록 실패: %s", _e)
-        if ok != "skip" and kind == "daily" and report["state"] in ("failed", "incomplete"):
+        if ok != "skip" and kind == "daily" and report["state"] == "failed":
             failures = " / ".join(report["failed"])[:250]
             log.error("운영 점검 실패: %s", failures)
             notify.send_slack("⚠ 아침 분석 일부 단계 실패 · " + failures +

@@ -9,7 +9,11 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-CRITICAL = ("메일·슬랙 발송", "앱 데이터 저장", "자동 모의투자")
+# 핵심(실패 시 워크플로 RED): 앱 데이터 저장·자동 모의투자.
+# 외부 발송(메일·슬랙)은 '전달 저하'로만 봐요 — 앱 데이터가 저장되면 사용자는 앱에서 모두 보므로,
+# 외부 릴레이(메일/슬랙) 실패만으로 워크플로를 RED(=진짜 실패)로 만들지 않아요. 저하(warn)로 표시만.
+CRITICAL = ("앱 데이터 저장", "자동 모의투자")
+DELIVERY = ("메일·슬랙 발송",)
 
 
 def run_outcome(ok, checks: list[dict], *, require_daily: bool = False):
@@ -33,8 +37,10 @@ def build_health(*, kind: str, at: str, checks: list[dict], success: bool,
     failing = [name for name, value in entries.items() if value["ok"] is False]
     missing = [name for name in CRITICAL if name not in entries] if kind == "daily" else []
     optional = [name for name in CRITICAL if entries.get(name, {}).get("ok") is None] if kind == "daily" else []
-    state = ("skipped" if success == "skip" else "failed" if success is False or failing
-             else "incomplete" if missing or optional or success == "warn" else "ok")
+    critical_failed = [name for name in failing if name in CRITICAL]
+    # 비핵심(외부 발송 등) 실패는 'failed'가 아니라 'incomplete'(저하)로 — 알림만 안 갔을 뿐 핵심은 성공.
+    state = ("skipped" if success == "skip" else "failed" if success is False or critical_failed
+             else "incomplete" if failing or missing or optional or success == "warn" else "ok")
     if kind != "daily" and state == "ok":
         state = "ok"
     repo = os.environ.get("GITHUB_REPOSITORY", "")
