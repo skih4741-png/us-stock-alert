@@ -136,6 +136,37 @@ def label_reasons(keys: list[str]) -> list[str]:
 # 아침 리포트
 # ======================================================================
 
+def _sim_reset_if_requested(store):
+    """data/sim_reset.json 지시가 있으면 모의 장부를 딱 1회만 리셋(토큰으로 중복 방지).
+    가상 장부는 결정 두뇌라 삭제는 못 하지만, 자금·시작일을 실제 KIS 계좌에 맞춰 새로 시작할 수 있어요."""
+    import json as _json
+    import os as _os
+    try:
+        path = "data/sim_reset.json"
+        if not _os.path.exists(path):
+            return
+        with open(path, encoding="utf-8") as _f:
+            req = _json.load(_f)
+        token = req.get("token")
+        if not token:
+            return
+        cur = simtrade.load(store) or {}
+        if cur.get("reset_token") == token:
+            return
+        budget = float(req.get("budget", 500))
+        start_day = req.get("start") or config.now_kst().strftime("%Y-%m-%d")
+        st = simtrade.start(store, start_day, budget=budget, max_pos=int(req.get("max_pos", 2)))
+        st["reset_token"] = token
+        simtrade.save(store, st)
+        if req.get("reset_ref"):
+            rf = simtrade.start(store, start_day, budget=budget, max_pos=int(req.get("ref_max_pos", 2)), key=simtrade.REF_KEY)
+            rf["reset_token"] = token
+            simtrade.save(store, rf)
+        log.info("모의 장부 리셋 완료: token=%s budget=%s start=%s", token, budget, start_day)
+    except Exception as e:
+        log.warning("모의 장부 리셋 실패: %s", e)
+
+
 def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool = False) -> dict:
     """app_only: 보내거나 기록하지 않고 앱 데이터만 시트에 저장 (앱 첫 설치·시험용)."""
     dry = dry or app_only
@@ -144,6 +175,7 @@ def run_daily(limit: int | None, dry: bool, app_only: bool = False, force: bool 
     now = config.now_kst()
     stage = "시작"
     store = Store()
+    _sim_reset_if_requested(store)
     cfg, warn = config.merge_settings(store.settings())
     ai.init(store, cfg)
     state = load_state()
