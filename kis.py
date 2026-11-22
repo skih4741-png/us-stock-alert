@@ -196,6 +196,7 @@ if __name__ == "__main__":  # python kis.py check — 연결 점검 (주문은 �
         sys.exit(0)
     from sheets import Store
     c = Client(Store())
+    failed = False
     try:
         c.token()
         print("토큰: 받음")
@@ -205,6 +206,10 @@ if __name__ == "__main__":  # python kis.py check — 연결 점검 (주문은 �
         print("오늘 주문·체결:", len(c.fills(kst)), "건")
     except KisError as e:
         print("실패:", e)
+        failed = True
         if "모의투자용 앱키가 아닙니다" in str(e):
             print("→ 지금 넣은 키는 실전용이에요. KIS Developers에서 '모의투자' 앱키를 따로 발급받아 KIS_APP_KEY·KIS_APP_SECRET을 바꿔 주세요.")
-    sys.exit(0)
+        elif "INVALID_CHECK_ACNO" in str(e) or "ACNO" in str(e):
+            print("→ 계좌번호가 모의 앱키에 연결된 계좌와 안 맞아요. KIS_ACCOUNT_NO(앞 8자리)·KIS_ACCOUNT_PROD(뒤 2자리)를 모의 앱키 계좌로 맞춰 주세요.")
+    # KIS를 켜뒀는데(설정 OK) 토큰·잔고가 실패하면 연결 점검을 빨강으로 — 진짜 실패를 드러내요.
+    sys.exit(1 if failed else 0)
